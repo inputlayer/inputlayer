@@ -8,7 +8,7 @@
 
 use super::{format_body_pred, format_term, term_to_value};
 use crate::ast::Term;
-use crate::protocol::wire::ErrorCode;
+use crate::protocol::wire::{ErrorCode, StatementKind};
 use crate::statement::{DeleteOp, DeletePattern, InsertOp, UpdateOp};
 use crate::storage_engine::{FactChange, KnowledgeGraphSnapshot};
 use crate::value::{Tuple, Value};
@@ -102,6 +102,15 @@ impl FactStatement {
                 update_changes(op, &vars, &query, &*view(&query)?)
                     .map_err(|e| invalid(self.failure_message(e)))
             }
+        }
+    }
+
+    /// The form of this statement, as reported in a result's counts.
+    pub fn kind(&self) -> StatementKind {
+        match self {
+            Self::Insert(_) => StatementKind::Insert,
+            Self::Delete(_) => StatementKind::Delete,
+            Self::Update(_) => StatementKind::Update,
         }
     }
 

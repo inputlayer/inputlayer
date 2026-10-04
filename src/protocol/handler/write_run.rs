@@ -12,7 +12,7 @@
 use super::catalog_staging::CatalogStatement;
 use super::fact_staging::{FactStatement, InsertLimits, StageError};
 use super::{storage_error_code, QueryJob};
-use crate::protocol::wire::ErrorCode;
+use crate::protocol::wire::{ErrorCode, StatementCounts};
 use crate::rule_catalog::RuleCatalog;
 use crate::storage_engine::{
     CommitError, KnowledgeGraphSnapshot, ProgramCommit, StagedChanges, StatementEffect,
@@ -117,8 +117,9 @@ impl WriteRun {
 }
 
 impl QueryJob {
-    /// Commit the statements queued in `run` to `kg` as one transaction and
-    /// fill their message rows in `messages`.
+    /// Commit the statements queued in `run` to `kg` as one transaction, fill
+    /// their message rows in `messages` and return the counts of its fact
+    /// statements.
     ///
     /// A program whose staging read the KG is staged again, up to
     /// [`MAX_STAGE_ATTEMPTS`] times with a short random pause, if a concurrent
@@ -129,7 +130,7 @@ impl QueryJob {
         kg: &str,
         run: &mut WriteRun,
         messages: &mut [String],
-    ) -> Result<(), RunFailure> {
+    ) -> Result<Vec<StatementCounts>, RunFailure> {
         let commit = match self.commit_queued(storage, kg, &run.queued) {
             Ok(commit) => commit,
             Err(mut failure) => {
@@ -145,10 +146,17 @@ impl QueryJob {
 
         let queued = std::mem::take(&mut run.queued);
         let mut inserted_total = 0;
+        let mut counts = Vec::new();
         for (queued, outcome) in queued.iter().zip(&commit.statements) {
             let message = match (&queued.statement, &outcome.effect) {
                 (WriteStatement::Facts(statement), StatementEffect::Facts(count)) => {
                     inserted_total += count.inserted;
+                    counts.push(StatementCounts {
+                        index: queued.index,
+                        kind: statement.kind(),
+                        inserted: count.inserted,
+                        deleted: count.deleted,
+                    });
                     statement.success_message(count.inserted, count.deleted)
                 }
                 (WriteStatement::Catalog(statement), StatementEffect::Catalog(outcome)) => {
@@ -179,7 +187,7 @@ impl QueryJob {
                 change.inserted + change.deleted,
             );
         }
-        Ok(())
+        Ok(counts)
     }
 
     /// Stage `queued` and commit it, re-staging while it goes stale.

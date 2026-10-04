@@ -293,7 +293,7 @@ impl ColumnDef {
     }
 }
 
-pub use inputlayer_ws_protocol::{ErrorCode, StatementError};
+pub use inputlayer_ws_protocol::{ErrorCode, StatementCounts, StatementError, StatementKind};
 
 // Query Result
 /// Result of a query execution.
@@ -332,6 +332,9 @@ pub struct QueryResult {
     /// Statements that failed. A statement not listed here succeeded.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<StatementError>,
+    /// Fact statements the program committed, with their effective counts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub statements: Vec<StatementCounts>,
 }
 
 /// Provenance and audit metadata for a query result
@@ -381,6 +384,7 @@ impl QueryResult {
             proof_trees: None,
             timing_breakdown: None,
             errors: Vec::new(),
+            statements: Vec::new(),
         }
     }
 
@@ -397,6 +401,7 @@ impl QueryResult {
             proof_trees: None,
             timing_breakdown: None,
             errors: Vec::new(),
+            statements: Vec::new(),
         }
     }
 
@@ -419,6 +424,7 @@ impl QueryResult {
             proof_trees: None,
             timing_breakdown: None,
             errors: Vec::new(),
+            statements: Vec::new(),
         }
     }
 }
@@ -700,6 +706,7 @@ mod tests {
             proof_trees: None,
             timing_breakdown: None,
             errors: Vec::new(),
+            statements: Vec::new(),
         };
         assert_eq!(result.rows.len(), 0);
         assert_eq!(result.schema.len(), 1);

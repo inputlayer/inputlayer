@@ -39,7 +39,8 @@ pub use error::{InputLayerError, InputLayerResult};
 
 // Re-export wire types
 pub use wire::{
-    ColumnDef, ErrorCode, QueryResult, StatementError, WireDataType, WireTuple, WireValue,
+    ColumnDef, ErrorCode, QueryResult, StatementCounts, StatementError, StatementKind,
+    WireDataType, WireTuple, WireValue,
 };
 
 // Re-export handler

@@ -1,4 +1,4 @@
-use inputlayer_ws_protocol::{RequestId, Subscribed};
+use inputlayer_ws_protocol::{RequestId, StatementCounts, StatementKind, Subscribed};
 use serde_json::{json, Value};
 
 use super::*;
@@ -30,6 +30,7 @@ fn result(rows: Vec<Row>) -> ResultFrame {
         proof_trees: None,
         timing_breakdown: None,
         errors: Vec::new(),
+        statements: Vec::new(),
         subscribed: Some(Subscribed {
             subscription: "s".into(),
             generation: 2,
@@ -61,12 +62,25 @@ fn a_small_result_is_one_frame_serialized_as_before() {
 #[test]
 fn a_large_result_streams_as_one_bounded_ordered_result() {
     let rows: Vec<Row> = (0..3_000).map(|i| row(i, 1_000)).collect();
-    let frames = parsed(&result_frames(result(rows.clone())).unwrap());
+    let counts = vec![StatementCounts {
+        index: 0,
+        kind: StatementKind::Insert,
+        inserted: 3,
+        deleted: 0,
+    }];
+    let frames = parsed(
+        &result_frames(ResultFrame {
+            statements: counts.clone(),
+            ..result(rows.clone())
+        })
+        .unwrap(),
+    );
 
     let (_, ServerFrame::ResultStart(start)) = &frames[0] else {
         panic!("{:?}", frames[0]);
     };
     assert_eq!(start.id.as_ref().map(RequestId::as_str), Some("q"));
+    assert_eq!(start.statements, counts, "counts ride on the header");
     assert_eq!(start.subscribed.as_ref().map(|s| s.generation), Some(2));
     let (mut got, mut provenance) = (Vec::new(), Vec::new());
     for (index, (bytes, frame)) in frames[1..frames.len() - 1].iter().enumerate() {

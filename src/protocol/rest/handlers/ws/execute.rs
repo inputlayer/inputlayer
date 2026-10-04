@@ -144,6 +144,7 @@ fn result_frame(id: Option<RequestId>, response: QueryResult) -> ServerFrame {
         proof_trees,
         timing_breakdown: response.timing_breakdown,
         errors: response.errors,
+        statements: response.statements,
         subscribed: None,
     })
 }
@@ -173,6 +174,7 @@ pub(super) fn subscription_reply(
         proof_trees: None,
         timing_breakdown: None,
         errors: Vec::new(),
+        statements: Vec::new(),
         subscribed,
     }
 }

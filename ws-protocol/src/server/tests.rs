@@ -20,6 +20,7 @@ fn result(id: Option<RequestId>) -> ServerFrame {
         proof_trees: None,
         timing_breakdown: None,
         errors: Vec::new(),
+        statements: Vec::new(),
         subscribed: None,
     })
 }
@@ -57,6 +58,7 @@ fn every_reply_echoes_its_id() {
             proof_trees: None,
             timing_breakdown: None,
             errors: Vec::new(),
+            statements: Vec::new(),
             subscribed: None,
         }),
         ServerFrame::ResultChunk {
@@ -279,4 +281,27 @@ fn stop_codes_serialize_in_snake_case() {
     ] {
         assert_eq!(serde_json::to_value(code).unwrap(), name);
     }
+}
+
+#[test]
+fn statement_counts_are_listed_only_when_a_fact_statement_committed() {
+    let ServerFrame::Result(mut frame) = result(None) else {
+        unreachable!()
+    };
+    let json = serde_json::to_value(ServerFrame::Result(frame.clone())).unwrap();
+    assert!(json.get("statements").is_none(), "{json}");
+
+    frame.statements = vec![StatementCounts {
+        index: 1,
+        kind: StatementKind::Update,
+        inserted: 1,
+        deleted: 0,
+    }];
+    let reply = ServerFrame::Result(frame);
+    let json = serde_json::to_value(&reply).unwrap();
+    assert_eq!(
+        json["statements"],
+        serde_json::json!([{"index": 1, "kind": "update", "inserted": 1, "deleted": 0}])
+    );
+    assert_eq!(round_trip(&reply), reply);
 }

@@ -285,6 +285,7 @@ impl WsClient {
                         proof_trees: start.proof_trees,
                         timing_breakdown: start.timing_breakdown,
                         errors: start.errors,
+                        statements: start.statements,
                         subscribed: None,
                     });
                 }

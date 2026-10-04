@@ -71,7 +71,7 @@ pub use push::{Notification, Row, SubscriptionPush};
 pub use request_id::{probe_request_id, InvalidRequestId, RequestId, MAX_REQUEST_ID_LEN};
 pub use server::{
     CancelOutcome, FrameClass, ResultFrame, ResultStartFrame, ServerFrame, SessionMetadata,
-    Subscribed,
+    StatementCounts, StatementKind, Subscribed,
 };
 pub use timing::{IrBuilderTiming, OptimizerTiming, RuleTiming, TimingBreakdown};
 

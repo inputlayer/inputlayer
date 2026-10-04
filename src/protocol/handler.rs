@@ -722,6 +722,7 @@ impl ProofSnapshot {
                 proof_us,
             ),
             errors: Vec::new(),
+            statements: Vec::new(),
         })
     }
 
@@ -772,6 +773,7 @@ impl ProofSnapshot {
             proof_trees: Some(vec![graph]),
             timing_breakdown: proof_timing(timing_mode, start, query_us, "explanation", explain_us),
             errors: Vec::new(),
+            statements: Vec::new(),
         })
     }
 }
@@ -1463,6 +1465,7 @@ impl Handler {
             proof_trees: None,
             timing_breakdown: None,
             errors: Vec::new(),
+            statements: Vec::new(),
         })
     }
 
@@ -2218,6 +2221,7 @@ impl Handler {
                     proof_trees: None,
                     timing_breakdown: None,
                     errors: Vec::new(),
+                    statements: Vec::new(),
                 });
             }
 
@@ -2282,6 +2286,7 @@ impl Handler {
                 proof_trees: None,
                 timing_breakdown: None,
                 errors: Vec::new(),
+                statements: Vec::new(),
             });
         }
 
@@ -3027,6 +3032,7 @@ impl QueryJob {
                                             proof_trees: None,
                                             timing_breakdown: None,
                                             errors,
+                                            statements: Vec::new(),
                                         });
                                     }
                                     MetaCommand::AgentStart(_)
@@ -3254,13 +3260,16 @@ impl QueryJob {
                 current_stmt.clear();
             }
         }
+        // Counts of the fact statements committed below.
+        let mut statement_counts = Vec::new();
         if !write_run.is_empty() {
             if errors.is_empty() {
-                if let Err(failure) =
-                    self.commit_write_run(&storage, &kg_name, &mut write_run, &mut messages)
-                {
-                    stmt_index = failure.index;
-                    fail!(failure.code, failure.message);
+                match self.commit_write_run(&storage, &kg_name, &mut write_run, &mut messages) {
+                    Ok(counts) => statement_counts = counts,
+                    Err(failure) => {
+                        stmt_index = failure.index;
+                        fail!(failure.code, failure.message);
+                    }
                 }
             } else if let Some(note) = write_run.abandon(errors[0].index) {
                 // The loop stopped at the first failure, so it is the last row.
@@ -3296,6 +3305,7 @@ impl QueryJob {
             return Ok(QueryResult {
                 switched_kg: switched_kg_result,
                 errors,
+                statements: statement_counts,
                 execution_time_ms: start.elapsed().as_millis() as u64,
                 ..Handler::messages_result(messages)
             });
@@ -3317,6 +3327,7 @@ impl QueryJob {
                         return Ok(QueryResult {
                             switched_kg: switched_kg_result,
                             errors,
+                            statements: statement_counts,
                             execution_time_ms: start.elapsed().as_millis() as u64,
                             ..Handler::messages_result(messages)
                         });
@@ -3511,6 +3522,7 @@ impl QueryJob {
             proof_trees: None,
             timing_breakdown,
             errors,
+            statements: statement_counts,
         })
     }
 }
@@ -3799,6 +3811,7 @@ impl Handler {
             proof_trees: None,
             timing_breakdown,
             errors: Vec::new(),
+            statements: Vec::new(),
         })
     }
 
@@ -4438,6 +4451,7 @@ impl Handler {
             proof_trees: None,
             timing_breakdown: None,
             errors: Vec::new(),
+            statements: Vec::new(),
         }
     }
 
@@ -4530,6 +4544,7 @@ impl Handler {
             proof_trees: None,
             timing_breakdown: None,
             errors: Vec::new(),
+            statements: Vec::new(),
         }
     }
 
@@ -5158,6 +5173,7 @@ impl Handler {
             proof_trees: None,
             timing_breakdown: None,
             errors: Vec::new(),
+            statements: Vec::new(),
         })
     }
 
