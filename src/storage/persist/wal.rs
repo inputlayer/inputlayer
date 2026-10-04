@@ -7,6 +7,8 @@
 //! durably (see the `wal_cut` module) and made before
 //! the next write or at the next open; when even that record fails, the append
 //! reports [`StorageError::OutcomeUnknown`]: its outcome is unknown, not failed.
+//! So does an append whose open file is no longer the file at the WAL's path,
+//! because the file or its directory was removed or moved while the server ran.
 //!
 //! Rule and schema changes stay in the WAL until their knowledge graph's catalog
 //! files are saved (see the `catalog_log` module).
@@ -55,6 +57,8 @@ pub struct PersistWal {
     current_file: PathBuf,
     /// Bytes in the file plus bytes buffered in `writer`
     len: u64,
+    /// Identity of the file `writer` writes to, to detect it leaving `current_file`
+    file_id: FileId,
     /// A failed write left bytes that could not be cut off; repair before the next write
     repair: Option<Repair>,
     read_only: bool,
@@ -80,6 +84,7 @@ impl PersistWal {
             wal_dir,
             writer: None,
             len: 0,
+            file_id: FileId::default(),
             repair: None,
             read_only: false,
             #[cfg(test)]
@@ -180,7 +185,9 @@ impl PersistWal {
                 .append(true)
                 .open(&self.current_file)?;
             sync_directory(&self.wal_dir)?;
-            self.len = file.metadata()?.len();
+            let metadata = file.metadata()?;
+            self.len = metadata.len();
+            self.file_id = FileId::of(&metadata);
             self.writer = Some(BufWriter::new(file));
         }
         Ok(self
@@ -198,13 +205,14 @@ impl PersistWal {
     ///
     /// # Errors
     /// [`StorageError::OutcomeUnknown`] when the cut can be neither made nor
-    /// recorded, so a restart may recover the transaction.
+    /// recorded, so a restart may recover the transaction, and when the record went
+    /// to a file no longer at the WAL's path (see [`Self::check_in_place`]).
     pub fn append(&mut self, txn: &Transaction, durable: bool) -> StorageResult<()> {
         let record = wal_record::encode(txn)?;
         self.ensure_writer()?;
         let len = self.len;
         let Err(write) = self.write_record(&record, durable) else {
-            return Ok(());
+            return self.check_in_place();
         };
         self.discard_writer(Repair::ToLength(len));
         if self.repair.is_some() {
@@ -217,6 +225,45 @@ impl PersistWal {
             }
         }
         Err(write)
+    }
+
+    /// Fail unless the file just written is still the file at `current_file`.
+    ///
+    /// An open file outlives its path: when the data directory is removed or moved
+    /// while the server runs, writes and fsyncs to the open file keep succeeding but
+    /// restart recovery reads `current_file` and never sees them. Checked after the
+    /// write, so a durable record that passes is in the WAL restart reads. A record
+    /// that fails went to a file recovery cannot read unless it is put back, so its
+    /// outcome is unknown, and the WAL refuses further writes until restart: the
+    /// transactions acknowledged before it may be gone with the file.
+    fn check_in_place(&mut self) -> StorageResult<()> {
+        let found = fs::metadata(&self.current_file);
+        if found
+            .as_ref()
+            .is_ok_and(|metadata| FileId::of(metadata) == self.file_id)
+        {
+            return Ok(());
+        }
+        let now = found.map_or_else(
+            |e| format!("cannot be read ({e})"),
+            |_| "is a different file".to_string(),
+        );
+        self.writer = None;
+        self.read_only = true;
+        tracing::error!(
+            file = %self.current_file.display(),
+            now = %now,
+            "WAL file removed or moved while the server ran; refusing writes until restart"
+        );
+        Err(StorageError::OutcomeUnknown {
+            write: format!(
+                "the WAL file {} was removed or moved while the server ran (the path now {now})",
+                self.current_file.display()
+            ),
+            undo: "the record went to the detached file, which restart recovery reads only \
+                   if it is put back"
+                .to_string(),
+        })
     }
 
     /// Record durably that the file must be cut back to `len`.
@@ -467,6 +514,30 @@ impl Drop for PersistWal {
                 "WAL repair at shutdown failed; a failed write may be replayed"
             );
         }
+    }
+}
+
+/// Which file a path or handle refers to: device and inode where the platform
+/// has them, else nothing, so only a missing path is detected.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct FileId {
+    dev: u64,
+    ino: u64,
+}
+
+impl FileId {
+    #[cfg(unix)]
+    fn of(metadata: &fs::Metadata) -> Self {
+        use std::os::unix::fs::MetadataExt;
+        FileId {
+            dev: metadata.dev(),
+            ino: metadata.ino(),
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn of(_: &fs::Metadata) -> Self {
+        FileId::default()
     }
 }
 
