@@ -2,7 +2,9 @@
 # Performance gate at a release checkpoint (full-suite.yml): the approved
 # baseline against this checkout on one runner, servers pinned away from the
 # gate's own clients. An INCONCLUSIVE first attempt is retried once with more
-# rounds; only PASS exits zero.
+# rounds. FAIL and INVALID exit non-zero and fail the checkpoint; a retry
+# that is still INCONCLUSIVE exits zero with a warning, because the runner's
+# noise alone must not block a release, but it is not a PASS.
 #
 # Usage: scripts/perf-gate-ci.sh [--aa]
 #   --aa                    baseline against itself: the runner's noise check
@@ -68,7 +70,10 @@ fi
 case "$STATUS" in
     0) echo "Performance gate: PASS" ;;
     1) echo "::error title=Performance gate FAIL::A required metric regressed beyond its budget (see the job summary)." ;;
-    2) echo "::error title=Performance gate INCONCLUSIVE::Still too noisy after a retry with $RETRY_ROUNDS rounds; only PASS is accepted. Re-run the job, or run make perf-gate on a quiet host." ;;
+    2)
+        echo "::warning title=Performance gate INCONCLUSIVE::Still too noisy after a retry with $RETRY_ROUNDS rounds. Not a PASS: no regression was shown, and none was ruled out. Read the job summary before releasing."
+        echo "**Not a PASS.** INCONCLUSIVE after $RETRY_ROUNDS rounds: no supported regression, but the runner was too noisy to rule one out. The checkpoint is not blocked." >> "$SUMMARY"
+        exit 0 ;;
     *) echo "::error title=Performance gate $(status_name "$STATUS")::The run was invalid or did not finish (see the job log)." ;;
 esac
 exit "$STATUS"

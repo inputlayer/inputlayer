@@ -310,9 +310,10 @@ jobs:
 
   # The performance gate itself: the approved baseline against this commit,
   # both built in release mode and measured interleaved on this one runner,
-  # so the runner's speed cancels out of the paired ratios. Only PASS
-  # passes; INCONCLUSIVE is retried once with more rounds
-  # (scripts/perf-gate-ci.sh, perf-gate/README.md).
+  # so the runner's speed cancels out of the paired ratios. FAIL or
+  # INVALID fails the checkpoint; INCONCLUSIVE is retried once with more
+  # rounds, then reported as a warning (scripts/perf-gate-ci.sh,
+  # perf-gate/README.md).
   perf-gate:
     name: Performance gate
     needs: gate
