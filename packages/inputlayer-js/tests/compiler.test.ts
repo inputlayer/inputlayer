@@ -392,6 +392,17 @@ describe('in / notIn', () => {
     expect(rule).toBe('+unmanaged(Name) <- employee(Id, Name, _, _, _), !manager(Id, _)');
   });
 
+  it('compiles in() on columns from a from().where() callback', () => {
+    const rule = compileRule(
+      'managed',
+      ['name'],
+      from(Employee, Manager)
+        .where((e, m) => e.col('id').in(m.col('employeeId')))
+        .select({ name: Employee.col('name') }),
+    );
+    expect(rule).toContain('manager(Id, _)');
+  });
+
   it('compiles in() in a query to a positive atom', () => {
     expect(
       compileQuery({

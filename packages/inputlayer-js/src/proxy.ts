@@ -195,15 +195,17 @@ export function NOT(operand: BoolExpr): Not {
 export class RelationProxy {
   readonly relationName: string;
   readonly refAlias?: string;
+  readonly columns?: readonly string[];
 
-  constructor(relationName: string, refAlias?: string) {
+  constructor(relationName: string, refAlias?: string, columns?: readonly string[]) {
     this.relationName = relationName;
     this.refAlias = refAlias;
+    this.columns = columns;
   }
 
   /** Get a ColumnProxy for the named column. */
   col(name: string): ColumnProxy {
-    return new ColumnProxy(this.relationName, name, this.refAlias);
+    return new ColumnProxy(this.relationName, name, this.refAlias, this.columns);
   }
 }
 

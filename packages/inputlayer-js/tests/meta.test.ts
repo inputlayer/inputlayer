@@ -5,7 +5,7 @@ import { meta as commands, sessionRules, ruleList, ruleClauses } from '../src/me
 // Fixture names are snake_case; the table's keys are lowerCamel.
 const key = (name: string) => name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 
-// The fixture both SDKs render their command tables against.
+// The fixture the command table is rendered against (the Python SDK is to adopt it too).
 const fixture = JSON.parse(
   readFileSync(resolve(__dirname, '../../conformance/meta-commands.json'), 'utf8'),
 );

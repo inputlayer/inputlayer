@@ -26,9 +26,9 @@ import {
   QueryError,
   StatementFailedError,
   count,
-  meta,
   Timestamp,
 } from '../src/index';
+import { meta } from '../src/meta';
 
 const SERVER_URL = process.env.INPUTLAYER_TEST_SERVER ?? '';
 const USERNAME = process.env.INPUTLAYER_TEST_USER ?? 'admin';
@@ -988,7 +988,7 @@ describe.skipIf(SKIP)('Integration: Engine failures', () => {
 describe.skipIf(SKIP)('Integration: Meta commands', () => {
   let client: InputLayer;
   const kg_name = kgName('meta');
-  // The fixture the Python SDK renders its command table against too.
+  // The fixture that pins the command table (the Python SDK is to adopt it too).
   const fixture = JSON.parse(
     readFileSync(resolve(__dirname, '../../conformance/meta-commands.json'), 'utf8'),
   );

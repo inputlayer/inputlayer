@@ -87,7 +87,7 @@ class FromBuilder {
     let resolved: BoolExpr;
     if (typeof condition === 'function') {
       const proxies = this.relations.map(
-        (r) => new RelationProxy(r.name, r.alias),
+        (r) => new RelationProxy(r.name, r.alias, r.def.columns),
       );
       resolved = condition(...proxies);
     } else {

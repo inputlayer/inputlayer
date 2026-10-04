@@ -1,10 +1,11 @@
 /**
  * Meta commands the SDK sends, in one table.
  *
- * The Python SDK keeps the same table, and both are pinned by the shared
- * fixture `packages/conformance/meta-commands.json`, which a live test also
- * runs against the engine. A command spelling therefore cannot be wrong in
- * one SDK only (`.session list`, `.session remove` and `.rule show` were).
+ * The table is pinned by the shared fixture
+ * `packages/conformance/meta-commands.json`, which a live test also runs
+ * against the engine. The Python SDK is planned to render its own table
+ * against the same fixture, so a command spelling cannot be wrong in one SDK
+ * only (`.session list`, `.session remove` and `.rule show` were).
  */
 
 export const meta = {
