@@ -271,7 +271,7 @@ pub struct PerformanceConfig {
 /// Query optimizer passes applied by every `IQLEngine` the server builds.
 ///
 /// Every pass defaults to on, whether the section or a key is omitted.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OptimizationConfig {
     /// Join order planning (maximum spanning tree)

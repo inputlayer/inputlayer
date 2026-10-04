@@ -826,7 +826,7 @@ impl RuleCatalog {
     /// Topologically sort rules so that each rule appears after all rules it depends on.
     /// A rule R1 depends on rule R2 if R1's body contains a predicate that matches R2's head.
     fn topological_sort_rules(&self, rules: Vec<Rule>) -> Vec<Rule> {
-        use std::collections::{HashMap, HashSet, VecDeque};
+        use std::collections::{BTreeSet, HashMap, VecDeque};
 
         if rules.is_empty() {
             return rules;
@@ -841,9 +841,11 @@ impl RuleCatalog {
                 .push(i);
         }
 
-        // Build dependency graph: rule_index -> set of rule indices it depends on
-        let mut dependencies: Vec<HashSet<usize>> = vec![HashSet::new(); rules.len()];
-        let mut dependents: Vec<HashSet<usize>> = vec![HashSet::new(); rules.len()];
+        // Build dependency graph: rule_index -> set of rule indices it depends on.
+        // Ordered sets keep the result deterministic: snapshots compare rule
+        // sets by their text to share compiled plans.
+        let mut dependencies: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); rules.len()];
+        let mut dependents: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); rules.len()];
 
         for (i, rule) in rules.iter().enumerate() {
             for pred in &rule.body {
@@ -863,10 +865,7 @@ impl RuleCatalog {
         }
 
         // Topological sort via in-degree reduction
-        let mut in_degree: Vec<usize> = dependencies
-            .iter()
-            .map(std::collections::HashSet::len)
-            .collect();
+        let mut in_degree: Vec<usize> = dependencies.iter().map(BTreeSet::len).collect();
         let mut queue: VecDeque<usize> = VecDeque::new();
         let mut result: Vec<Rule> = Vec::with_capacity(rules.len());
 
@@ -1193,6 +1192,27 @@ mod tests {
         let relations: Vec<_> = rules.iter().map(|r| r.head.relation.as_str()).collect();
         assert!(relations.contains(&"path"));
         assert!(relations.contains(&"reach"));
+    }
+
+    #[test]
+    fn test_rule_catalog_all_rules_order_is_deterministic() {
+        // Snapshots compare rule sets by their text to share compiled plans:
+        // the same catalog must list its rules in the same order every time.
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        catalog
+            .register("hub", &make_test_rule("hub", "edge"))
+            .unwrap();
+        for k in 0..12 {
+            let name = format!("leaf{k}");
+            catalog
+                .register(&name, &make_test_rule(&name, "hub"))
+                .unwrap();
+        }
+        let first = catalog.all_rules();
+        for _ in 0..20 {
+            assert_eq!(catalog.all_rules(), first);
+        }
     }
 
     #[test]

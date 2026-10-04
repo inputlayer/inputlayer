@@ -8,8 +8,12 @@
 //! - `KnowledgeGraphSnapshot`: immutable; relations share tuples with the
 //!   writer and with other snapshots (see [`Relation`]), so publishing after a
 //!   write costs O(changed chunks), not O(KG)
-//! - Persistent rules are parsed once per snapshot; a query is evaluated with
-//!   only the rules and relations in its dependency closure
+//! - Persistent rules are parsed once and shared by every snapshot until they
+//!   change; a query is evaluated with only the rules and relations in its
+//!   dependency closure
+//! - Standing queries reuse their compiled plan across snapshots
+//!   ([`KnowledgeGraphSnapshot::execute_with_rules_tuples_cached`]): plans
+//!   live with the rules, so a rule change starts over with no plans
 //! - Writers publish new snapshots atomically via `ArcSwap`
 //! - Readers get consistent snapshots without holding locks
 
@@ -18,7 +22,8 @@ use crate::ast::{Program, Rule};
 use crate::execution::{TimingBreakdown, TimingMode};
 use crate::index_manager::HnswSearchFn;
 use crate::value::{Relation, RelationMap, Tuple};
-use crate::{IQLEngine, OptimizationConfig};
+use crate::{CompiledProgram, IQLEngine, OptimizationConfig};
+use arc_swap::ArcSwap;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -61,11 +66,9 @@ pub struct KnowledgeGraphSnapshot {
     /// their data is already present in `input_tuples` as base facts.
     pub materialized_relations: Arc<HashSet<String>>,
 
-    /// Non-materialized rules formatted as text, one per line.
-    rule_prefix: Arc<String>,
-
-    /// `rule_prefix` parsed once, as every query would parse it.
-    prefix_rules: Arc<Result<Vec<Rule>, String>>,
+    /// The non-materialized rules queries are evaluated with, and the plans
+    /// compiled against them. Shared with the previous snapshot when equal.
+    persistent: Arc<PersistentRules>,
 
     /// Maximum result rows returned per query (0 = unlimited)
     pub max_result_rows: usize,
@@ -79,6 +82,69 @@ pub struct KnowledgeGraphSnapshot {
     /// HNSW search over the index views captured when this snapshot was
     /// published, so `hnsw_nearest` sees the same data as `input_tuples`.
     pub hnsw_search_fn: Option<HnswSearchFn>,
+}
+
+/// The persistent rules a snapshot evaluates queries with, and the plans
+/// compiled against them.
+///
+/// Snapshots published while the rules stay the same share one value, so a
+/// plan compiled on one snapshot serves every later one; a rule change
+/// publishes a new value with no plans. Lookups are lock-free: the plan map is
+/// replaced, never modified, and a miss compiles outside any lock.
+pub struct PersistentRules {
+    /// Non-materialized rules formatted as text, one per line.
+    prefix: String,
+    /// `prefix` parsed once, as every query would parse it.
+    rules: Result<Vec<Rule>, String>,
+    plans: ArcSwap<HashMap<String, Arc<CachedPlan>>>,
+}
+
+/// Plans kept per rule set; past this many, a new plan replaces them all.
+const MAX_CACHED_PLANS: usize = 256;
+
+/// A query program compiled with the persistent rules it depends on.
+struct CachedPlan {
+    optimization: OptimizationConfig,
+    compiled: CompiledProgram,
+    /// The relations in the program's dependency closure: its inputs.
+    relations: Vec<String>,
+}
+
+impl PersistentRules {
+    fn new(prefix: String) -> Self {
+        let rules = crate::parser::parse_program(&prefix).map(|p| p.rules);
+        Self {
+            prefix,
+            rules,
+            plans: ArcSwap::default(),
+        }
+    }
+
+    /// The plan for `program` under `optimization`, if one was compiled.
+    fn plan(&self, program: &str, optimization: &OptimizationConfig) -> Option<Arc<CachedPlan>> {
+        self.plans
+            .load()
+            .get(program)
+            .filter(|plan| plan.optimization == *optimization)
+            .cloned()
+    }
+
+    fn remember(&self, program: &str, plan: Arc<CachedPlan>) {
+        self.plans.rcu(|plans| {
+            let mut plans = if plans.len() >= MAX_CACHED_PLANS && !plans.contains_key(program) {
+                HashMap::new()
+            } else {
+                HashMap::clone(plans)
+            };
+            plans.insert(program.to_string(), Arc::clone(&plan));
+            plans
+        });
+    }
+
+    /// Number of cached plans.
+    pub fn cached_plans(&self) -> usize {
+        self.plans.load().len()
+    }
 }
 
 /// Whether the caller reads derived relations by their original names
@@ -123,13 +189,30 @@ impl KnowledgeGraphSnapshot {
         num_workers: usize,
         materialized_names: HashSet<String>,
     ) -> Self {
+        Self::with_rules_after(input_tuples, rules, num_workers, materialized_names, None)
+    }
+
+    /// [`Self::new_with_materializations`], sharing `previous`'s parsed rules
+    /// and compiled plans when its rules are the same.
+    pub fn with_rules_after<R: Into<Relation>>(
+        input_tuples: HashMap<String, R>,
+        rules: Vec<Rule>,
+        num_workers: usize,
+        materialized_names: HashSet<String>,
+        previous: Option<&Self>,
+    ) -> Self {
         let revision = LAST_REVISION.fetch_add(1, Ordering::SeqCst) + 1;
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_micros() as u64);
 
         let prefix = Self::build_rule_prefix(&rules, &materialized_names);
-        let prefix_rules = crate::parser::parse_program(&prefix).map(|p| p.rules);
+        let persistent = match previous {
+            Some(previous) if previous.persistent.prefix == prefix => {
+                Arc::clone(&previous.persistent)
+            }
+            _ => Arc::new(PersistentRules::new(prefix)),
+        };
         let input_tuples: RelationMap = input_tuples
             .into_iter()
             .map(|(name, tuples)| (name, tuples.into()))
@@ -142,8 +225,7 @@ impl KnowledgeGraphSnapshot {
             rules: Arc::new(rules),
             num_workers,
             materialized_relations: Arc::new(materialized_names),
-            rule_prefix: Arc::new(prefix),
-            prefix_rules: Arc::new(prefix_rules),
+            persistent,
             max_result_rows: 0,
             max_query_cost: 0,
             optimization: OptimizationConfig::default(),
@@ -171,25 +253,22 @@ impl KnowledgeGraphSnapshot {
 
     /// Get the cached rule prefix (all non-materialized rules as text).
     pub fn rule_prefix(&self) -> &str {
-        &self.rule_prefix
+        &self.persistent.prefix
     }
 
-    /// Build an engine and program for `program`: the query's rules, plus the
-    /// persistent rules it depends on, over only the relations it can read.
-    /// Session facts are layered on copies of the affected relations; the
-    /// snapshot itself is never modified.
-    fn prepare(
-        &self,
-        program: &str,
-        rule_set: RuleSet,
-        output: Output,
-        session_facts: Vec<(String, Tuple)>,
-        timing_mode: TimingMode,
-    ) -> Result<(IQLEngine, Program), String> {
+    /// The persistent rules and their compiled plans, shared with every
+    /// snapshot of the same rules.
+    pub fn persistent_rules(&self) -> &Arc<PersistentRules> {
+        &self.persistent
+    }
+
+    /// `program`'s rules plus the persistent rules it depends on, and the
+    /// relations in its dependency closure.
+    fn combine(&self, program: &str, rule_set: RuleSet) -> Result<(Program, Vec<String>), String> {
         let query = crate::parser::parse_program(program)?;
         let persistent: &[Rule] = match rule_set {
             RuleSet::QueryOnly => &[],
-            RuleSet::WithPersistent => self.prefix_rules.as_ref().as_ref().map_err(Clone::clone)?,
+            RuleSet::WithPersistent => self.persistent.rules.as_ref().map_err(Clone::clone)?,
         };
 
         let mut closure = DependencyClosure::default();
@@ -205,15 +284,36 @@ impl KnowledgeGraphSnapshot {
             .cloned()
             .chain(query.rules)
             .collect();
+        let relations = closure.relations().map(str::to_string).collect();
+        Ok((combined, relations))
+    }
 
-        let mut inputs: RelationMap = closure
-            .relations()
+    /// This snapshot's data for `relations` (those it has).
+    fn inputs<'a>(&self, relations: impl IntoIterator<Item = &'a str>) -> RelationMap {
+        relations
+            .into_iter()
             .filter_map(|name| {
                 self.input_tuples
                     .get(name)
                     .map(|tuples| (name.to_string(), tuples.clone()))
             })
-            .collect();
+            .collect()
+    }
+
+    /// Build an engine and program for `program`: the query's rules, plus the
+    /// persistent rules it depends on, over only the relations it can read.
+    /// Session facts are layered on copies of the affected relations; the
+    /// snapshot itself is never modified.
+    fn prepare(
+        &self,
+        program: &str,
+        rule_set: RuleSet,
+        output: Output,
+        session_facts: Vec<(String, Tuple)>,
+        timing_mode: TimingMode,
+    ) -> Result<(IQLEngine, Program), String> {
+        let (combined, relations) = self.combine(program, rule_set)?;
+        let mut inputs = self.inputs(relations.iter().map(String::as_str));
         for (relation, tuple) in session_facts {
             inputs.entry(relation).or_default().push(tuple);
         }
@@ -343,6 +443,53 @@ impl KnowledgeGraphSnapshot {
         .map(|(tuples, _, timing)| (tuples, timing))
     }
 
+    /// [`Self::execute_with_rules_tuples_profiled`] reusing the plan compiled
+    /// for `program` on any snapshot of the same rules, compiling and keeping
+    /// it on a miss. For programs evaluated again and again (standing
+    /// queries); a hit's timing breakdown has no compile stages.
+    pub fn execute_with_rules_tuples_cached(
+        &self,
+        program: &str,
+        timing_mode: TimingMode,
+    ) -> Result<(Vec<Tuple>, Option<TimingBreakdown>), String> {
+        let start = Instant::now();
+        let (plan, compiled_now) = match self.persistent.plan(program, &self.optimization) {
+            Some(plan) => (plan, false),
+            None => {
+                let (combined, relations) = self.combine(program, RuleSet::WithPersistent)?;
+                let mut engine = self.new_engine();
+                engine.set_timing_mode(timing_mode);
+                let plan = Arc::new(CachedPlan {
+                    optimization: self.optimization.clone(),
+                    compiled: engine.compile_program(combined)?,
+                    relations,
+                });
+                self.persistent.remember(program, Arc::clone(&plan));
+                (plan, true)
+            }
+        };
+        let mut engine = self.new_engine();
+        engine.set_timing_mode(timing_mode);
+        engine.set_inputs(self.inputs(plan.relations.iter().map(String::as_str)));
+        let (tuples, _, mut timing) = engine.execute_compiled_profiled(&plan.compiled)?;
+        if let (true, Some(timing)) = (compiled_now, timing.as_mut()) {
+            let compile = plan.compiled.compile_timing();
+            timing.parse_us = compile.parse_us;
+            timing.sip_us = compile.sip_us;
+            timing.magic_sets_us = compile.magic_sets_us;
+            timing.ir_build_us = compile.ir_build_us;
+            timing.optimize_us = compile.optimize_us;
+            timing.total_us = start.elapsed().as_micros() as u64;
+        }
+        info!(
+            program_len = program.len(),
+            plan_cached = !compiled_now,
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            "snapshot_execute_cached"
+        );
+        Ok((tuples, timing))
+    }
+
     /// Execute a query with rules, returning tuples, all derived relation data,
     /// and optional timing breakdown.
     pub fn execute_with_rules_tuples_profiled_full(
@@ -444,6 +591,10 @@ impl std::fmt::Debug for KnowledgeGraphSnapshot {
             .finish()
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod plan_cache_tests;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
