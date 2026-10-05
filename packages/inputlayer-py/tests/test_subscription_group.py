@@ -15,6 +15,7 @@ import pytest
 
 from inputlayer import (
     Cancelled,
+    CompileError,
     DeadlineExceeded,
     GroupChange,
     GroupSubscription,
@@ -478,6 +479,9 @@ async def test_reads_refused_before_anything_is_sent() -> None:
         ({"o": "?order(S, O)\n?eta(O, T)"}, "rejected"),
         ({"o": "order(S, O)"}, "rejected"),
         ({"o": {"select": Order, "offset": 2}}, "limit_offset"),
+        ({"o": {"iql": "?order(S, O)", "limit": 1}}, "limit_offset"),
+        ({"o": {"iql": "?order(S, O)", "offset": 1, "limit": 1}}, "limit_offset"),
+        ({"o": {"iql": "?order(S, O)", "order_by": Order.s}}, "limit_offset"),
         ({}, "rejected"),
         ({"": Order}, "rejected"),
     ]
@@ -487,6 +491,10 @@ async def test_reads_refused_before_anything_is_sent() -> None:
         assert err.value.reason == reason, queries
         if queries and "" not in queries:
             assert err.value.message.startswith("Query 'o': "), err.value.message
+    with pytest.raises(CompileError) as compile_err:
+        await kg.read({"o": Order, "p": {"iql": "?order(S, O)", "select": Order}})
+    assert str(compile_err.value).startswith("Query 'p': "), str(compile_err.value)
+    assert compile_err.value.hint is not None
     # A page of a whole relation is one ? query: allowed.
     shape = kg._target_shape({"select": Order, "limit": 1, "offset": 2}, read=True)
     assert shape.query.startswith("?order(") and "\n" not in shape.query
@@ -924,6 +932,7 @@ async def test_groups_refused_before_anything_is_sent() -> None:
         ({"o": {"select": Order, "where": lambda o: (o.s == 1) | (o.s == 2)}}, "or_branches"),
         ({"o": (Order.s, count(Order.o))}, "session_view"),
         ({"o": "order(S, O)"}, "rejected"),
+        ({"o": {"iql": "?order(S, O)", "limit": 1}}, "limit_offset"),
         ({}, "rejected"),
         ({"": Order}, "rejected"),
     ]

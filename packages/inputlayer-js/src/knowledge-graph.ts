@@ -2,7 +2,7 @@
  * KnowledgeGraph - the primary workspace for data, queries, and rules.
  */
 
-import type { Connection, ExecuteOptions } from './connection.js';
+import type { Connection, ExecuteOptions, ReadOptions } from './connection.js';
 import type { ResultResponse } from './protocol.js';
 import { rowKey } from './protocol.js';
 import type { Expr, BoolExpr, OrderedColumn } from './ast.js';
@@ -590,7 +590,7 @@ export class KnowledgeGraph {
    * @example
    * const { revision, results } = await kg.read({ orders: Order, etas: Eta });
    */
-  read(queries: Record<string, SubscriptionTarget>, opts?: ExecuteOptions): Promise<ReadResult> {
+  read(queries: Record<string, SubscriptionTarget>, opts?: ReadOptions): Promise<ReadResult> {
     return snapshotRead(this.conn, queries, opts, () => this._session.listRules());
   }
 

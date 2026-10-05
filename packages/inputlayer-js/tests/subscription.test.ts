@@ -13,6 +13,7 @@ import { WebSocketServer, type WebSocket as ServerSocket } from 'ws';
 import {
   CancelledError,
   type Change,
+  ConnectionError,
   ConnectionLostError,
   DeadlineExceededError,
   type GroupChange,
@@ -103,6 +104,8 @@ class Engine {
   /** Every `read`, `subscribe` and `cancel` frame. */
   readonly frames: Frame[] = [];
   sessionRules: string[] = [];
+  /** The /ws protocol version the engine reports on login. */
+  protocolVersion = 5;
   /** Drop the connection on the next `.session` request. */
   dropOnSession = false;
   /** Requests not answered until `release()`. */
@@ -141,7 +144,7 @@ class Engine {
     if (msg.type === 'login' || msg.type === 'authenticate') {
       send({
         type: 'authenticated', session_id: 's', knowledge_graph: 'kg', version: 'test',
-        role: 'admin', protocol_version: 5, stream_epoch: 'e1',
+        role: 'admin', protocol_version: this.protocolVersion, stream_epoch: 'e1',
       });
       return;
     }
@@ -664,6 +667,17 @@ describe('subscribeGroup', () => {
     expect(frame.timeout_ms).toBeUndefined();
     await sub.close();
     await waitFor(() => engine!.programs.includes(`.unsubscribe ${sub.id}`));
+  });
+
+  it('ends with the version refusal, not ConnectionLostError, on an engine older than protocol 5', async () => {
+    const kg = await graph();
+    engine!.protocolVersion = 4;
+    const sub = kg.subscribeGroup({ x: E, y: E });
+    const error = await sub.next().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConnectionError);
+    expect(error).not.toBeInstanceOf(ConnectionLostError);
+    expect((error as Error).message).toMatch(/need version 5/);
+    expect(engine!.frames.some((f) => f.type === 'subscribe')).toBe(false);
   });
 
   it('assembles a streamed group snapshot', async () => {

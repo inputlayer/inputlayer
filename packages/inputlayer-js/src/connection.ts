@@ -128,16 +128,19 @@ export interface ConnectionOptions {
 }
 
 /** Per-call options. */
-export interface ExecuteOptions {
+export interface ReadOptions {
+  /** Deadline in milliseconds; overrides `defaultTimeoutMs` (0 for none). */
+  timeoutMs?: number;
+  /** Abort to cancel the call: `CancelledError` unless it was already committing. */
+  signal?: AbortSignal;
+}
+
+export interface ExecuteOptions extends ReadOptions {
   /**
    * Values of the program's `$name` references, sent beside its text and
    * bound by the engine without being parsed (protocol version 4).
    */
   params?: Params;
-  /** Deadline in milliseconds; overrides `defaultTimeoutMs` (0 for none). */
-  timeoutMs?: number;
-  /** Abort to cancel the call: `CancelledError` unless it was already committing. */
-  signal?: AbortSignal;
 }
 
 /** Subscription pushes: deltas, their streamed parts, errors and resets. */
@@ -566,7 +569,7 @@ export class Connection {
    * cancellation stop the whole read, as for `execute`; an `error` frame
    * (naming the failing query) rejects it as a whole.
    */
-  read(queries: NamedQuery[], opts: ExecuteOptions = {}): Promise<SnapshotResponse> {
+  read(queries: NamedQuery[], opts: ReadOptions = {}): Promise<SnapshotResponse> {
     return this.call({ type: 'read', queries }, queryLines(queries), false, opts);
   }
 
@@ -576,7 +579,7 @@ export class Connection {
    * Route the pushes with `routeSubscription` before calling. `timeoutMs`
    * bounds the call locally: the engine takes no deadline for it.
    */
-  subscribeGroup(subscription: string, queries: NamedQuery[], opts: ExecuteOptions = {}): Promise<SnapshotResponse> {
+  subscribeGroup(subscription: string, queries: NamedQuery[], opts: ReadOptions = {}): Promise<SnapshotResponse> {
     return this.call({ type: 'subscribe', subscription, queries }, queryLines(queries), false, opts);
   }
 

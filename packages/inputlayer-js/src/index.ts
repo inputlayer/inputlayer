@@ -218,6 +218,7 @@ export type {
   ConnectionEventType,
   ConnectionStats,
   ExecuteOptions,
+  ReadOptions,
   SubscriptionPushMessage,
   SubscriptionRoute,
 } from './connection.js';

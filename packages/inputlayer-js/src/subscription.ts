@@ -43,7 +43,7 @@
  * kinds, fields and reasons.
  */
 
-import type { Connection, ExecuteOptions, SubscriptionPushMessage, SubscriptionRoute } from './connection.js';
+import type { Connection, ReadOptions, SubscriptionPushMessage, SubscriptionRoute } from './connection.js';
 import { compileQueryPlan, resultColumnIndexes, type QueryOptions, type QueryPlan } from './compiler.js';
 import {
   CancelledError,
@@ -472,7 +472,7 @@ function commitDelta(held: Result, touched: Map<string, Touched>): { inserted: R
 export async function snapshotRead(
   conn: Connection,
   targets: Record<string, SubscriptionTarget>,
-  opts: ExecuteOptions = {},
+  opts: ReadOptions = {},
   sessionRules: () => Promise<string[]> = async () => [],
 ): Promise<ReadResult> {
   const named = namedShapes(targets, 'read');
@@ -719,8 +719,8 @@ export abstract class StandingSubscription<E, S> implements AsyncIterableIterato
       } catch (e) {
         if (this.state !== state) return;
         if (e instanceof ConnectionError && !(e instanceof ConnectionLostError)) {
-          // Closed for good (reconnecting is off, or gave up).
-          this.fail(new ConnectionLostError(`Connection lost: ${e.message}`, 'closed'));
+          // Closed for good (reconnecting is off, or gave up), or refused by an open one.
+          this.fail(this.conn.connected ? e : new ConnectionLostError(`Connection lost: ${e.message}`, 'closed'));
           return;
         }
         if (!transient(e)) {

@@ -835,7 +835,7 @@ class KnowledgeGraph:
             self._conn,
             self._shapes(queries, read=True),
             timeout=timeout,
-            session_rules=self._session.list_rules,
+            session_rules=lambda: self._session.list_rules(timeout=timeout),
         )
 
     def _shapes(self, targets: Mapping[str, Any], *, read: bool) -> dict[str, Shape]:
@@ -849,6 +849,10 @@ class KnowledgeGraph:
                 raise SubscriptionRejected(
                     f"Query '{name}': {err.message}", err.reason, query=err.query
                 ) from None
+            except CompileError as err:
+                named = CompileError(f"Query '{name}': {err}")
+                named.hint = err.hint
+                raise named from None
         return shapes
 
     def _target_shape(self, target: Any, *, read: bool) -> Shape:
@@ -885,6 +889,11 @@ class KnowledgeGraph:
                 raise CompileError(
                     f"{'read' if read else 'subscribe'} takes a query or iql=, not both",
                     hint="put the whole query in iql=, or drop iql=",
+                )
+            if limit is not None or offset is not None or (read and order_by is not None):
+                raise SubscriptionRejected(
+                    "iql= takes the whole query as written: drop limit, offset and order_by.",
+                    "limit_offset",
                 )
             return iql_shape(iql, read=read)
         if read and offset is not None and limit is None:
