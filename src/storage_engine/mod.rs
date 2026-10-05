@@ -47,6 +47,7 @@ mod replica;
 #[cfg(test)]
 mod replica_tests;
 mod residency;
+mod revisions;
 mod snapshot;
 mod vector_index;
 mod write_program;
@@ -213,6 +214,8 @@ pub struct StorageEngine {
     /// A replication follower: client writes are refused and only the
     /// replication applier changes state (see `replica`).
     replica: AtomicBool,
+    /// The durable bound on this engine's revisions, raised while it is open.
+    _revisions: Arc<revisions::RevisionReservation>,
     /// Single-writer ownership of `data_dir` for this engine's lifetime.
     /// Declared last so it is released only after every other field drops.
     _data_dir_lock: DataDirLock,
@@ -272,7 +275,11 @@ impl StorageEngine {
             elapsed_us = lock_start.elapsed().as_micros() as u64,
             "data_dir_lock_acquired"
         );
+        let has_state = config.storage.data_dir.join("persist").exists();
         fs::create_dir_all(config.storage.data_dir.join("metadata"))?;
+        // Before any snapshot: this run's revisions continue above every
+        // revision an earlier run on this directory issued.
+        let revisions = revisions::RevisionReservation::open(&config.storage.data_dir, has_state)?;
 
         // Initialize DD-native persist backend
         let persist_config = PersistConfig {
@@ -306,6 +313,7 @@ impl StorageEngine {
             kg_set: RwLock::new(()),
             checkpoint_exports: checkpoint::CheckpointExports::default(),
             replica: AtomicBool::new(false),
+            _revisions: revisions,
             _data_dir_lock: data_dir_lock,
         };
 

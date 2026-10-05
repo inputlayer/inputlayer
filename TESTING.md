@@ -291,7 +291,8 @@ ones included) while the engine interleaves pushes, a streamed result and a
 `tests/scenarios/stream.rs` requires the stream contract: notifications
 arrive in strictly increasing `seq` order under concurrent writers, a reconnect
 cursor from before an engine restart gets one `replay_gap` notice and nothing
-replayed, and commits racing a `.subscribe` all reach the agent.
+replayed, an `expect_revision` from before a crash-restart is refused without
+`expect_epoch` (#380), and commits racing a `.subscribe` all reach the agent.
 
 Results over `storage.performance.max_result_rows` are required to fail
 closed: the subscription is refused, or a refresh pushes `subscription_error`

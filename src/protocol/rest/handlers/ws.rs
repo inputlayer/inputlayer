@@ -678,7 +678,7 @@ fn admit(
                 Some(ErrorCode::PreconditionFailed),
                 format!(
                     "Precondition failed: expect_epoch is not this engine run's stream \
-                     epoch ({epoch}); revisions restart with the engine. Nothing was applied."
+                     epoch ({epoch}); the revision is from another engine run. Nothing was applied."
                 ),
             );
             let (access, request) = Request::immediate(rejected);

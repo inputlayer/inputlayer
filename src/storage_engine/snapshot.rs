@@ -21,6 +21,7 @@
 //! - Readers get consistent snapshots without holding locks
 
 use super::precondition::ChangeLog;
+use super::revisions::next_revision;
 use crate::ast::dependencies::DependencyClosure;
 use crate::ast::{Program, Rule};
 use crate::execution::{TimingBreakdown, TimingMode};
@@ -29,19 +30,9 @@ use crate::value::{Relation, RelationMap, Tuple};
 use crate::{CompiledProgram, IQLEngine, OptimizationConfig};
 use arc_swap::ArcSwap;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::info;
-
-/// Last revision handed to a snapshot, across all knowledge graphs.
-static LAST_REVISION: AtomicU64 = AtomicU64::new(0);
-
-/// The last revision handed to a snapshot of any knowledge graph in this
-/// engine run; no snapshot has a later one yet.
-pub(super) fn last_revision() -> u64 {
-    LAST_REVISION.load(Ordering::SeqCst)
-}
 
 /// Immutable point-in-time snapshot of knowledge graph data
 ///
@@ -50,10 +41,11 @@ pub(super) fn last_revision() -> u64 {
 pub struct KnowledgeGraphSnapshot {
     /// Revision of the knowledge graph state this snapshot holds: assigned
     /// when the snapshot is built, from one counter shared by every knowledge
-    /// graph of this engine run, from 1. A knowledge graph publishes its
-    /// snapshots under its write lock, so each publish has a higher revision
-    /// than the one before, even across a drop and re-create of the same
-    /// name. Revisions restart with the engine; the stream epoch
+    /// graph. A knowledge graph publishes its snapshots under its write lock,
+    /// so each publish has a higher revision than the one before, even across
+    /// a drop and re-create of the same name. A restarted engine continues
+    /// above every revision its earlier runs issued (see
+    /// [`super::revisions`]); the stream epoch
     /// ([`crate::protocol::notification_log::NotificationLog::epoch`]) tells
     /// runs apart.
     pub revision: u64,
@@ -222,7 +214,7 @@ impl KnowledgeGraphSnapshot {
         num_workers: usize,
         previous: Option<&Self>,
     ) -> Self {
-        let revision = LAST_REVISION.fetch_add(1, Ordering::SeqCst) + 1;
+        let revision = next_revision();
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_micros() as u64);

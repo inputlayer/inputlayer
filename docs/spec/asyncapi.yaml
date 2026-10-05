@@ -206,11 +206,12 @@ info:
     relation should include it in `expect_relations` or rely on the claim
     guard.
 
-    Revisions restart with the engine. `expect_epoch` names the stream epoch
+    A restarted engine continues above every revision its earlier runs
+    issued. `expect_epoch` names the stream epoch
     (`authenticated.stream_epoch`) the revision belongs to and fails the
     precondition when it is not this run's. Without it, a revision older than
-    the knowledge graph's first state in this run, or not yet issued, still
-    fails. A program that does not write persistent state (queries, session
+    the knowledge graph's first state in this run (every revision of an
+    earlier run is), or not yet issued, still fails. A program that does not write persistent state (queries, session
     rules, meta commands, `.subscribe`) cannot carry `expect_revision`: it is
     rejected with `invalid_request`.
 
