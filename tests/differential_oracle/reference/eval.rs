@@ -176,9 +176,12 @@ fn compare(left: &Cell, op: &ComparisonOp, right: &Cell) -> Result<bool, Adapter
 
 /// All distinct full bindings of a conjunctive body over `db`.
 ///
-/// Positive atoms bind left to right; comparisons and negations are then
-/// checked on fully bound values (a body needing them earlier is unsafe for
-/// the reference and reported as unsupported).
+/// Positive atoms bind left to right; then an equality with one side an
+/// unbound variable binds it (`Why = "in_stock"`), in body order; comparisons
+/// and negations are then checked on fully bound values (a body needing them
+/// earlier is unsafe for the reference and reported as unsupported). A `_`
+/// inside a negation matches any value: `!claim(O, X, _)` holds when no
+/// `claim` row has `O` and `X` in those positions.
 pub fn bindings(
     body: &[BodyPredicate],
     db: &Relations,
@@ -198,25 +201,53 @@ pub fn bindings(
             )?;
         }
     }
-    for predicate in body {
+    let mut assignments = Vec::new();
+    for (i, predicate) in body.iter().enumerate() {
+        if let BodyPredicate::Comparison(left, ComparisonOp::Equal, right) = predicate {
+            // Every binding binds the same variables, so the first one decides.
+            let bound = |term: &Term| match term {
+                Term::Variable(v) => result.iter().next().is_none_or(|b| b.contains_key(v)),
+                _ => true,
+            };
+            let (target, source) = match (left, right) {
+                (Term::Variable(v), other) if !bound(left) && bound(other) => (v, other),
+                (other, Term::Variable(v)) if !bound(right) && bound(other) => (v, other),
+                _ => continue,
+            };
+            let mut assigned = BTreeSet::new();
+            for mut binding in result {
+                let cell = value(source, &binding)?;
+                binding.insert(target.clone(), cell);
+                assigned.insert(binding);
+            }
+            result = assigned;
+            assignments.push(i);
+        }
+    }
+    for (i, predicate) in body.iter().enumerate() {
         match predicate {
             BodyPredicate::Positive(_) => {}
+            BodyPredicate::Comparison(..) if assignments.contains(&i) => {}
             BodyPredicate::Negated(atom) => {
-                if atom.args.iter().any(|t| matches!(t, Term::Placeholder)) {
-                    return unsupported(format!("'_' inside negated {}", atom.relation));
-                }
-                let atom_args = args(atom, &mut fresh)?;
                 let tuples = db.get(&atom.relation).unwrap_or(&empty);
                 let mut kept = BTreeSet::new();
                 for binding in result {
-                    let mut tuple = Vec::with_capacity(atom_args.len());
-                    for arg in &atom_args {
-                        tuple.push(match arg {
-                            Arg::Value(c) => c.clone(),
-                            Arg::Var(v) => value(&Term::Variable(v.clone()), &binding)?,
+                    // `None` for a `_`, which matches any value.
+                    let mut pattern = Vec::with_capacity(atom.args.len());
+                    for term in &atom.args {
+                        pattern.push(match term {
+                            Term::Placeholder => None,
+                            other => Some(value(other, &binding)?),
                         });
                     }
-                    if !tuples.contains(&tuple) {
+                    let matches = |tuple: &Row| {
+                        tuple.len() == pattern.len()
+                            && pattern
+                                .iter()
+                                .zip(tuple)
+                                .all(|(want, got)| want.as_ref().is_none_or(|w| w == got))
+                    };
+                    if !tuples.iter().any(matches) {
                         kept.insert(binding);
                     }
                 }
@@ -354,6 +385,23 @@ pub fn check_rule(rule: &Rule) -> Result<(), AdapterError> {
             }
             BodyPredicate::Comparison(..) => {}
             BodyPredicate::HnswNearest { .. } => return unsupported("hnsw_nearest"),
+        }
+    }
+    // An equality binds its one unbound variable side, as `bindings` does.
+    for predicate in &rule.body {
+        if let BodyPredicate::Comparison(left, ComparisonOp::Equal, right) = predicate {
+            let is_bound = |term: &Term| match term {
+                Term::Variable(v) => bound.contains(v),
+                other => constant(other).is_some(),
+            };
+            match (left, right) {
+                (Term::Variable(v), other) | (other, Term::Variable(v))
+                    if !bound.contains(v) && is_bound(other) =>
+                {
+                    bound.insert(v.clone());
+                }
+                _ => {}
+            }
         }
     }
     let needs_binding = |term: &Term| -> Result<(), AdapterError> {
