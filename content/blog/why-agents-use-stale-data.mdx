@@ -19,15 +19,15 @@ This works when your data changes slowly. It breaks when your data changes faste
 
 The fundamental issue is that full recomputation doesn't scale. A 2,000-node entity graph takes 11.3 seconds to follow every chain of connections from scratch. Run that hourly, and you're spending 271 seconds per day on recomputation. That's for one graph, one query type. And even then, between refreshes, you can't know whether the context you retrieved is current or one cycle stale.
 
-## The Incremental Alternative
+## The Alternative: Derive at Query Time
 
-Incremental computation flips this around: only recompute what changed.
+Instead of refreshing a precomputed copy on a schedule, derive the conclusion from the current facts when the agent asks for it.
 
-When a supplier status changes from suspended to active, the only conclusions that need updating are the ones that depended on that supplier's status. Not the entire graph.
+When a supplier status changes from suspended to active, the question the agent asks is usually about one supplier, one order, one person. That question only needs the part of the graph it touches. Not the entire graph.
 
-This is what incremental computation engines do. They maintain a dependency graph between facts and conclusions. When a fact changes, they spread the update through only the affected paths.
+This is what InputLayer does. Rules are stored definitions, and every query evaluates them against the facts as they are at that moment, so there is no stored copy to go stale. A demand-driven rewrite (Magic Sets) restricts recursive rules to the part of the graph the question is about. On a 2,000-node graph, following every chain of connections from scratch takes 11.3 seconds; asking "what can node 1 reach?" takes 6.83ms, computed fresh from the current facts.
 
-InputLayer is built on Differential Dataflow, a computation engine designed to process changes efficiently rather than re-running everything. The same 2,000-node query that takes 11.3 seconds to follow every chain of connections from scratch takes 6.83ms when a single connection is added, because only the paths affected by that connection are re-evaluated.
+InputLayer is built on Differential Dataflow and uses it to execute each query. Keeping persistent rules as incrementally maintained views, so a change is applied once rather than re-derived by every read, is planned work ([milestone 9](https://github.com/inputlayer/inputlayer/issues/305)).
 
 ## What This Means by Domain
 
@@ -45,12 +45,12 @@ Your data pipeline writes facts to InputLayer as they change:
 +supplier("sup_02", "status", "active")  // previously suspended
 ```
 
-InputLayer spreads the update. Conclusions that depended on `sup_02` being suspended are removed. New conclusions based on the active status are computed. Your agent queries against current state, not a snapshot.
+The next query sees the update. Conclusions that depended on `sup_02` being suspended are no longer derived. Conclusions based on the active status are. Your agent queries against current state, not a snapshot. An agent that subscribes to a rule gets the change pushed: the engine re-evaluates the subscription after the commit and sends the rows that changed.
 
-The key property is smart cleanup: when a fact is deleted or updated, every conclusion that was built on top of it disappears automatically. Nothing stale lingers. Differential Dataflow handles this natively.
+The key property is correct cleanup: when a fact is deleted or updated, every conclusion that was built on top of it is absent from the next evaluation, because that evaluation recomputes from the remaining facts. Nothing stale lingers, because nothing derived is stored.
 
 ## The bottom line
 
 When a supplier status changes at 3pm, the next query at 3:01pm should reflect that change. Not the next morning after the batch job runs.
 
-InputLayer maintains its conclusions incrementally. When a fact changes, only the affected conclusions update, in milliseconds, not hours. And every decision traces back to the specific facts and rules in effect at the time it was made.
+InputLayer derives its conclusions from the current facts on every query, and bound questions over recursive rules answer in milliseconds, not hours. And every decision traces back to the specific facts and rules in effect at the time it was made.

@@ -11,11 +11,11 @@ You're five turns into a conversation with your agent. You mentioned a constrain
 
 Chat history captures what was said. The part you usually have to bolt on yourself is the semantic layer: which turns belong to which topic, which topics travel together through the conversation, which user question is still open. That layer is a small reasoning problem, and it is exactly the kind of thing rules are good at.
 
-This post walks through `InputLayerMemory`, a LangGraph component that stores conversation turns as facts and uses rules to derive the context your agent needs for the next reply. You keep the usual history, and you also get a queryable map of what the conversation is about. Rules update automatically as new turns arrive, keeping conclusions current without any manual bookkeeping.
+This post walks through `InputLayerMemory`, a LangGraph component that stores conversation turns as facts and uses rules to derive the context your agent needs for the next reply. You keep the usual history, and you also get a queryable map of what the conversation is about. Rules are evaluated against all stored turns whenever the memory is queried, so conclusions reflect the latest turn without any manual bookkeeping.
 
 ## The idea: facts + rules = derived memory
 
-[InputLayer](https://github.com/inputlayer/inputlayer) is the live rules engine for AI agents. You give it facts, write rules over them, and it keeps all derived conclusions up to date as new facts arrive. When you add a new turn, only the conclusions touched by that turn get recomputed, so the semantic layer stays in sync with the conversation instead of being rebuilt from scratch on every reply.
+[InputLayer](https://github.com/inputlayer/inputlayer) is the live rules engine for AI agents. You give it facts, write rules over them, and every query derives the conclusions from the facts as they are at that moment. When you add a new turn, nothing has to be rebuilt: the next recall evaluates the rules over the conversation including that turn, so the semantic layer always matches the conversation.
 
 `InputLayerMemory` is a [LangGraph](https://github.com/langchain-ai/langgraph) component that stores conversation turns as **facts** and uses **rules** to derive what's relevant. You drop it into your graph as a node, and it handles the storage and retrieval for you.
 

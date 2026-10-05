@@ -22,7 +22,7 @@ For a warehouse running thousands of picks per hour, hundreds of milliseconds pe
 
 ## The solution
 
-InputLayer was added alongside the existing infrastructure. Warehouse layout, inventory positions, and order priorities are ingested as facts. The routing logic is expressed as rules that the engine keeps current as those facts change.
+InputLayer was added alongside the existing infrastructure. Warehouse layout, inventory positions, and order priorities are ingested as facts. The routing logic is expressed as rules that the engine evaluates against the current facts whenever a route is requested.
 
 The warehouse layout is encoded as facts: "Aisle 3 connects to Dock B," "Bin 3-14 contains Item X," "Order 2847 needs Item X from high-priority queue." The routing rules compute optimal paths through this graph, taking all factors into account simultaneously.
 
@@ -32,17 +32,17 @@ The path computation is recursive - the engine explores routes through the wareh
 
 ```steps
 Routing decisions :: Under 50ms (previously hundreds of ms) [success]
-Inventory change propagation :: Only affected routes recompute [primary]
+Inventory changes :: Reflected in the next routing query [primary]
 Stale route elimination :: Automatic - no robots sent to empty bins [success]
 ```
 
 The impact was felt almost immediately. Query latency dropped to under 50ms for routing decisions that previously required multiple round-trips between systems.
 
-The incremental computation turned out to be especially valuable. When someone picks Item X from Bin 3-14, the engine only recalculates routes that need Item X - routes for other items stay the same. When an item is fully picked, all dependent routing decisions update automatically. No need to rebuild the entire routing graph every time inventory changes.
+Computing routes at query time turned out to be especially valuable. When someone picks Item X from Bin 3-14, the next routing query for an order that needs Item X sees the new inventory. When an item is fully picked, routes through that bin are simply no longer derived. There is no precomputed routing graph to rebuild every time inventory changes.
 
 ## Key technical insight
 
 ```note
 type: tip
-The recursive path computation through the warehouse graph is what makes this practical. InputLayer's incremental computation means adding or removing inventory doesn't require recomputing all paths - only the affected routes update. This is what keeps latency under 50ms even as the warehouse state changes continuously.
+The recursive path computation through the warehouse graph is what makes this practical. Each routing query asks about one order, so the demand-driven rewrite (Magic Sets) only explores the part of the warehouse graph that order needs, from the current facts. This is what keeps latency under 50ms even as the warehouse state changes continuously.
 ```

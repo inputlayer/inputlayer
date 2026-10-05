@@ -114,17 +114,17 @@ InputLayer identifies these relationships automatically by following chains of o
 
 This is where the knowledge graph approach becomes especially valuable for compliance. Entity relationships change constantly. Companies are acquired. Ownership stakes are transferred. New sanctions designations are published. Old ones are lifted.
 
-When you add a new sanctions designation, say Gamma Holding's owner gets added to the list, InputLayer picks up the change instantly. It identifies every entity in that person's ownership chain, evaluates whether the ownership thresholds are met, and flags the affected transactions. On a graph with thousands of entities, this takes milliseconds.
+When you add a new sanctions designation, say Gamma Holding's owner gets added to the list, the next query sees the change. Asked about a transaction, InputLayer follows that person's ownership chain from the current facts, evaluates whether the ownership thresholds are met, and flags the transaction. A bound question like this explores only the relevant chain, so on a graph with thousands of entities it takes milliseconds. A subscription to the flagging rule is re-evaluated after the commit and pushes the newly flagged rows.
 
 ```flow
 Full recompute approach [highlight] -> Sanctions updated -> Recompute all (minutes) -> Stale until done
 ```
 
 ```flow
-InputLayer: Sanctions updated [success] -> Instant update (ms) -> Current immediately
+InputLayer: Sanctions updated [success] -> Next query derives from current facts (ms) -> Current immediately
 ```
 
-The reverse is equally important. When someone is removed from a sanctions list, all the downstream flags that were derived through their ownership chain clear automatically. No manual cleanup, no stale alerts clogging up your queue. And if an entity had sanctions exposure through *multiple* paths (e.g., owned by two sanctioned individuals), removing one designation correctly preserves the remaining exposure.
+The reverse is equally important. When someone is removed from a sanctions list, all the downstream flags that were derived through their ownership chain are absent from the next evaluation, because it recomputes from the remaining facts. No manual cleanup, no stale alerts clogging up your queue. And if an entity had sanctions exposure through *multiple* paths (e.g., owned by two sanctioned individuals), removing one designation correctly preserves the remaining exposure.
 
 ## Getting started
 

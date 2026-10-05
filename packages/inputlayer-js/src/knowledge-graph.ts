@@ -731,7 +731,7 @@ export class KnowledgeGraph {
     await this.conn.execute(iql, { params });
   }
 
-  /** Clear a rule's materialized data. */
+  /** Clear a rule's clauses. */
   async clearRule(name: string): Promise<void> {
     await this.conn.execute(meta.ruleClear(name));
   }

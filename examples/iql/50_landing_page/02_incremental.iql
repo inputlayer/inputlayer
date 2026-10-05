@@ -1,5 +1,6 @@
-// Landing page example: Incremental Updates
-// Authority chain that updates incrementally when a new edge is added.
+// Landing page example: a new fact reaches derived results
+// Authority chain: the next query after a new edge includes the new paths
+// (rules are recomputed from the current facts on every query).
 
 .kg create landing_incremental
 .kg use landing_incremental

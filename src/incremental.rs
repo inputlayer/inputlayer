@@ -1,9 +1,12 @@
-//! Incremental Materialization Engine
+//! Base-relation mirror (not used on the server path)
 //!
-//! `IncrementalEngine` provides persistent incremental computation for one
-//! knowledge graph. It owns a timely worker thread with Differential Dataflow
-//! InputSessions for base relations, and coordinates derived relation
-//! materialization.
+//! `IncrementalEngine` mirrors the base relations of one knowledge graph in a
+//! long-lived timely worker thread with Differential Dataflow InputSessions
+//! and arrangements. No rule is compiled into it: it holds base relations
+//! only. It is enabled only by tests (`KnowledgeGraph::enable_incremental`);
+//! production storage engines leave it off, so persistent rules are
+//! re-derived from base facts on every query. Keeping deployed rules as
+//! maintained views is milestone 9 (issue #305).
 //!
 //! ## Architecture
 //!

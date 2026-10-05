@@ -125,7 +125,7 @@ info:
       whole, naming the failing query. It runs alongside other queries (see Pipelining)
       under the request's deadline and `cancel`, which stop every query of it.
     - `subscribe` registers a subscription *group*: several named queries kept current
-      together. Its reply is a `snapshot` of every member at one revision (with
+      together, by re-evaluating them after each relevant commit and diffing the results. Its reply is a `snapshot` of every member at one revision (with
       `subscribed`). Afterwards the server pushes one `subscription_group_delta` per
       refresh that changed any member, listing every member in order, the ones whose
       result did not change marked `unchanged`; after applying it, every member is its

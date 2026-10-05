@@ -4,12 +4,12 @@ A unified IQL-native syntax for InputLayer, designed for intuitive data manipula
 
 ## Quick Reference
 
-| Operator | Meaning | Persisted | DD Semantics |
-|----------|---------|-----------|--------------|
-| `+` | Insert fact or persistent rule | Yes | diff = +1 |
-| `-` | Delete fact or drop rule | Yes | diff = -1 |
-| `<-` | Session rule (transient) | No | Ad-hoc computation |
-| `?` | Query | No | Ad-hoc query |
+| Operator | Meaning | Persisted | Stored as |
+|----------|---------|-----------|-----------|
+| `+` | Insert fact or persistent rule | Yes | Fact: WAL/Parquet record with diff = +1; rule: catalog entry |
+| `-` | Delete fact or drop rule | Yes | Fact: WAL/Parquet record with diff = -1; rule: catalog removal |
+| `<-` | Session rule (transient) | No | Evaluated with each query of the session |
+| `?` | Query | No | Evaluated against the current facts |
 
 ## Key Terminology
 
@@ -109,7 +109,7 @@ To update data, delete the old value then insert the new:
 
 ## Persistent Rules (`+head <- body`)
 
-Persistent rules are saved to disk and incrementally maintained by Differential Dataflow.
+Persistent rules are saved to disk (`rules/catalog.json`) and evaluated from the base facts on every query that reads them; no derived rows are stored.
 
 Simple rule:
 ```iql
@@ -338,16 +338,16 @@ See [functions.md](functions.md) for the complete reference (55 functions).
 
 ## Differential Dataflow Semantics
 
-InputLayer is built on Differential Dataflow (DD), which uses a diff-based model:
+InputLayer uses Differential Dataflow (DD) as its per-query execution engine:
 
-- `+fact` sends `(fact, time, +1)` to DD
-- `-fact` sends `(fact, time, -1)` to DD
-- Rules are incrementally maintained using DD's `iterate()` operator
-- Queries are executed using DD's dataflow operators
+- `+fact` is persisted as a `(fact, time, +1)` triple
+- `-fact` is persisted as a `(fact, time, -1)` triple
+- Each query (including standing queries, re-run after each relevant commit) builds a DD dataflow over the current facts; recursive rules use DD's `iterate()` operator inside that evaluation
+- The dataflow is torn down when the query finishes; no rule results are kept between queries
 
-The persistence layer stores `(data, time, diff)` triples, enabling:
-- Efficient incremental updates
-- Crash recovery with WAL (Write-Ahead Log)
+The persistence layer stores `(data, time, diff)` triples as its WAL and Parquet format, enabling crash recovery with the WAL (Write-Ahead Log).
+
+Keeping deployed persistent rules as long-lived, incrementally maintained DD views is the goal of milestone 9 ([#305](https://github.com/inputlayer/inputlayer/issues/305)); until it ships, rules are recomputed on read.
 
 ## Architecture
 
@@ -358,12 +358,12 @@ Storage Engine       ->  Multi-knowledge-graph management
        |
 Rule Catalog         ->  Persistent rule definitions (JSON)
        |
-IQL Engine       ->  DD-based execution
+IQL Engine       ->  DD dataflow per query
        |
 Persist Layer        ->  WAL + batched Parquet storage
 ```
 
-See [architecture.md](../internals/architecture.md) for the complete architecture reference.
+See [architecture.mdx](../content/docs/internals/architecture.mdx) for the complete architecture reference.
 
 ## File Locations
 

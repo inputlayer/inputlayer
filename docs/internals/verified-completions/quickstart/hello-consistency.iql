@@ -42,9 +42,9 @@
 // stays trustworthy.
 ?conflict(C1, C2)
 
-// ── The incremental story, in one delete ───────────────────────────────────
-// Retract the m3 presupposition (user corrects themselves): the conflict
-// vanishes, nothing recomputes from scratch.
+// ── The retraction story, in one delete ────────────────────────────────────
+// Retract the m3 presupposition (user corrects themselves): the next query
+// recomputes from the remaining facts and the conflict is gone.
 -claim("c2", "trip", "departure_date", "2026-08-12")
 ?conflict(C1, C2)
 

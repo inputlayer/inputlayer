@@ -59,7 +59,7 @@ Question -> InputLayer [primary] -> Derived conclusions
 
 Your vector database finds similar content. InputLayer follows chains of facts and derives conclusions.
 
-When the patient's medication list changes, InputLayer automatically updates every downstream risk assessment. When an employee changes departments, their permissions recalculate through the org hierarchy. When a corporate ownership structure shifts, the compliance analysis adjusts. All of this happens incrementally. Only the affected conclusions recompute, not the entire knowledge base.
+When the patient's medication list changes, the next query sees every downstream risk assessment derived from the new list. When an employee changes departments, their permissions are derived through the org hierarchy from the current facts. When a corporate ownership structure shifts, the compliance analysis reflects it. Nothing has to be refreshed: every query evaluates the rules against the facts as they are, and a bound question only explores the part of the graph it is about.
 
 ## Getting started
 

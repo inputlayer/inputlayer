@@ -1,6 +1,6 @@
 # InputLayer Benchmarks
 
-InputLayer is a streaming reasoning layer for AI systems, built on Differential Dataflow. Its core advantages: Magic Sets for demand-driven recursive queries (up to 1,587x faster than full materialization), correct retraction through recursive fixpoints, and sub-50ms multi-hop deductive queries over knowledge graphs.
+InputLayer is a streaming reasoning layer for AI systems, built on Differential Dataflow. Its core advantages: Magic Sets for demand-driven recursive queries (up to 1,587x faster than computing the full closure), correct results after deletions through recursive fixpoints (each query recomputes from the remaining facts), and sub-50ms multi-hop deductive queries over knowledge graphs.
 
 These are Criterion in-process microbenchmarks (`cargo bench`): means, used for diagnosis and comparison with other systems. The acceptance check for latency and throughput regressions is the performance gate (`make perf-gate`, see [`perf-gate/README.md`](perf-gate/README.md)), which measures p50/p99 end to end over the WebSocket protocol.
 
@@ -31,7 +31,7 @@ Speedup grows with graph size because full TC is O(N^2) while bound queries only
 
 **DuckDB recursive CTEs** hit a harder wall. On LDBC social network graphs with just 484 nodes and 2K edges, standard recursive CTEs [run out of memory](https://duckdb.org/2025/05/23/using-key) (606M intermediate rows). DuckDB's new `USING KEY` feature (SIGMOD 2025) addresses row explosion for shortest-path, but it's path deduplication, not demand restriction. InputLayer handles the same graph (500 nodes, 2K edges) in **1.12s** for full TC or **2.67ms** for a bound query - no memory issues.
 
-**Souffle** (compiled IQL to C++) is faster for full materialization - it compiles rules to optimized parallel C++, achieving roughly [2-5x better throughput on batch TC](https://souffle-lang.github.io/benchmarks). But Souffle requires a 13-second compilation step before execution, has no retraction support, and its [magic sets implementation](https://souffle-lang.github.io/magicset) operates at the same conceptual level as InputLayer's. For interactive use (REPL, API queries, agent workloads), InputLayer's zero-compilation interpreted execution with single-digit millisecond bound queries is the better fit.
+**Souffle** (compiled IQL to C++) is faster for computing the full closure - it compiles rules to optimized parallel C++, achieving roughly [2-5x better throughput on batch TC](https://souffle-lang.github.io/benchmarks). But Souffle requires a 13-second compilation step before execution, has no retraction support, and its [magic sets implementation](https://souffle-lang.github.io/magicset) operates at the same conceptual level as InputLayer's. For interactive use (REPL, API queries, agent workloads), InputLayer's zero-compilation interpreted execution with single-digit millisecond bound queries is the better fit.
 
 | System | Bound Reachability (2Kn) | Full TC (2Kn) | Arbitrary Recursion | Retraction |
 |--------|--------------------------|---------------|---------------------|------------|
@@ -54,7 +54,7 @@ Graph: 2,000 nodes, 4K edges, TC rules defined. Insert 100 new edges, then re-qu
 | **Bound** `?reach(1, Y)` (Magic Sets) | **6.83 ms** | **1,652x** |
 | **Full** `?reach(X, Y)` (recompute all) | **11.3 s** | baseline |
 
-After inserting 100 new edges, InputLayer answers "what can node 1 reach?" in **6.8ms**. A system that must recompute the full transitive closure (PostgreSQL `REFRESH MATERIALIZED VIEW`, Souffle re-run) takes **11.3 seconds** - 1,652x slower.
+After inserting 100 new edges, InputLayer answers "what can node 1 reach?" in **6.8ms**. InputLayer also recomputes on this query; it computes only the slice the bound query demands, not the whole closure. A system that must recompute the full transitive closure (PostgreSQL `REFRESH MATERIALIZED VIEW`, Souffle re-run) takes **11.3 seconds** - 1,652x slower.
 
 This is the key difference: PostgreSQL, DuckDB, and Souffle have no way to answer a bound recursive query without computing the full closure first. InputLayer's Magic Sets rewrites the recursion to only explore the demanded subgraph. The cost is proportional to the answer size (reachable nodes from seed), not the total graph size.
 
@@ -62,9 +62,9 @@ This is the key difference: PostgreSQL, DuckDB, and Souffle have no way to answe
 
 ## Retraction Through Recursive Views
 
-Delete edges from a graph with TC rules and re-query. DD correctly retracts all derived tuples that depended on removed facts - including transitively derived consequences through recursive fixpoints.
+Delete edges from a graph with TC rules and re-query. The re-query recomputes from the remaining facts, so no derived tuple that depended on a removed fact survives - including transitively derived consequences through recursive fixpoints. Nothing is retracted from maintained state; there is none.
 
-Base graph: 500 nodes, 1K edges, TC rules materialized.
+Base graph: 500 nodes, 1K edges, TC rules registered.
 
 | Edges Deleted | Re-query Time |
 |---------------|---------------|
@@ -72,9 +72,9 @@ Base graph: 500 nodes, 1K edges, TC rules materialized.
 | -50 edges | **715 ms** |
 | -100 edges | **1.13 s** |
 
-Deleting 10 edges costs the same as a baseline query. Deleting 100 edges (10% of the graph) roughly doubles it - the additional cost is proportional to the cascade of derived tuples that must be retracted.
+Deleting 10 edges costs the same as a baseline query. Deleting 100 edges (10% of the graph) roughly doubles it - the re-query evaluates the recursive rules again over the changed graph.
 
-**No other IQL engine handles retraction through recursive fixpoints.** Souffle is append-only - once a fact is derived, it can never be removed. PostgreSQL materialized views require full recomputation (`REFRESH MATERIALIZED VIEW`). Neo4j has no materialized recursive views at all. InputLayer is the only system that correctly and automatically propagates deletions through chains of recursive rules.
+**A re-query after a delete is correct without a full-closure refresh step.** Souffle is append-only - once a fact is derived, it can never be removed without re-running the program. PostgreSQL materialized views require full recomputation (`REFRESH MATERIALIZED VIEW`). Neo4j has no materialized recursive views at all. InputLayer's results are correct after deletions through chains of recursive rules because every query recomputes from the current facts.
 
 ---
 
@@ -100,7 +100,7 @@ Sum aggregation over 10K+ rows in under 10ms. Adding 100x more new employees (10
 
 ## Full Transitive Closure
 
-Full materialization of all reachable pairs. This is the worst-case workload - compute everything, filter nothing.
+Full computation of all reachable pairs. This is the worst-case workload - compute everything, filter nothing.
 
 | Graph | Time | Output Size |
 |-------|------|-------------|
@@ -213,7 +213,7 @@ Snapshots share relation data (copy-on-write chunks), inserts dedup through a ha
 | Single insert (fsync-bound) | 4.20 ms | 4.17 ms |
 | Recovery from WAL, 10K | 2.72 ms | 3.16 ms |
 
-Refresh cost no longer grows with KG size. Recovery pays for building the dedup index.
+Refresh cost (a re-evaluation of the standing query) no longer grows with KG size. Recovery pays for building the dedup index.
 
 ---
 
@@ -270,7 +270,8 @@ spurious at any size; see
 # Full production suite (~15 min)
 cargo bench --bench production_benchmarks
 
-# Individual groups
+# Individual groups (the incremental_* names measure a re-query after a change;
+# the engine recomputes on that query, it does not maintain results)
 cargo bench --bench production_benchmarks -- transitive_closure
 cargo bench --bench production_benchmarks -- magic_sets
 cargo bench --bench production_benchmarks -- incremental_requery

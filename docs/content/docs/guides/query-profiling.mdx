@@ -31,7 +31,7 @@ When timing is enabled, every query result includes a `timing_breakdown` with th
 | `magic_sets_us` | Magic Sets | Demand-driven query adornment |
 | `ir_build_us` | IR Build | Intermediate representation construction |
 | `optimize_us` | Optimize | Optimizer passes (filter pushdown, fusion, identity elimination) |
-| `shared_views_us` | Shared Views | Common subexpression pre-computation |
+| `shared_views_us` | Shared Views | Common subexpression pre-computation within this one evaluation (nothing is stored across queries) |
 | `total_us` | Total | End-to-end engine time |
 
 Per-rule execution timing appears in the `rules` array (Detailed mode only). Each entry includes the rule head name, execution time, whether it ran recursively, and worker count.
@@ -76,7 +76,7 @@ From this you can see that execution dominates (890us out of 1250us total), the 
 
 The **Performance** tab in query results shows a waterfall bar chart with stages color-coded, a table with exact timings, and a collapsible per-rule breakdown (Detailed mode).
 
-In the Explorer, clicking a view and opening the **Performance** tab shows timing sub-tabs:
+In the Explorer, clicking a view and opening the **Performance** tab shows timing sub-tabs for evaluating that rule (a view is evaluated from the base facts each time it is displayed or queried):
 
 - **Overview** - evaluation cost summary with a mini waterfall
 - **Timing** - full stage breakdown and per-rule detail

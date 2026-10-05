@@ -164,7 +164,7 @@ result = await kg.query(
 
 ## Derived Relations (Rules)
 
-Define computed views with recursive logic:
+Define computed views (rules evaluated on each query) with recursive logic:
 
 ```python
 from typing import ClassVar

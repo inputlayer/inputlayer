@@ -1,11 +1,11 @@
-// Test: Materialized view pattern
+// Test: summary view pattern (a persistent rule, evaluated on each query)
 
 .kg create test_mat_view_n18t121
 .kg use test_mat_view_n18t121
 
 +orders[(1, 100, "2024-01"), (2, 200, "2024-01"), (3, 150, "2024-02")]
 
-// Materialized summary (persistent rule)
+// Summary view (persistent rule)
 +monthly_total(Month, sum<Amount>) <- orders(_, Amount, Month)
 
 ?monthly_total(M, T)

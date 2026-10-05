@@ -256,18 +256,18 @@ views/
   reporting.iql
 ```
 
-### 4. Use Persistent Rules for Automatic Materialization
+### 4. Use Persistent Rules for Shared Definitions
 
-Persistent rules are automatically materialized and updated when base data changes:
+Persistent rules are stored in the knowledge graph's rule catalog and evaluated from the base facts on every query that reads them. Nothing derived is stored, so a query always sees the current facts:
 
 ```iql
-// Session rules compute fresh each query:
+// Session rules live in your session and are evaluated per query:
 reachable(X, Y) <- edge(X, Y)
 reachable(X, Y) <- reachable(X, Z), edge(Z, Y)
 
-// Persistent rules materialize and cache results:
+// Persistent rules are saved for every client, and are also computed fresh on each query:
 +reachable(X, Y) <- edge(X, Y)
 +reachable(X, Y) <- reachable(X, Z), edge(Z, Y)
 ```
 
-Both session and persistent rules support full recursion with fixed-point iteration.
+Both session and persistent rules support full recursion with fixed-point iteration. Making deployed persistent rules incrementally maintained views is planned in [#305](https://github.com/inputlayer/inputlayer/issues/305); today both kinds are recomputed per query.

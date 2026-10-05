@@ -4,7 +4,7 @@
 
 ## Problem Statement
 
-Differential Dataflow (DD) operates on streaming deltas with multiplicities. It has no native concept of type enforcement. Once data enters DD, it flows through computation - "rejecting" invalid data would require expensive rollback.
+Facts enter the relation store at commit; Differential Dataflow (DD) runs per query over those facts. DD operates on deltas with multiplicities and has no native concept of type enforcement, so invalid data that reaches the store would surface in every later query - "rejecting" it afterwards would require an expensive rollback.
 
 **Solution:** Validate data types *before* they enter the dataflow. Create a validation gate that enforces schemas at the boundary.
 

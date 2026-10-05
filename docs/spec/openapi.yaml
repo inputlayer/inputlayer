@@ -194,6 +194,7 @@ components:
               type: integer
             views:
               type: integer
+              description: Number of persistent rules (views) across all knowledge graphs. Rules are evaluated on query; nothing derived is stored.
             memory_usage_bytes:
               type: integer
               format: uint64

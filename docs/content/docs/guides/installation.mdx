@@ -150,7 +150,7 @@ The data directory contains:
 ./data/
 ├── default/           # Default knowledge graph
 │   └── rules/         # Persistent rule definitions (catalog.json)
-├── persist/           # DD-native persist layer
+├── persist/           # DD-native persist layer (WAL + Parquet)
 │   ├── shards/        # Shard metadata
 │   ├── batches/       # Compacted batch files
 │   └── wal/           # Write-ahead log

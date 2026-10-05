@@ -327,7 +327,7 @@ memory_turn(thread_id, turn_id, role, content, ts)
 memory_topic(thread_id, turn_id, topic)
 ```
 
-Three rules derive context automatically:
+Three rules derive context. They are evaluated when `recall` queries them, not when `store` writes a turn:
 
 ```
 active_topic(ThreadId, Topic) <- memory_topic(ThreadId, _, Topic)
@@ -396,7 +396,7 @@ Each turn through the graph:
 
 1. **recall** reads `state["thread_id"]` and writes derived context into `state["context"]`
 2. **respond** is your own logic. The LLM uses `state["context"]` to generate a response
-3. **store** reads `state["new_message"]` (a dict with `role` and `content`) and stores it as a new turn. Rules fire automatically
+3. **store** reads `state["new_message"]` (a dict with `role` and `content`) and stores it as a new turn. The rules see it the next time `recall` queries them
 
 The `thread_key` parameter defaults to `"thread_id"` on both nodes. If your state uses a different key, pass `thread_key="your_key"` explicitly.
 

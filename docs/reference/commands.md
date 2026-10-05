@@ -380,7 +380,6 @@ Atomically replace existing definitions.
 1. Parse and validate the entire file
 2. Delete all existing rules/relations that will be created
 3. Execute the file statements
-4. Re-materialize dependent views
 
 **Use case:** Updating rule definitions during development.
 
@@ -397,7 +396,7 @@ Merge with existing definitions.
 - Keep existing data
 - Error on schema conflicts
 
-**Use case:** Adding rules incrementally.
+**Use case:** Adding rules one file at a time.
 
 ### Load Mode Comparison
 

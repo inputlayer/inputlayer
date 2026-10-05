@@ -195,7 +195,7 @@ RelOp       ::= "=" | "!=" | "<" | ">" | "<=" | ">="
 ### 4.4 Persistent vs Session Rules
 
 ```iql
-// Persistent rule (with + prefix) - stored and incrementally maintained
+// Persistent rule (with + prefix) - definition stored in the catalog, evaluated on each query
 +admin_email(Email) <-
     user(_, _, Email),
     admin(Email)
@@ -223,13 +223,13 @@ SQL analogy:
 
 Clear separation of concerns:
 
-| Syntax | Purpose | DD Materialization | Type Checking |
-|--------|---------|-------------------|---------------|
-| `type` | Value type definitions | No | N/A |
-| `+name(col: type, ...)` | Schema declaration | **No** | **Yes** |
-| `+name(...) <- body` | Persistent rule (DD view) | **Yes** | Only if schema exists |
-| `name(...) <- body` | Session rule (transient) | **No** | Only if schema exists |
-| `+`/`-` (facts) | Base data manipulation | No | Only if schema exists |
+| Syntax | Purpose | Type Checking |
+|--------|---------|---------------|
+| `type` | Value type definitions | N/A |
+| `+name(col: type, ...)` | Schema declaration | **Yes** |
+| `+name(...) <- body` | Persistent rule (view, computed on query) | Only if schema exists |
+| `name(...) <- body` | Session rule (transient) | Only if schema exists |
+| `+`/`-` (facts) | Base data manipulation | Only if schema exists |
 
 ### 6.2 Persistent Rule Grammar
 
@@ -246,7 +246,7 @@ temp_result(X, Y) <- source(X, Y), X > 10
 ```
 
 - Computed on-demand during evaluation
-- NOT persisted or incrementally maintained
+- NOT persisted (persistent rules are also computed on each query; the difference is that their definition is saved in the catalog)
 - Useful for ad-hoc queries
 
 ## 7. Implementation Notes
@@ -284,12 +284,12 @@ type Email: string(pattern("^[^@]+@[^@]+$"))
 +user[(1, "Alice", "alice@example.com"), (2, "Bob", "bob@example.com")]
 +purchase[(1, 1500), (1, 200), (2, 300)]
 
-// Persistent rule (explicit DD materialization)
+// Persistent rule (definition saved in the catalog, computed on query)
 +high_spender(UserId) <-
     purchase(UserId, Amount),
     Amount > 1000
 
-// Session rule (not materialized, just computed on query)
+// Session rule (not saved, computed on query)
 temp(Id) <- user(Id, _, _), high_spender(Id)
 
 // Query

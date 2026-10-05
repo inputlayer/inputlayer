@@ -37,7 +37,7 @@ The engine records the decision atomically. The external effect happens outside 
 
 ## When a fact changes mid-run
 
-The agent that claimed the work keeps its subscription open. If a supporting fact changes while the tool is running (the ETA recovers, an operator flips the kill switch, the order is cancelled), the conclusion is retracted and the agent receives the retraction as a delta. The same loop that started the work cancels it and deletes its claim, so the need can be claimed again if it comes back. Cancellation is derived from the state of the facts, not left to the model.
+The agent that claimed the work keeps its subscription open. If a supporting fact changes while the tool is running (the ETA recovers, an operator flips the kill switch, the order is cancelled), the re-evaluated standing query no longer contains the conclusion and the agent receives the retraction as a delta (the engine re-runs the query after the commit and diffs the result). The same loop that started the work cancels it and deletes its claim, so the need can be claimed again if it comes back. Cancellation is derived from the state of the facts, not left to the model.
 
 An effect that already landed before the retraction is not undone by the engine. Compensating it is your code's job, as it is today.
 
@@ -69,6 +69,6 @@ Rules that a standing query watches are re-evaluated when facts change, not when
 
 *Decision models judge. Language models think. InputLayer knows.*
 
-The model keeps the thinking: it reads conclusions and proposes actions. InputLayer holds the facts and rules, keeps the conclusions current, and records an action only while the rules allow it. In the reference architecture a model's output never authorizes an action by itself.
+The model keeps the thinking: it reads conclusions and proposes actions. InputLayer holds the facts and rules, derives the conclusions on demand, and records an action only while the rules allow it. In the reference architecture a model's output never authorizes an action by itself.
 
 Measured today for tens of concurrent agent sessions per knowledge graph, with per-session subscriptions; a change that lifts this is in progress (draft): https://github.com/inputlayer/inputlayer/pull/232.

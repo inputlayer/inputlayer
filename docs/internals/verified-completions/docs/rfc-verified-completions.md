@@ -15,7 +15,7 @@
 
 InputLayer gains an LLM gateway: an OpenAI-compatible chat-completions endpoint. The operator drops an Anthropic API key into config; clients point their existing OpenAI SDK at InputLayer by changing `base_url`. On every request the gateway (a) forwards the conversation to Claude for the completion and (b) **in parallel**, translates the conversation into facts inside a per-conversation knowledge graph and evaluates a shipped consistency rule pack over them. Contradictions come back attached to the normal completion response as an `inputlayer` extension block — each one with the exact source spans and the `.why` proof tree that derived it.
 
-The engine's three differentiators are load-bearing here, not decorative: **incremental evaluation** means each new turn re-checks a growing conversation in milliseconds instead of re-verifying from scratch; **correct retraction** means an edited or truncated conversation history retracts exactly the conclusions that depended on the removed turns; **provenance** means a contradiction is never a vibe — it is a proof tree grounded in quoted spans of the user's own messages.
+The engine's three differentiators are load-bearing here, not decorative: **incremental sessions** mean each new turn extracts only the new messages, and the engine re-evaluates the watch rules over the conversation's facts in milliseconds, so the model never re-verifies the whole history; **correct retraction** means an edited or truncated conversation history retracts exactly the conclusions that depended on the removed turns; **provenance** means a contradiction is never a vibe — it is a proof tree grounded in quoted spans of the user's own messages.
 
 ## 2. Motivation
 
@@ -30,7 +30,7 @@ Hence the OpenAI-compatible surface. Changing `base_url` is the lowest-friction 
 1. Drop-in gateway: `ANTHROPIC_API_KEY` in env → `/v1/chat/completions` works with unmodified OpenAI clients.
 2. Verify **internal consistency of the incoming conversation** (system + user + prior assistant turns) on every request. Verifying the *generated* output is a fast follow (M3), same machinery.
 3. Findings are explainable: every conflict carries claim IDs, message indices, surface spans, and a structured proof tree.
-4. Verification is incremental across turns of the same conversation and never blocks completions in the default mode (fail-open).
+4. Extraction is incremental across turns of the same conversation (each request re-evaluates the watch rules over the conversation's facts), and verification never blocks completions in the default mode (fail-open).
 5. Rule packs are ordinary `.il` files a user can read, extend, and replace.
 
 **Non-goals (for this RFC)**
@@ -230,7 +230,7 @@ Message 3 arrives on the next request. Only it is extracted (the prefix is cache
     "modality": "question", "msg": 3, "surface": "can you make sure Bob gets an aisle seat" } ] }
 ```
 
-Note `c_m3_2`: the seat request is phrased as a question, so it's tagged `question` and will never trigger a rule — but "since we leave on the 12th" is a presupposition stated as fact, and the extractor is instructed to treat presuppositions as `asserted`. "Bob" resolved to `robert` (§6.3). Inserting `c_m3_1` is a single-fact incremental update; the engine re-derives only what it touches.
+Note `c_m3_2`: the seat request is phrased as a question, so it's tagged `question` and will never trigger a rule — but "since we leave on the 12th" is a presupposition stated as fact, and the extractor is instructed to treat presuppositions as `asserted`. "Bob" resolved to `robert` (§6.3). Inserting `c_m3_1` is a single-fact insert; the next evaluation of the watch rules sees it.
 
 ## 7. The rule pack: `consistency.core`
 
@@ -309,17 +309,17 @@ Once output verification lands, the same machinery checks the *completion* again
 
 Constraints are a different logical species from claims (rules about what output *must* be, not what *is*), which is why they get their own relations rather than being shoehorned into `claim`.
 
-## 8. Session lifecycle: statelessness meets incrementality
+## 8. Session lifecycle: statelessness meets session reuse
 
-The OpenAI API is stateless — every request carries the full message list. The engine is incremental. The session resolver bridges the two:
+The OpenAI API is stateless — every request carries the full message list. The engine keeps each conversation's facts in a session knowledge graph and re-evaluates the watch rules over them on each request. The session resolver bridges the two:
 
 1. Per request, compute a **chained hash** over messages: `h_i = H(h_{i-1} ‖ role_i ‖ content_i)`.
 2. Look up a session KG whose stored hash chain is a prefix of the incoming one. Hit → extract and assert **only the suffix** (usually one user turn). Miss → new KG named `_conv_<h_n[:12]>`, extract everything once.
-3. **Divergence** (client edited or truncated history at index k): retract all facts with provenance `MsgIdx >= k`, then extract the new suffix. This is where correct retraction earns its keep — a conflict derived through a now-deleted turn disappears, but a conclusion still supported by surviving turns stays, with no recompute and no stale flags.
+3. **Divergence** (client edited or truncated history at index k): retract all facts with provenance `MsgIdx >= k`, then extract the new suffix. This is where correct retraction earns its keep — a conflict derived through a now-deleted turn disappears, but a conclusion still supported by surviving turns stays, with no stale flags, because the next evaluation recomputes from the surviving facts.
 4. Clients may pin sessions explicitly with an `il_conversation_id` field (or `X-IL-Conversation` header) to survive prompt-prefix rewrites (e.g., sliding-window truncation by a framework).
 5. Eviction: TTL + LRU per `[verify]` config. An evicted conversation that returns is simply re-extracted in full — correctness is unaffected, only cost.
 
-Net effect: steady-state per-turn work is *one Haiku extraction of one message* plus a *millisecond-scale incremental rule evaluation*, regardless of conversation length. Verification cost stops scaling with history — which is exactly the property that makes always-on checking viable.
+Net effect: steady-state per-turn work is *one Haiku extraction of one message* plus a *millisecond-scale re-evaluation of the watch rules* over the conversation's facts. Extraction cost stops scaling with history — which is exactly the property that makes always-on checking viable.
 
 ## 9. API specification
 
@@ -357,7 +357,7 @@ Request: `{ "messages": [...], "inputlayer": { ... } }`. Response: the `consiste
 | Completion (unchanged) | seconds | operator's chosen model |
 | Extraction (parallel) | ~0.4–1.0 s on Haiku | new-suffix tokens only; static prefix prompt-cached |
 | Canonicalization | ms | embedding of new mentions only |
-| Rule evaluation | ms (incremental) | engine-local |
+| Rule evaluation | ms (full re-evaluation of the watch rules per request) | engine-local |
 | Response assembly | ms | proof-tree walk |
 
 Because extraction runs in the completion's shadow, `annotate` mode adds ~zero wall-clock latency for prompt-side verification in the common case. Dollar cost is one small-model call per turn over just the new message — with prompt caching, typically a low-single-digit percentage of the completion's own cost. `enforce` mode inverts the ordering (verify first, complete second) and therefore does add extraction latency to the critical path; that trade is the point of the mode.

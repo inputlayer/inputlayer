@@ -430,7 +430,7 @@ For agent-style or chain-style use, see also the [LangChain Integration](langcha
 
 ## Derived Relations (Rules)
 
-Derived relations are computed views that InputLayer keeps up to date automatically. When the underlying data changes, derived results are recomputed incrementally - you never need to manually refresh them.
+Derived relations are computed views: InputLayer stores the rule, not its results, and recomputes the rows from the current facts on every query that reads them. There is nothing to refresh by hand: the next query after a change reflects it.
 
 Define them using `Derived` with the `From(...).where(...).select(...)` builder:
 
@@ -500,7 +500,7 @@ for clause in clauses:
 # Drop a specific rule
 await kg.drop_rule("high_earner")
 
-# Clear a rule's materialized data (rule stays, data recomputes)
+# Remove every clause of a rule
 await kg.clear_rule("reachable")
 ```
 
@@ -649,7 +649,7 @@ await kg.drop_index("doc_emb_idx")
 
 ## Sessions
 
-Sessions let you inject ephemeral facts and rules that exist only for the lifetime of your WebSocket connection. They're useful for user-specific context, A/B testing, or temporary views that shouldn't persist.
+Sessions let you inject ephemeral facts and rules that exist only for the lifetime of your WebSocket connection. They're useful for user-specific context, A/B testing, or temporary views that shouldn't persist (session rules are evaluated with each query on the connection, like persistent ones).
 
 ```python
 # Insert session-scoped facts (only visible to this connection)

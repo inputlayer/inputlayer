@@ -137,8 +137,8 @@ To add a new built-in function:
 - Production hardening complete (55/55 issues):
   - Multi-user authentication and ACL system
   - Rate limiting (per-connection WS, per-IP HTTP)
-  - Auto-compaction for DD-native persist layer
-  - Lock-free DD queries via storage snapshots
+  - Auto-compaction for the DD-native persist layer (WAL + Parquet batches)
+  - Lock-free queries via storage snapshots (each query runs its own DD dataflow)
   - Streaming result transport for large results (>1 MB)
   - Relation drop, rule drop by prefix, clear by prefix
   - TLS deployment support
@@ -148,4 +148,4 @@ To add a new built-in function:
 - Aggregations (count, sum, min, max, avg)
 - Vector distance functions
 - Type declarations and schemas
-- Differential Dataflow backend
+- Differential Dataflow execution backend (one dataflow per query; rules are not maintained between queries, see [#305](https://github.com/inputlayer/inputlayer/issues/305))

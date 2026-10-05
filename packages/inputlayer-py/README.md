@@ -2,7 +2,7 @@
 
 Python SDK for [InputLayer](https://github.com/inputlayer/inputlayer), the live rules engine for AI agents.
 
-Take the rules out of your prompts: declare facts and rules as typed Python classes, and InputLayer keeps every conclusion current as facts change. Write Python, no query syntax required: the SDK compiles your classes into IQL, InputLayer's rule language, and sends it over WebSocket. A knowledge graph (`il.knowledge_graph("support")`) is the facts and rule-derived conclusions of one domain.
+Take the rules out of your prompts: declare facts and rules as typed Python classes, and InputLayer derives every conclusion from the current facts whenever it is read. Write Python, no query syntax required: the SDK compiles your classes into IQL, InputLayer's rule language, and sends it over WebSocket. A knowledge graph (`il.knowledge_graph("support")`) is the facts and rule-derived conclusions of one domain.
 
 **Today and next.** This package declares relations and rules (`Relation`, `Derived`, `From`), writes and deletes facts, and queries the derived views. It also subscribes to them: `kg.subscribe()` (the engine pushes each change to the agent), `kg.watch()` and `kg.on()`, described in the [Python SDK guide](../../docs/content/docs/guides/python-sdk.mdx#subscriptions), and reads or subscribes to several results at one revision: `kg.read()` and `kg.subscribe_group()` ([Subscriptions](#subscriptions)). And it has `kg.claim()` (an agent's action is recorded only while the rules allow it), built on guarded programs (`kg.program().when()`, committed whole or not at all) and `R.any()` / `~R.any()` existence checks, described in [Guarded writes and claims](../../docs/content/docs/guides/python-sdk.mdx#guarded-writes-and-claims); these are not in a release yet. The [main README](../../README.md) shows both forms side by side.
 
@@ -97,7 +97,7 @@ Supported types: `int`, `float`, `str`, `bool`, `Vector[N]`, `VectorInt8[N]`, `T
 
 ### Derived Relations (Rules)
 
-Define computed views using `Derived` and the `From(...).where(...).select(...)` builder. InputLayer keeps derived data up to date automatically when the underlying facts change.
+Define computed views using `Derived` and the `From(...).where(...).select(...)` builder. Derived data is computed from the current facts on every query, so a read always reflects the latest writes.
 
 ```python
 from typing import ClassVar
@@ -495,7 +495,7 @@ The autodetector diffs your current Python models against the last migration's s
 | `list_rules()` | List all rules |
 | `rule_definition(name)` | Get compiled rule clauses |
 | `drop_rule(name)` | Drop a rule |
-| `clear_rule(name)` | Clear materialized rule data |
+| `clear_rule(name)` | Remove every clause of a rule |
 | `create_index(HnswIndex(...))` | Create HNSW index |
 | `list_indexes()` | List indexes |
 | `index_stats(name)` | Get index statistics |

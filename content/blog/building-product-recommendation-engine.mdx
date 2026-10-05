@@ -30,7 +30,7 @@ type: info
 Results are combined, de-duplicated, and filtered: already purchased items are excluded, out-of-stock items are excluded, and discontinued items are removed automatically.
 ```
 
-Each signal is expressed as a simple, readable rule. The engine combines them automatically. And because this runs on a knowledge graph with incremental computation, the recommendations stay fresh without model retraining or index rebuilding.
+Each signal is expressed as a simple, readable rule. The engine combines them automatically. And because every query derives the recommendations from the current facts, they stay fresh without model retraining or index rebuilding.
 
 ## Step 1: Model your product catalog
 
@@ -117,11 +117,11 @@ Each recommendation carries its reasoning trail. You can explain to the user *wh
 
 Here's where the knowledge graph approach really shines compared to model-based recommenders.
 
-**A new purchase comes in.** User_1 buys a GPS Watch. You add that fact. All recommendations update instantly. GPS Watch drops out of user_1's recommendations (already purchased), and any collaborative filtering signals that involve GPS Watch recalculate. No model retraining needed.
+**A new purchase comes in.** User_1 buys a GPS Watch. You add that fact. The next query reflects it. GPS Watch drops out of user_1's recommendations (already purchased), and any collaborative filtering signals that involve GPS Watch recalculate. No model retraining needed.
 
-**A product goes out of stock.** You update the stock status for Trail Shoes. Every recommendation that included Trail Shoes disappears from results automatically. When it's back in stock, the recommendations come back. No index rebuild needed.
+**A product goes out of stock.** You update the stock status for Trail Shoes. Every recommendation that included Trail Shoes is absent from the next query's results. When it's back in stock, the recommendations come back. No index rebuild needed.
 
-**A product is discontinued.** You retract it from the catalog entirely. InputLayer's correct retraction mechanism removes it from every recommendation result, every collaborative filtering signal, every category association, automatically and immediately. No stale suggestions pointing customers to a product page that returns a 404.
+**A product is discontinued.** You retract it from the catalog entirely. The next query recomputes from the remaining facts, so the product is gone from every recommendation result, every collaborative filtering signal, every category association, immediately. No stale suggestions pointing customers to a product page that returns a 404.
 
 ```flow
 Batch ML recommender [highlight] -> Retrain (hours) -> Rebuild index -> Deploy

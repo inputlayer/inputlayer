@@ -227,8 +227,8 @@ Both dates now live → engine flags `functional`. Correct.
     { "target": "c_m3_1", "kind": "claim", "msg": 5,
       "surface": "Actually, scratch that" } ] }
 ```
-The engine retracts the conflict incrementally; the graph converges on one
-departure date. No flag survives.
+The retracted claim leaves the conflict absent from the next evaluation; the
+graph converges on one departure date. No flag survives.
 
 ### C — Constraint removal by revision marker
 

@@ -4,9 +4,9 @@
 
 ## Problem Statement
 
-Differential Dataflow (DD) operates on streaming deltas with multiplicities. It has no native concept of type enforcement. Once data enters DD, it flows through computation - "rejecting" invalid data would require expensive rollback.
+Facts are committed to the WAL and the relation store, and every query evaluates them in a Differential Dataflow (DD) dataflow built for that query. DD operates on deltas with multiplicities and has no native concept of type enforcement, so invalid data that reaches the store flows into every later evaluation.
 
-**Solution:** Validate data types *before* they enter the dataflow. Create a validation gate that enforces schemas at the boundary.
+**Solution:** Validate data types *before* they are committed to the store. Create a validation gate that enforces schemas at the boundary.
 
 **Scope:** Type validation only.
 

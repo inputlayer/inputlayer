@@ -1,8 +1,11 @@
 //! Derived Relations Manager
 //!
-//! Manages materialized derived relations from persistent rules.
-//! Enables HNSW indexing on rule outputs by maintaining persistent
-//! materialized views that update incrementally when base data changes.
+//! Bookkeeping for externally supplied results of persistent rules, keyed
+//! by the base-data versions they were computed from. Unused on the server
+//! path: the incremental engine that owns it is enabled only by tests, no
+//! rule is ever compiled for execution here (`CompiledRule` clauses stay
+//! empty), and queries re-derive persistent rules from base facts. Rule
+//! maintenance as live views is milestone 9 (issue #305).
 //!
 //! ## Architecture
 //!
@@ -28,13 +31,14 @@
 //! ## Key Concepts
 //!
 //! - CompiledRule: Parsed rule stored as IR, ready for execution
-//! - MaterializedRelation: Cached rule output, invalidated on base changes
+//! - MaterializedRelation: Rule output stored by a caller, invalidated on base changes
 //! - Dependency Tracking: Maps base relations -> dependent derived relations
 //!
 //! ## Persistent vs Session Rules
 //!
-//! - Persistent Rules: Materialized here, results cached across queries
-//! - Session Rules: NOT materialized, but CAN read from materialized persistent rules
+//! - Persistent Rules: could be stored here when the (test-only) engine is on;
+//!   on the server path nothing is stored and every query evaluates them
+//! - Session Rules: never stored; evaluated with each query
 
 use crate::ast::Rule;
 use crate::ir::IRNode;

@@ -1,6 +1,6 @@
 # Verified Completions
 
-LLMs contradict themselves. A travel assistant that confirms a departure on August 14th will happily plan around "we leave on the 12th" three messages later, and neither the model nor the user notices until something breaks. InputLayer catches this class of failure at the source: conversations flowing through an OpenAI-compatible chat API are translated into typed facts inside a knowledge graph, an ontology's rules evaluate them incrementally, and every finding comes back with the exact quoted spans that clash - plus the engine's proof tree showing the derivation.
+LLMs contradict themselves. A travel assistant that confirms a departure on August 14th will happily plan around "we leave on the 12th" three messages later, and neither the model nor the user notices until something breaks. InputLayer catches this class of failure at the source: conversations flowing through an OpenAI-compatible chat API are translated into typed facts inside a knowledge graph, an ontology's rules are re-evaluated over the conversation's facts on each request, and every finding comes back with the exact quoted spans that clash - plus the engine's proof tree showing the derivation.
 
 Three design decisions shape everything:
 
@@ -132,7 +132,7 @@ print(r.choices[0].message.content)          # a normal completion
 print(r.model_extra["inputlayer"])           # ... with per-ontology reports
 ```
 
-The completion behaves like any OpenAI chat call. Alongside it, the conversation was translated into the pack's typed claims (one extraction prompt per selected pack), every identifier prefixed with `trip-42:` so conversations are isolated namespaces inside the shared `support` KG, the tuples stored, and the pack's rules evaluated incrementally - the engine's differential core processes each turn's delta. The report:
+The completion behaves like any OpenAI chat call. Alongside it, the conversation was translated into the pack's typed claims (one extraction prompt per selected pack), every identifier prefixed with `trip-42:` so conversations are isolated namespaces inside the shared `support` KG, the tuples stored, and the pack's watch rules evaluated over the conversation's facts for this request. The report:
 
 ```json
 { "reports": [ {
@@ -192,7 +192,7 @@ finding functional - hard
 report
 ```
 
-Three event kinds per evaluated request, per ontology: `translation` (the stored tuples), `finding` (the watch-view row with spans and the engine proof tree), and `report` (the per-ontology close). Everything traceable in the stream comes from the engine; the gateway relays.
+Three event kinds per evaluated request, per ontology: `translation` (the stored tuples), `finding` (a row of a watch view, evaluated for this request, with spans and the engine proof tree), and `report` (the per-ontology close). Everything traceable in the stream comes from the engine; the gateway relays.
 
 Every event carries `seq`, increasing by one per conversation. A ring buffer (256 events per conversation) replays recent events to late subscribers; to resume after a disconnect, pass the last `seq` you processed:
 
@@ -234,7 +234,7 @@ curl -s http://127.0.0.1:8081/v1/conversations/call-7/turns \
 
 - **Only new messages.** The body carries the messages since the last turn. The gateway appends them to a message ledger kept in the KG (`il_message(conv, idx, role, content)`), so indices are global, survive gateway restarts, and claims cite them (`c_m2_1` quotes message 2).
 - **Prior state from the KG.** Live claims of the conversation (`il_row`) are rendered into the extraction prompt as `CLAIMS_SO_FAR`, the last 8 messages as read-only context. One extraction call per turn, whatever the history length; the prompt's static head is prompt-cached.
-- **One write batch.** Facts, ledger rows, and any retractions land in one program; the watch views are evaluated and `translation` / `finding` / `report` events go out on `/v1/events` as for chat. `findings` is the conversation's full current set.
+- **One write batch.** Facts, ledger rows, and any retractions land in one program; the watch views are evaluated over the conversation's current facts and `translation` / `finding` / `report` events go out on `/v1/events` as for chat. `findings` is the conversation's full current set.
 - **Selection and auth** are the chat forms: `x-il-ontology` or `il_ontology`, exactly one `<kg>/<ontology>` pair (the message ledger lives in that KG). `x-il-trace: 1` adds a `trace` with the extraction, statements, rendered prompt, and model usage.
 - **Annotate semantics only.** There is no completion to withhold, so `il_mode: enforce` is a 400; act on `findings[].blocking` yourself.
 - **Failure records nothing.** Extraction or engine failure returns 503 `verification_unavailable` with `status: "incomplete"` and `reason`; resend the same messages.

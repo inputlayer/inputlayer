@@ -680,7 +680,7 @@ Before submitting code, verify:
 
 ## Getting Help
 
-- **Architecture questions**: Read `docs/internals/architecture.md`
+- **Architecture questions**: Read `docs/content/docs/internals/architecture.mdx`
 - **API questions**: Check doc comments with `cargo doc --open`
 - **Debugging**: Use `RUST_LOG=debug cargo run` for verbose output
 - **Tests failing**: Run `./scripts/run_snapshot_tests.sh -v` for diffs

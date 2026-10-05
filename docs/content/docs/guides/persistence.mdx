@@ -290,7 +290,7 @@ auto_compact_interval_secs = 300  # Check interval (seconds)
 data_dir = "./data"
 
 [storage.persist]
-# Enable DD-native persistence
+# Enable DD-native persistence (the name of the WAL + Parquet layer)
 enabled = true
 
 # Buffer size before flushing to Parquet
@@ -419,9 +419,9 @@ version that wrote it once, so it drains the WAL into batch files, then upgrade.
 
 ---
 
-## Differential Updates
+## Update Format
 
-InputLayer uses differential dataflow semantics internally:
+The WAL and the Parquet batch files store facts as differential dataflow update triples:
 
 ```rust
 Update {
@@ -444,7 +444,10 @@ Multiple updates to the same tuple are consolidated:
 This enables:
 - Efficient delta storage
 - Time-travel queries (if history preserved)
-- Incremental computation
+
+The triples are a storage format only. Only base facts and rule definitions are persisted; nothing derived is. No long-lived dataflow consumes these updates: each query builds its own dataflow over a snapshot of the facts and evaluates the rules it reads from scratch.
+
+Planned, not shipped: milestone 9 ([#305](https://github.com/inputlayer/inputlayer/issues/305)) adds one long-lived dataflow per knowledge graph, fed from the commit path, that keeps every persistent rule as an incrementally maintained view. Queries will read those views without re-deriving them, and subscriptions will be keyed diffs of a view between revisions. Derived rows will still not be persisted; views are rebuilt from the base facts at startup.
 
 ---
 

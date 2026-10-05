@@ -45,7 +45,7 @@ Rules define new relations based on existing data. A rule has:
 
 The head is `path(X, Y)`. The body is everything after `<-`.
 
-Rules don't store data directly - they compute results from stored facts. When facts change, rule results update automatically.
+Rules don't store data directly - they compute results from stored facts. When facts change, the next query sees the new facts.
 
 ## Views
 
@@ -54,7 +54,6 @@ A view is a relation defined by rules. In the example above, `path` is a view.
 Views are virtual tables:
 - They don't store data directly
 - Results are computed when queried
-- Updates are incremental (only changed parts recompute)
 
 ## Queries
 

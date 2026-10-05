@@ -146,13 +146,13 @@ export default function LandingPage() {
             <p className="mt-6 text-xl sm:text-2xl max-w-3xl">
               <strong className="font-semibold">Your agents act on what&apos;s true now.</strong>{" "}
               <span className="text-muted-foreground">
-                Declare your facts and rules once. InputLayer keeps every conclusion current as facts change, tells your
+                Declare your facts and rules once. InputLayer derives every conclusion from the current facts when it is read, tells your
                 agents what changed, and records an agent&apos;s action only while the rules allow it, so the tool runs
                 only then.
               </span>
             </p>
             <p className="mt-4 text-lg text-muted-foreground max-w-3xl">
-              A rules engine, made live: a conclusion is retracted when its facts stop supporting it, the exact
+              A rules engine, made live: a conclusion drops out of the next evaluation once its facts stop supporting it, the exact
               change is pushed to every subscribed agent, and any row can be explained with a proof, on request. The
               model proposes; the rules decide.
             </p>
@@ -400,7 +400,7 @@ export default function LandingPage() {
           </div>
           <p className="mt-6 text-muted-foreground max-w-3xl">
             Models keep the thinking. The knowledge graph is what the engine holds: the facts and rule-derived
-            conclusions of one domain. The rules engine is what keeps it current and enforces it.
+            conclusions of one domain. The rules engine is what derives the conclusions on demand and enforces them.
           </p>
         </Section>
 
@@ -419,8 +419,9 @@ export default function LandingPage() {
                   agent is woken when the answer changes, and an unchanged answer pushes nothing.
                 </li>
                 <li>
-                  <strong className="text-foreground">The cached flag and its invalidation</strong> become a view the
-                  engine keeps current, retracted when its facts stop supporting it.
+                  <strong className="text-foreground">The cached flag and its invalidation</strong> become a rule the
+                  engine re-evaluates after each relevant commit; the row leaves the answer when its facts stop
+                  supporting it.
                 </li>
                 <li>
                   <strong className="text-foreground">The policy prose</strong> becomes facts and a rule, enforced when the
@@ -462,7 +463,7 @@ export default function LandingPage() {
                   "Re-query + cache + cron": "No, you recompute",
                   "Kafka / CDC alone": "No, you write the logic",
                   "Vector store / memory layer": "No",
-                  InputLayer: "Yes, only affected ones",
+                  InputLayer: "Yes, it re-evaluates and reports which rows changed",
                 },
               },
               {
@@ -513,11 +514,11 @@ export default function LandingPage() {
               <div className="flex flex-wrap gap-8">
                 <div>
                   <span className="text-4xl font-extrabold text-primary">6.83ms</span>
-                  <p className="text-xs text-muted-foreground mt-1">incremental update</p>
+                  <p className="text-xs text-muted-foreground mt-1">bound query (Magic Sets)</p>
                 </div>
                 <div>
                   <span className="text-4xl font-extrabold text-muted-foreground/60">11.3s</span>
-                  <p className="text-xs text-muted-foreground mt-1">full recompute</p>
+                  <p className="text-xs text-muted-foreground mt-1">full closure</p>
                 </div>
                 <div>
                   <span className="text-4xl font-extrabold text-primary">1,652x</span>
@@ -525,8 +526,9 @@ export default function LandingPage() {
                 </div>
               </div>
               <p className="text-sm text-muted-foreground">
-                One new edge in a graph with 400,000 derived relationships: only the affected conclusions update. A
-                recursive-query result, not an agent-latency figure.{" "}
+                After new edges in a graph with 400,000 derived relationships, a bound query computes only the slice it
+                asks for instead of the whole closure; both are recomputations. A recursive-query result, not an
+                agent-latency figure.{" "}
                 <Link href={BENCHMARK_URL} className="text-primary hover:underline">
                   Read the benchmark
                 </Link>
@@ -676,10 +678,10 @@ export default function LandingPage() {
           </Card>
           <p className="mt-6 text-muted-foreground max-w-3xl">
             Nightly ETL became change data capture. Cron jobs became event-driven services. Full refreshes became
-            incremental views. Agents are still built the old way: a trigger fires, the agent fetches the world, reasons
+            incremental views elsewhere in the stack. Agents are still built the old way: a trigger fires, the agent fetches the world, reasons
             over all of it, acts, and stops. Everything that changes before the next trigger is invisible. In the 2000s
             the rules engine took business rules out of application code; a live rules engine takes them out of the
-            prompt and keeps them current while the agent works.
+            prompt and re-evaluates them as facts change while the agent works.
           </p>
           <p className="mt-6 text-sm text-muted-foreground max-w-3xl">
             A good fit when the agent acts on structured facts that change, the answer is derived through a chain of facts

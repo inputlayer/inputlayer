@@ -121,7 +121,7 @@ The recursive call is on the **left** side of the join.
 
 The recursive call is on the **right** side.
 
-**Both work**, but left recursion often performs better in Differential Dataflow.
+**Both work**, but left recursion often performs better in the Differential Dataflow evaluation each query runs.
 
 ## Mutual Recursion
 
