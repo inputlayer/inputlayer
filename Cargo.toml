@@ -154,12 +154,13 @@ path = "examples/rust/pipeline_demo.rs"
 name = "storage_demo"
 path = "examples/storage_demo.rs"
 
-# Reactive agent path against real engine processes; slow, so it runs only
-# when selected (`make e2e-reactive`, part of `make test-all`/CI).
+# Scenarios against real engine processes on the testkit. Runs under plain
+# `cargo test` (debug); `make e2e-reactive` is the release run that writes
+# delta-latency samples.
 [[test]]
-name = "e2e_reactive"
-path = "tests/e2e_reactive/main.rs"
-test = false
+name = "scenarios"
+path = "tests/scenarios/main.rs"
+test = true
 
 [[bench]]
 name = "query_benchmarks"

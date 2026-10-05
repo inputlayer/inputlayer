@@ -186,6 +186,10 @@ async fn saturated_engine() -> Checked<Engine> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "timing bounds hold for a release engine; `make e2e-reactive` runs it"
+)]
 async fn saturated_sessions_get_every_delta_once_in_time_and_nothing_else() -> Checked<()> {
     let engine = saturated_engine().await?;
     let stop_load = Arc::new(AtomicBool::new(false));

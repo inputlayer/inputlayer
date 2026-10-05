@@ -69,6 +69,8 @@ pub enum Violation {
     Uncorrelated { expected: String, frame: String },
     /// Connection closed, malformed frame or an unknown protocol message.
     Transport(String),
+    /// The engine does not export a counter the assertion needs.
+    NotMeasurable(String),
 }
 
 impl fmt::Display for Violation {
@@ -140,6 +142,7 @@ impl fmt::Display for Violation {
                 write!(f, "reply does not answer request {expected}: {frame}")
             }
             Self::Transport(detail) => write!(f, "transport: {detail}"),
+            Self::NotMeasurable(counter) => write!(f, "counter {counter} is not exported"),
         }
     }
 }

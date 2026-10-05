@@ -15,6 +15,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 
+use crate::client::WsClient;
+use crate::contract::{Checked, Violation};
+use crate::counters::Counters;
+
 /// How long a fresh or restarted engine may take to answer `/health`.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 /// Attempts at binding a free port (another process may grab it first).
@@ -22,9 +26,54 @@ const PORT_ATTEMPTS: usize = 3;
 /// Admin password written into the generated config.
 const ADMIN_PASSWORD: &str = "testkit-admin-password";
 
+/// How the engine answers reads of persistent rules (`engine.views`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mode {
+    /// Every read re-derives persistent rules from base facts (today's engine).
+    #[default]
+    Recompute,
+    /// Persistent rules are incrementally maintained views (V2 #309).
+    Maintained,
+}
+
+impl Mode {
+    /// The mode named by environment variable `var` (`recompute` or
+    /// `maintained`); unset or empty is [`Mode::Recompute`]. The scenario
+    /// suite reads `INPUTLAYER_SCENARIO_VIEWS`, so CI can run it once per mode.
+    ///
+    /// # Panics
+    /// On any other value.
+    pub fn from_env(var: &str) -> Self {
+        match std::env::var(var).unwrap_or_default().trim() {
+            "" | "recompute" => Self::Recompute,
+            "maintained" => Self::Maintained,
+            other => panic!("{var}={other:?}: expected \"recompute\" or \"maintained\""),
+        }
+    }
+
+    /// The `engine.views` config value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Recompute => "recompute",
+            Self::Maintained => "maintained",
+        }
+    }
+}
+
 /// Engine settings a scenario may change; everything else is the shipped default.
 #[derive(Debug, Clone, Default)]
 pub struct EngineSettings {
+    /// `engine.views`. Until V2 (#309) defines the setting nothing is
+    /// written and only [`Mode::Recompute`] can run.
+    pub views: Mode,
+    /// `storage.performance.max_query_memory_bytes`; `None` keeps the default.
+    pub max_query_memory_bytes: Option<u64>,
+    /// `storage.performance.max_graph_memory_bytes`; `None` keeps the default.
+    pub max_graph_memory_bytes: Option<u64>,
+    /// `storage.performance.max_query_cost`; `None` keeps the default.
+    pub max_query_cost: Option<u64>,
+    /// `storage.performance.max_nesting_depth`; `None` keeps the default.
+    pub max_nesting_depth: Option<usize>,
     /// `storage.performance.max_result_rows`; `None` keeps the default cap.
     pub max_result_rows: Option<usize>,
     /// `http.rate_limit.ws_max_subscriptions`; `None` keeps the default.
@@ -84,6 +133,48 @@ impl EngineBuilder {
     #[must_use]
     pub fn max_result_rows(mut self, rows: usize) -> Self {
         self.settings.max_result_rows = Some(rows);
+        self
+    }
+
+    /// Answer reads of persistent rules in `mode`.
+    ///
+    /// # Panics
+    /// For [`Mode::Maintained`] until V2 (#309) defines `engine.views`: the
+    /// engine cannot run that mode, so the scenario fails before starting one.
+    #[must_use]
+    pub fn views(mut self, mode: Mode) -> Self {
+        assert!(
+            mode == Mode::Recompute,
+            "engine.views = \"{}\": mode not available on this engine (V2 #309 adds it); \
+             unset INPUTLAYER_SCENARIO_VIEWS or set it to \"recompute\"",
+            mode.as_str()
+        );
+        self.settings.views = mode;
+        self
+    }
+
+    /// Refuse a query holding more than `query_bytes`
+    /// (`max_query_memory_bytes`) and writes growing a knowledge graph past
+    /// `graph_bytes` (`max_graph_memory_bytes`, 0 = unlimited).
+    #[must_use]
+    pub fn memory_limits(mut self, query_bytes: u64, graph_bytes: u64) -> Self {
+        self.settings.max_query_memory_bytes = Some(query_bytes);
+        self.settings.max_graph_memory_bytes = Some(graph_bytes);
+        self
+    }
+
+    /// Stop a query after `cost` units of work (`max_query_cost`, 0 = unlimited).
+    #[must_use]
+    pub fn max_query_cost(mut self, cost: u64) -> Self {
+        self.settings.max_query_cost = Some(cost);
+        self
+    }
+
+    /// Reject terms and type expressions nested deeper than `depth`
+    /// (`max_nesting_depth`).
+    #[must_use]
+    pub fn nesting_limit(mut self, depth: usize) -> Self {
+        self.settings.max_nesting_depth = Some(depth);
         self
     }
 
@@ -203,6 +294,74 @@ impl Engine {
     /// The engine's data directory.
     pub fn data_dir(&self) -> PathBuf {
         self.dir.path().join("data")
+    }
+
+    /// The engine's work counters from `/metrics/prometheus`.
+    pub async fn metrics(&self) -> Result<Counters> {
+        let body = http_get(self.port, "/metrics/prometheus", &self.api_key).await?;
+        Ok(Counters::parse(&body))
+    }
+
+    /// Create user `name` with server role `role` (`admin`, `editor` or `viewer`).
+    pub async fn create_user(&self, name: &str, password: &str, role: &str) -> Checked<()> {
+        self.admin(&format!(".user create {name} {password} {role}"))
+            .await
+            .map(drop)
+    }
+
+    /// Grant `user` role `role` (`owner`, `editor`, `writer`, `decider` or
+    /// `viewer`) on `knowledge_graph`, limited to `relations` when not empty.
+    pub async fn grant(
+        &self,
+        knowledge_graph: &str,
+        user: &str,
+        role: &str,
+        relations: &[&str],
+    ) -> Checked<()> {
+        self.admin(&format!(
+            ".kg acl grant {knowledge_graph} {user} {role}{}",
+            relations_clause(relations)
+        ))
+        .await
+        .map(drop)
+    }
+
+    /// Create API key `label`, limited to `role` on `knowledge_graph` (and to
+    /// `relations` when not empty), for [`WsClient::connect_with_key`].
+    pub async fn create_api_key(
+        &self,
+        label: &str,
+        role: &str,
+        knowledge_graph: &str,
+        relations: &[&str],
+    ) -> Checked<String> {
+        let result = self
+            .admin(&format!(
+                ".apikey create {label} role {role} on {knowledge_graph}{}",
+                relations_clause(relations)
+            ))
+            .await?;
+        result
+            .rows
+            .first()
+            .and_then(|row| row.get(1))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| Violation::Transport(format!("no key in {:?}", result.rows)))
+    }
+
+    /// Run one admin meta command on the bootstrap admin key.
+    async fn admin(&self, command: &str) -> Checked<crate::client::QueryResult> {
+        let mut admin = WsClient::connect(self, "default").await?;
+        let result = admin.execute(command).await?;
+        admin.close().await;
+        if !result.errors.is_empty() {
+            return Err(Violation::Rejected(format!(
+                "{command:?} failed: {:?}",
+                result.errors
+            )));
+        }
+        Ok(result)
     }
 
     /// Kill the process (SIGKILL: no clean shutdown).
@@ -336,9 +495,24 @@ impl Engine {
             "data_dir".into(),
             path_value(&self.dir.path().join("data"))?,
         );
-        if let Some(rows) = self.settings.max_result_rows {
-            let mut performance = toml::Table::new();
+        let settings = &self.settings;
+        let mut performance = toml::Table::new();
+        if let Some(rows) = settings.max_result_rows {
             performance.insert("max_result_rows".into(), integer(rows)?);
+        }
+        if let Some(bytes) = settings.max_query_memory_bytes {
+            performance.insert("max_query_memory_bytes".into(), integer_u64(bytes)?);
+        }
+        if let Some(bytes) = settings.max_graph_memory_bytes {
+            performance.insert("max_graph_memory_bytes".into(), integer_u64(bytes)?);
+        }
+        if let Some(cost) = settings.max_query_cost {
+            performance.insert("max_query_cost".into(), integer_u64(cost)?);
+        }
+        if let Some(depth) = settings.max_nesting_depth {
+            performance.insert("max_nesting_depth".into(), integer(depth)?);
+        }
+        if !performance.is_empty() {
             storage.insert("performance".into(), performance.into());
         }
         let mut auth = toml::Table::new();
@@ -451,6 +625,38 @@ async fn health_ok(port: u16) -> bool {
         && (response.starts_with(b"HTTP/1.1 200") || response.starts_with(b"HTTP/1.0 200"))
 }
 
+/// ` relations a, b` for a non-empty relation list.
+fn relations_clause(relations: &[&str]) -> String {
+    if relations.is_empty() {
+        String::new()
+    } else {
+        format!(" relations {}", relations.join(", "))
+    }
+}
+
+/// Body of a successful `GET path` with a bearer key.
+async fn http_get(port: u16, path: &str, api_key: &str) -> Result<String> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port))
+        .await
+        .context("connect for HTTP")?;
+    let request = format!(
+        "GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {api_key}\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).await?;
+    let mut response = Vec::new();
+    tokio::time::timeout(Duration::from_secs(30), stream.read_to_end(&mut response))
+        .await
+        .with_context(|| format!("GET {path} timed out"))??;
+    let response = String::from_utf8(response).context("non-UTF-8 HTTP response")?;
+    let (head, body) = response
+        .split_once("\r\n\r\n")
+        .with_context(|| format!("malformed HTTP response to {path}"))?;
+    if !head.starts_with("HTTP/1.1 200") && !head.starts_with("HTTP/1.0 200") {
+        bail!("GET {path}: {}", head.lines().next().unwrap_or_default());
+    }
+    Ok(body.to_string())
+}
+
 fn read_api_key(credentials: &Path) -> Result<String> {
     let text = std::fs::read_to_string(credentials)
         .with_context(|| format!("read {}", credentials.display()))?;
@@ -460,4 +666,29 @@ fn read_api_key(credentials: &Path) -> Result<String> {
         .and_then(toml::Value::as_str)
         .map(str::to_string)
         .context("credentials file has no api_key")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mode_from_env_defaults_to_recompute() {
+        assert_eq!(
+            Mode::from_env("INPUTLAYER_TESTKIT_MODE_TEST_UNSET"),
+            Mode::Recompute
+        );
+    }
+
+    #[test]
+    fn recompute_mode_is_accepted() {
+        let builder = EngineBuilder::new("inputlayer-server").views(Mode::Recompute);
+        assert_eq!(builder.settings.views, Mode::Recompute);
+    }
+
+    #[test]
+    #[should_panic(expected = "mode not available")]
+    fn maintained_mode_is_refused_until_the_engine_has_it() {
+        let _ = EngineBuilder::new("inputlayer-server").views(Mode::Maintained);
+    }
 }

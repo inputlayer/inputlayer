@@ -79,7 +79,7 @@ pub struct QueryResult {
     /// For a `.subscribe` reply: the revision the snapshot is the answer at.
     pub subscribed_revision: Option<u64>,
     /// The reply's `revision`: for a write, the revision its changes are
-    /// visible at.
+    /// visible at. Queries carry none until V9 (#315).
     pub revision: Option<u64>,
     /// Effective counts of the fact statements a write committed
     /// (`statements`), in program order.
@@ -209,6 +209,16 @@ impl WsClient {
     /// Connect to `knowledge_graph` on `engine` and authenticate with its API key.
     pub async fn connect(engine: &Engine, knowledge_graph: &str) -> Checked<Self> {
         Self::connect_url(&engine.ws_url(knowledge_graph), engine.api_key()).await
+    }
+
+    /// Connect to `knowledge_graph` on `engine` and authenticate with `api_key`
+    /// (e.g. a scoped key from [`Engine::create_api_key`]).
+    pub async fn connect_with_key(
+        engine: &Engine,
+        knowledge_graph: &str,
+        api_key: &str,
+    ) -> Checked<Self> {
+        Self::connect_url(&engine.ws_url(knowledge_graph), api_key).await
     }
 
     /// Connect to `url` and authenticate with `api_key`.
@@ -348,6 +358,38 @@ impl WsClient {
     /// Run `program`; returns its complete result or the engine's error.
     pub async fn execute(&mut self, program: &str) -> Checked<QueryResult> {
         self.send_execute(program).await?;
+        self.result().await
+    }
+
+    /// Run write `program` only if nothing in scope changed after `revision`
+    /// (`expect_revision`): the scope is `relations` and everything derived
+    /// from them, or the whole knowledge graph when `relations` is empty.
+    /// A failed precondition is the engine's error, a [`Violation::Rejected`]
+    /// naming the relation that changed and its revision.
+    pub async fn execute_expecting(
+        &mut self,
+        program: &str,
+        revision: u64,
+        relations: &[&str],
+    ) -> Checked<QueryResult> {
+        let mut request = json!({
+            "type": "execute",
+            "program": program,
+            "expect_revision": revision,
+        });
+        if !relations.is_empty() {
+            request["expect_relations"] = json!(relations);
+        }
+        self.send(request).await?;
+        self.result().await
+    }
+
+    /// Run `program` reading the knowledge graph as of `revision` (`at`,
+    /// V13 #316). Until the engine supports `at` it answers at its latest
+    /// revision; compare [`QueryResult::revision`] with `revision`.
+    pub async fn execute_at(&mut self, program: &str, revision: u64) -> Checked<QueryResult> {
+        self.send(json!({"type": "execute", "program": program, "at": revision}))
+            .await?;
         self.result().await
     }
 

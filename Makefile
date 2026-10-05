@@ -15,6 +15,13 @@ test-fast: check unit-test
 test: check unit-test e2e-test
 	@echo "All tests complete."
 
+# Every workspace test except the scenarios binary. test-all and ci-test-all
+# run the scenarios once, in release, through e2e-reactive.
+NON_SCENARIO_TESTS := $(addprefix --test ,$(filter-out scenarios,$(basename $(notdir $(wildcard tests/*.rs))) $(notdir $(patsubst %/main.rs,%,$(wildcard tests/*/main.rs)))))
+test_without_scenarios = { RUST_TEST_THREADS=$(1) cargo test --workspace --all-features --exclude inputlayer -- --test-threads=$(1) --format=pretty && \
+	RUST_TEST_THREADS=$(1) cargo test -p inputlayer --all-features --lib --bins $(NON_SCENARIO_TESTS) -- --test-threads=$(1) --format=pretty && \
+	RUST_TEST_THREADS=$(1) cargo test -p inputlayer --all-features --doc -- --test-threads=$(1) --format=pretty; }
+
 # Full verification (CI, pre-merge)
 # Runs everything: static analysis, build, unit+integration tests, snapshot E2E tests, coverage
 # All tests run in parallel. Zero ignored tests allowed. Cleanup verified.
@@ -42,7 +49,7 @@ test-all: check static-analysis
 	echo "=== Unit + Integration Tests ($$NCPU threads) ==="; \
 	UNIT_TMPFILE=$$(mktemp); \
 	set -o pipefail; \
-	RUST_TEST_THREADS=$$NCPU cargo test --workspace --all-features -- --test-threads=$$NCPU --format=pretty \
+	$(call test_without_scenarios,$$NCPU) \
 		2>&1 | tee "$$UNIT_TMPFILE"; \
 	UNIT_EXIT=$${PIPESTATUS[0]}; \
 	tail -5 "$$UNIT_TMPFILE"; \
@@ -206,7 +213,7 @@ ci-test-all:
 	echo "=== Unit Tests ==="; \
 	UNIT_TMPFILE=$$(mktemp); \
 	set -o pipefail; \
-	RUST_TEST_THREADS=$$CI_JOBS cargo test --workspace --all-features -- --test-threads=$$CI_JOBS --format=pretty \
+	$(call test_without_scenarios,$$CI_JOBS) \
 		2>&1 | tee "$$UNIT_TMPFILE"; \
 	UNIT_EXIT=$${PIPESTATUS[0]}; \
 	tail -5 "$$UNIT_TMPFILE"; \
@@ -324,9 +331,11 @@ soak:
 e2e-test:
 	./scripts/run_snapshot_tests.sh
 
-# Reactive agent path E2E: real engine processes, agents subscribed over /ws,
-# independent writers; release build for representative latency. Known
-# defects, when any is tracked, run as expected failures. Raw writer->agent delta
+# Scenario suite (tests/scenarios) in a release build for representative
+# latency: real engine processes, agents subscribed over /ws, independent
+# writers. Plain `cargo test` runs the same scenarios in debug. Known defects
+# run as expected failures; quarantined scenarios run here too (--include-ignored)
+# until a nightly workflow exists. Raw writer->agent delta
 # latency samples (schema inputlayer.reactive.delta_latency.v1) land in
 # $(E2E_REACTIVE_SAMPLES)/<scenario>.jsonl.
 E2E_REACTIVE_SAMPLES ?= target/e2e-reactive
@@ -334,7 +343,7 @@ e2e-reactive:
 	rm -rf $(E2E_REACTIVE_SAMPLES)
 	cargo test --release -p inputlayer-testkit
 	INPUTLAYER_REACTIVE_SAMPLES_DIR=$(abspath $(E2E_REACTIVE_SAMPLES)) \
-		cargo test --release --test e2e_reactive -- --nocapture
+		cargo test --release --test scenarios -- --nocapture --include-ignored
 	@ls $(E2E_REACTIVE_SAMPLES)/*.jsonl >/dev/null || { echo "ERROR: no latency samples written"; exit 1; }
 
 # Regenerate snapshot .iql.out files (sequential mode)
@@ -599,7 +608,6 @@ fmt-check:
 # Run clippy lints
 lint:
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
-	cargo clippy --all-features --test e2e_reactive -- -D warnings
 
 # Pre-PR gate: affected fast checks run in parallel before every push to a PR,
 # then the same-host performance gate. Formatting always runs; PRE_PR_BASE
