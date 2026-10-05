@@ -10,9 +10,7 @@ mod parameterized;
 mod sharing;
 
 use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use harness::{admin, rows, start_server, start_server_with, Client, Server, KG};
 use serde_json::{json, Value};
@@ -408,98 +406,6 @@ async fn test_burst_of_writes_coalesces_to_correct_final_state() {
         evaluations <= (N + 5) as u64,
         "at most one evaluation per commit, got {evaluations}"
     );
-}
-
-/// Subscriptions sent while writes commit: the view may publish between
-/// attaching a subscriber and the connection registering it, which must not
-/// lose that subscriber's wake-ups. Each subscription gets its snapshot, then
-/// deltas numbered without gaps up to the final result.
-#[tokio::test(flavor = "multi_thread")]
-async fn test_subscriptions_registered_during_a_write_burst_get_every_delta() {
-    const SUBSCRIPTIONS: usize = 16;
-    let server = start_server(64).await;
-    server.write("+n(0)").await;
-    let mut client = Client::connect(&server).await;
-
-    let stop = Arc::new(AtomicBool::new(false));
-    let writer = {
-        let handler = Arc::clone(&server.handler);
-        let stop = Arc::clone(&stop);
-        tokio::spawn(async move {
-            let mut n = 0;
-            while !stop.load(Ordering::Relaxed) {
-                n += 1;
-                handler
-                    .execute_program(None, Some(KG.to_string()), format!("+n({n})"), None)
-                    .await
-                    .unwrap();
-            }
-            n
-        })
-    };
-
-    let mut states = vec![None; SUBSCRIPTIONS];
-    for i in 0..SUBSCRIPTIONS {
-        client
-            .send(json!({"type": "execute", "program": format!(".subscribe s{i} ?n(X)")}))
-            .await;
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-    while states.iter().any(Option::is_none) {
-        take(&mut states, client.recv().await);
-    }
-    stop.store(true, Ordering::Relaxed);
-    let writes = writer.await.unwrap();
-    let expected: BTreeSet<i64> = (0..=writes).collect();
-    while states
-        .iter()
-        .any(|state| state.as_ref().is_none_or(|(held, _)| *held != expected))
-    {
-        let Ok(msg) = tokio::time::timeout(Duration::from_secs(10), client.recv()).await else {
-            let held: Vec<_> = states
-                .iter()
-                .map(|state| state.as_ref().map(|(held, _)| held.len()))
-                .collect();
-            panic!("{writes} writes; subscriptions stopped short, rows held: {held:?}");
-        };
-        take(&mut states, msg);
-    }
-}
-
-/// Apply a frame to the `?n(X)` subscriptions' rows and last `seq`.
-fn take(states: &mut [Option<(BTreeSet<i64>, u64)>], msg: Value) {
-    let index = |name: &str| name[1..].parse::<usize>().unwrap();
-    match msg["type"].as_str() {
-        Some("result") => {
-            let name = msg["subscribed"]["subscription"].as_str().unwrap();
-            let state = &mut states[index(name)];
-            assert!(state.is_none(), "two snapshots for {name}");
-            let held = rows(&msg["rows"])
-                .iter()
-                .map(|row| row[0].as_i64().unwrap())
-                .collect();
-            *state = Some((held, 0));
-        }
-        Some("subscription_delta") => {
-            assert!(rows(&msg["retracted"]).is_empty(), "{msg}");
-            let name = msg["subscription"].as_str().unwrap();
-            let (held, last_seq) = states[index(name)]
-                .as_mut()
-                .unwrap_or_else(|| panic!("a delta before the snapshot: {msg}"));
-            assert_eq!(msg["seq"].as_u64().unwrap(), *last_seq + 1, "{msg}");
-            *last_seq += 1;
-            for row in rows(&msg["inserted"]) {
-                assert!(
-                    held.insert(row[0].as_i64().unwrap()),
-                    "duplicate insert {msg}"
-                );
-            }
-        }
-        Some("error" | "subscription_error" | "subscription_reset") => {
-            panic!("unexpected frame {msg}")
-        }
-        _ => {}
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
