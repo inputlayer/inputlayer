@@ -106,9 +106,9 @@ during the copy, the primary abandons that resync, logs
 `replication_resync_pin_overflowed`, and counts it in
 `primary.resync_pin_overflows`. The follower counts the attempt in
 `resync_failures` and waits longer before each retry: 1 s, doubling up to
-60 s. The wait resets once a resync finishes and streaming starts. If the
-counters keep rising, raise `retain_bytes` to cover the writes made during
-one resync.
+60 s. The wait resets once a resync finishes and the follower catches up
+with the primary's head. If the counters keep rising, raise `retain_bytes`
+to cover the writes made during one resync.
 
 **Known limit.** The follower stops reading the stream while it applies one graph from a
 checkpoint. If a single graph takes longer to apply than the primary waits

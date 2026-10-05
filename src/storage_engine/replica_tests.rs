@@ -260,7 +260,7 @@ fn replaying_events_already_applied_changes_nothing() {
     let head = pump(&primary, &follower, 0);
     let applied = state(&follower);
     // A crash before the position was saved replays from an older point.
-    for from in [0, head / 2, head - 1] {
+    for from in 0..head {
         pump(&primary, &follower, from);
         assert_eq!(state(&follower), applied, "replayed from {from}");
     }

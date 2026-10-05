@@ -6,8 +6,8 @@
 //! Silence longer than `replication.timeout_ms`, a gap in LSNs, or any error
 //! ends the connection; it reconnects with backoff. A failed apply or a gap
 //! clears the position, so the next connection resyncs from a checkpoint.
-//! Consecutive resyncs that end before their checkpoint is applied back off
-//! further, up to `MAX_RESYNC_BACKOFF`, so a resync that cannot finish does
+//! Consecutive resyncs that end before the follower catches up with the
+//! primary's head back off further, up to `MAX_RESYNC_BACKOFF`, so a resync that cannot finish does
 //! not cost the primary a checkpoint every few seconds.
 
 use super::{
@@ -106,8 +106,8 @@ struct Follower {
     position: Position,
     /// The last session applied something (resets the backoff).
     streamed: bool,
-    /// The last session began a resync and has not streamed past its
-    /// checkpoint yet.
+    /// The last session began a resync and has not caught up with the
+    /// primary's head yet.
     resyncing: bool,
 }
 
@@ -235,6 +235,8 @@ impl Follower {
                         // Apply every frame that already arrived as one batch:
                         // one fsync and one position save for all of them.
                         let mut batch = lines.to_vec();
+                        let mut caught_up = false;
+                        let mut head = head;
                         let mut next = first + split_lines(lines).count() as u64;
                         while batch.len() < BATCH_BYTES {
                             let Some(message) = ws.next().now_or_never() else {
@@ -242,14 +244,15 @@ impl Follower {
                             };
                             match message {
                                 Some(Ok(Message::Binary(frame))) => {
-                                    let (more, head, lines) = decode_frame(&frame)?;
+                                    let (more, more_head, lines) = decode_frame(&frame)?;
                                     if more != next {
                                         return Err(format!(
                                             "frame at LSN {more} does not follow {}",
                                             next - 1
                                         ));
                                     }
-                                    status.contact(head);
+                                    status.contact(more_head);
+                                    head = head.max(more_head);
                                     next += split_lines(lines).count() as u64;
                                     batch.extend_from_slice(lines);
                                 }
@@ -257,6 +260,7 @@ impl Follower {
                                     match serde_json::from_str(&text) {
                                         Ok(PrimaryMessage::Heartbeat { head }) => {
                                             status.contact(head);
+                                            caught_up = true;
                                         }
                                         Ok(PrimaryMessage::Error { message }) => {
                                             return Err(message)
@@ -271,7 +275,9 @@ impl Follower {
                             }
                         }
                         let lsn = self.apply_events(stream_id, first, batch).await?;
-                        self.resyncing = false;
+                        if caught_up || lsn >= head {
+                            self.resyncing = false;
+                        }
                         lsn
                     };
                     self.streamed = true;
