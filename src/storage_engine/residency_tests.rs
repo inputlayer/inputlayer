@@ -292,7 +292,7 @@ fn a_knowledge_graph_with_state_only_in_memory_stays_loaded() {
         ef_construction: None,
         ef_search: None,
     };
-    storage.create_index_in("b", &index).unwrap();
+    storage.create_index_in("b", &index, None).unwrap();
     assert_eq!(storage.unload_idle_knowledge_graphs(Duration::ZERO), 0);
     assert!(loaded(&storage, "a") && loaded(&storage, "b"));
 }

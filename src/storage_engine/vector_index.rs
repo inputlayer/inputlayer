@@ -24,6 +24,7 @@ use crate::statement::IndexCreateOptions;
 use crate::value::{Relation, Tuple};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 /// Tombstone fraction that triggers an automatic rebuild.
 pub const COMPACT_RATIO: f64 = 0.3;
@@ -62,6 +63,20 @@ struct BuiltIndex {
     built_from: Relation,
 }
 
+/// The pool index builds run in. A build keeps every thread of its pool busy
+/// until it ends, so on the global pool it would starve the queries sharing
+/// it; this one has half the global pool's threads, leaving queries the rest.
+fn build_pool() -> &'static rayon::ThreadPool {
+    static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+    POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads((rayon::current_num_threads() / 2).max(1))
+            .thread_name(|n| format!("index-build-{n}"))
+            .build()
+            .expect("index build thread pool")
+    })
+}
+
 /// Build an index for `def` from `rows`, giving up when `stop` returns true.
 fn build_from(
     def: RegisteredIndex,
@@ -75,7 +90,9 @@ fn build_from(
         id_type = t;
         vectors.push((id, vector.to_vec()));
     }
-    let index = HnswIndex::build_unless(def.index_type.hnsw_config().clone(), vectors, stop)
+    let config = def.index_type.hnsw_config().clone();
+    let index = build_pool()
+        .install(|| HnswIndex::build_unless(config, vectors, &stop))
         .map_err(|e| match e {
             BuildError::Invalid(e) => {
                 BuildError::Invalid(format!("Cannot build index '{}': {e}", def.name))

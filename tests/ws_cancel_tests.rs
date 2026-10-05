@@ -484,6 +484,7 @@ async fn writes_and_reads_are_served_while_an_index_builds() {
         .execute("w", &format!("+vec({late}, {})", vector(late)))
         .await;
     assert_eq!(other.reply_to("w").await["type"], "result");
+    let read_sent = Instant::now();
     other.execute("r", &format!("?vec({late}, V)")).await;
     let read = other.reply_to("r").await;
     let served_at = Instant::now();
@@ -495,6 +496,12 @@ async fn writes_and_reads_are_served_while_an_index_builds() {
         served_at < built_at,
         "the build finished {:?} before the write and read were answered: grow VECTORS",
         served_at - built_at
+    );
+    // A read that waited for the build would be answered just before it ends.
+    let (read_took, build_left) = (served_at - read_sent, built_at - read_sent);
+    assert!(
+        read_took * 2 < build_left,
+        "the read took {read_took:?} of the {build_left:?} the build still ran: it waited for the build"
     );
     assert_eq!(reply["type"], "result", "{reply}");
     assert!(
