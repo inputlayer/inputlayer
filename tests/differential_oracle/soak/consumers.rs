@@ -279,7 +279,16 @@ async fn subscribe_loop(
                             Instant::now() + Duration::from_millis(500 + rng.below(2500) as u64);
                         opened
                     }
-                    Err(e) => return Err(format!("subscribe: {e}")),
+                    Err(e) => match allowed_disconnect(&e) {
+                        // A slow reader can be closed while it subscribes
+                        // too: deltas for its first queries queue ahead of
+                        // the next reply, and the engine's send times out.
+                        Some(reason) if matches!(class, Class::Slow | Class::Stalled) => {
+                            *stats.disconnects.entry(reason.to_string()).or_default() += 1;
+                            continue;
+                        }
+                        _ => return Err(format!("subscribe: {e}")),
+                    },
                 }
             }
         };
