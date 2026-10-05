@@ -134,6 +134,8 @@ export interface AuthErrorResponse {
   type: 'auth_error';
   id?: string;
   message: string;
+  /** `access_denied` when the credential may not use the knowledge graph. */
+  code?: ErrorCode;
 }
 
 export interface RuleTiming {
@@ -517,6 +519,8 @@ export interface SubscriptionErrorResponse {
   subscription: string;
   generation: number;
   message: string;
+  /** `access_denied` when the subscriber may no longer read the knowledge graph. */
+  code?: ErrorCode;
 }
 
 export interface NotificationResponse {

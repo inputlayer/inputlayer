@@ -200,7 +200,7 @@
       <tr><td>type</td><td>string</td><td>Always <code>"error"</code></td></tr>
       <tr><td>id</td><td>string?</td><td>The request's id, when it could be read</td></tr>
       <tr><td>message</td><td>string</td><td>Human-readable error message</td></tr>
-      <tr><td>code</td><td>string?</td><td><code>validation</code>, <code>not_found</code>, <code>conflict</code>, <code>unsupported</code>, <code>internal</code>, <code>invalid_request</code>, <code>rate_limited</code>, <code>deadline_exceeded</code>, <code>cancelled</code>, <code>outcome_unknown</code>, <code>store_read_only</code>, <code>resource_exhausted</code>, <code>precondition_failed</code> or <code>access_denied</code></td></tr>
+      <tr><td>code</td><td>string?</td><td><code>validation</code>, <code>not_found</code>, <code>conflict</code>, <code>unsupported</code>, <code>internal</code>, <code>invalid_request</code>, <code>rate_limited</code>, <code>deadline_exceeded</code>, <code>cancelled</code>, <code>outcome_unknown</code>, <code>store_read_only</code>, <code>resource_exhausted</code>, <code>precondition_failed</code>, <code>replica_unconfirmed</code> or <code>access_denied</code></td></tr>
     </table>
     <pre><code>{"type": "error", "id": "7", "message": "Knowledge graph 'missing' not found", "code": "not_found"}</code></pre>
   </div>
@@ -296,8 +296,8 @@
     <h4>subscription_error</h4>
   </div>
   <div class="msg-card-body">
-    <p>Re-evaluation of a standing query failed, or the subscriber may no longer read the knowledge graph. The subscription stays registered; its next delta is relative to the last result it received.</p>
-    <pre><code>{"type": "subscription_error", "subscription": "late", "generation": 1, "message": "Access denied"}</code></pre>
+    <p>Re-evaluation of a standing query failed, or the subscriber may no longer read the knowledge graph. The subscription stays registered; its next delta is relative to the last result it received. <code>code</code> is <code>access_denied</code> when read access was lost, and absent otherwise.</p>
+    <pre><code>{"type": "subscription_error", "subscription": "late", "generation": 1, "message": "Access denied", "code": "access_denied"}</code></pre>
   </div>
 </div>
 

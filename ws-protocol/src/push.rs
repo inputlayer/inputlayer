@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ErrorCode;
+
 /// One result row, values in column order.
 pub type Row = Vec<serde_json::Value>;
 
@@ -211,6 +213,9 @@ pub enum SubscriptionPush {
         subscription: String,
         generation: u64,
         message: String,
+        /// Why it failed, when known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<ErrorCode>,
     },
     /// The server ended the subscription because it could not deliver its
     /// next change (the change cannot be framed, or read access was lost).

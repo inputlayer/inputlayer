@@ -132,6 +132,10 @@ pub(super) async fn auth_error(
     message: String,
 ) -> bool {
     sender
-        .send_frame(&ServerFrame::AuthError { id, message })
+        .send_frame(&ServerFrame::AuthError {
+            id,
+            message,
+            code: None,
+        })
         .await
 }

@@ -77,9 +77,14 @@ async fn s15_tenants_and_scoped_keys_are_isolated() -> Checked<()> {
     for (reply, names) in refusals {
         refused(reply, "access_denied", names)?;
     }
-    match WsClient::connect_with_key(&engine, KG_B, &writer_key).await {
-        Err(Violation::Rejected(message)) if message.contains("Access denied") => {}
-        Err(other) => return Err(other),
+    match WsClient::try_connect_with_key(&engine, KG_B, &writer_key).await? {
+        Err(refusal) if refusal.code.as_deref() == Some("access_denied") => {}
+        Err(refusal) => {
+            return Err(Violation::Rejected(format!(
+                "a key scoped to tenant_a was refused on tenant_b without access_denied: \
+                 {refusal:?}"
+            )))
+        }
         Ok(_) => {
             return Err(Violation::Transport(
                 "a key scoped to tenant_a authenticated on tenant_b".to_string(),

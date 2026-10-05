@@ -119,6 +119,13 @@ class TestDeserializeAuthError:
         msg = deserialize_message(data)
         assert isinstance(msg, AuthErrorResponse)
         assert msg.message == "Bad creds"
+        assert msg.code is None
+
+    def test_access_denied_code(self):
+        data = json.dumps({"type": "auth_error", "message": "Access denied", "code": "access_denied"})
+        msg = deserialize_message(data)
+        assert isinstance(msg, AuthErrorResponse)
+        assert msg.code == "access_denied"
 
 
 class TestDeserializeResult:
@@ -375,6 +382,13 @@ class TestDeserializePushes:
             "message": "boom",
         }))
         assert isinstance(error, SubscriptionErrorResponse)
+        assert error.code is None
+        denied = deserialize_message(json.dumps({
+            "type": "subscription_error", "subscription": "live", "generation": 3,
+            "message": "Access denied", "code": "access_denied",
+        }))
+        assert isinstance(denied, SubscriptionErrorResponse)
+        assert denied.code == "access_denied"
 
     def test_streamed_delta_and_reset_frames(self):
         start = deserialize_message(json.dumps({

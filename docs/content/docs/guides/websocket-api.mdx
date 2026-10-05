@@ -72,6 +72,8 @@ On failure:
 }
 ```
 
+When the credential is valid but may not use the knowledge graph (it has no role on it, or its API key is scoped to another one), the `auth_error` also carries `"code": "access_denied"`.
+
 The server allows 30 seconds for authentication before closing the connection.
 
 The connection stays bound to the credential it authenticated with. See [Authentication: Revocation](authentication#revocation) for which credential changes and key expiries end a session and how they affect in-flight results and writes.
@@ -234,7 +236,7 @@ The reply to a program that changed persistent state of a knowledge graph also c
 }
 ```
 
-A program of one statement that fails gets an `error`. `code` says why: `validation`, `not_found`, `conflict`, `unsupported` or `internal`; `invalid_request` and `rate_limited` reject a request before it runs; `deadline_exceeded`, `cancelled` and `outcome_unknown` are described in [Deadlines and Cancellation](#deadlines-and-cancellation); `store_read_only` refuses a write while the store is read-only after an unknown outcome; `validation` also refuses a query whose plan would form a cross product past `storage.performance.max_query_cost` (before it runs), or whose recursion did not reach a fixpoint within `storage.performance.max_recursion_iterations` when it is set; `resource_exhausted` refuses a query that went over `storage.performance.max_query_memory_bytes`, or that grew while the server's queries held all of `storage.performance.max_total_query_memory_bytes`, or a write that would grow its knowledge graph past `storage.performance.max_graph_memory_bytes`, and nothing was applied. `precondition_failed` refuses a program whose `expect_revision` did not hold (see [Revision Preconditions](#revision-preconditions)). `access_denied` refuses a program or subscription the caller may not run: its role, its write grants or its API key's scope do not allow a statement, or its credential was revoked or has expired; nothing ran. It is absent for other engine failures. For write outcomes and restart recovery, see [Persistence](persistence#wal-record-format).
+A program of one statement that fails gets an `error`. `code` says why: `validation`, `not_found`, `conflict`, `unsupported` or `internal`; `invalid_request` and `rate_limited` reject a request before it runs; `deadline_exceeded`, `cancelled` and `outcome_unknown` are described in [Deadlines and Cancellation](#deadlines-and-cancellation); `store_read_only` refuses a write while the store is read-only after an unknown outcome; `validation` also refuses a query whose plan would form a cross product past `storage.performance.max_query_cost` (before it runs), or whose recursion did not reach a fixpoint within `storage.performance.max_recursion_iterations` when it is set; `resource_exhausted` refuses a query that went over `storage.performance.max_query_memory_bytes`, or that grew while the server's queries held all of `storage.performance.max_total_query_memory_bytes`, or a write that would grow its knowledge graph past `storage.performance.max_graph_memory_bytes`, and nothing was applied. `precondition_failed` refuses a program whose `expect_revision` did not hold (see [Revision Preconditions](#revision-preconditions)). `replica_unconfirmed` reports a write that committed on a primary shipping synchronously while no replica confirmed it in time; it is applied there, so do not retry it as a failed write. `access_denied` refuses a program or subscription the caller may not run: its role, its write grants or its API key's scope do not allow a statement, or its credential was revoked or has expired; nothing ran. It is absent for other engine failures. For write outcomes and restart recovery, see [Persistence](persistence#wal-record-format).
 
 ### Statement Failures
 
@@ -526,10 +528,10 @@ A delta whose frame would exceed 1 MiB arrives as one logical delta in several f
 If re-evaluation fails, or the subscriber may no longer read the knowledge graph (`.kg acl revoke`), the server pushes:
 
 ```json
-{"type": "subscription_error", "subscription": "late_orders", "generation": 3, "message": "Access denied"}
+{"type": "subscription_error", "subscription": "late_orders", "generation": 3, "message": "Access denied", "code": "access_denied"}
 ```
 
-The subscription stays registered; its next delta is relative to the last result it received. A subscriber that had not yet received the last complete result before the failure (it was reading slowly) first gets that result as a delta, then the error.
+`code` is `access_denied` when the subscriber may no longer read the knowledge graph, and absent for a failed re-evaluation. The subscription stays registered; its next delta is relative to the last result it received. A subscriber that had not yet received the last complete result before the failure (it was reading slowly) first gets that result as a delta, then the error.
 
 A result cut at `storage.performance.max_result_rows` is incomplete, so it is never delivered as a snapshot or diffed into a delta. When a re-evaluation's result grows past the cap, the server pushes a `subscription_error` naming the cap and keeps the last complete result. Once the result fits again, the next delta is relative to that last complete result, so applying it restores the current set.
 

@@ -705,7 +705,6 @@ async fn kg_access_revocation_stops_pushes_on_a_live_connection() {
     );
 }
 
-/// Run `program` over an admin `/ws` session; its `result` frame.
 /// A refused program or subscription is answered by an `error` frame with
 /// the code `access_denied`, whatever refused it: the caller's role on the
 /// knowledge graph, an admin-only command, or access revoked since it
@@ -746,6 +745,69 @@ async fn permission_refusals_reply_with_the_access_denied_code() {
     assert_eq!(server.handler.subscription_metrics().active(), 0);
 }
 
+/// Refusals outside an `error` frame carry `access_denied` too: the
+/// `subscription_error` pushed once a live subscriber may no longer read its
+/// knowledge graph, and the `auth_error` refusing a session on a knowledge
+/// graph the credential may not use. Failures that are not permission
+/// refusals carry no code.
+#[tokio::test(flavor = "multi_thread")]
+async fn refusals_on_push_and_auth_frames_carry_the_access_denied_code() {
+    let server = start_server_with(|config| {
+        config.storage.performance.max_result_rows = 3;
+    })
+    .await;
+    let key = server.key("bob-pushed", "bob");
+    let mut bob = Client::connect(&server, Login::Key(&key)).await;
+    let reply = bob.execute(".subscribe d ?d(X)").await;
+    assert_eq!(reply["type"], "result", "{reply}");
+    server.wait_for_active(1).await;
+
+    server.write("+d[(1,), (2,), (3,), (4,)]").await;
+    let (_, capped) = bob.frames_until("subscription_error").await;
+    assert!(
+        capped["message"]
+            .as_str()
+            .unwrap()
+            .contains("max_result_rows (3)"),
+        "{capped}"
+    );
+    assert_eq!(capped.get("code"), None, "{capped}");
+
+    server.handler.handle_kg_acl_revoke(KG, "bob").unwrap();
+    server.write("-d[(4,)]").await;
+    let (_, denied) = bob.frames_until("subscription_error").await;
+    assert_eq!(denied["code"], "access_denied", "{denied}");
+    assert_eq!(
+        denied["message"],
+        "Access denied to knowledge graph 'shared'. The subscription keeps its last \
+         delivered result; once access is restored, its next delta is relative to it.",
+        "{denied}"
+    );
+
+    let (_, reply) = Client::try_connect(&server, KG, Login::Key(&key)).await;
+    assert_eq!(reply["type"], "auth_error", "{reply}");
+    assert_eq!(reply["code"], "access_denied", "{reply}");
+    assert_eq!(reply["message"], "Access denied", "{reply}");
+
+    let (_, reply) = Client::try_connect(
+        &server,
+        "_internal",
+        Login::Password("admin", ADMIN_PASSWORD),
+    )
+    .await;
+    assert_eq!(reply["type"], "auth_error", "{reply}");
+    assert_eq!(reply["code"], "access_denied", "{reply}");
+    assert_eq!(
+        reply["message"], "Access denied: '_internal' is a system knowledge graph",
+        "{reply}"
+    );
+
+    let (_, reply) = Client::try_connect(&server, KG, Login::Password("bob", "wrong")).await;
+    assert_eq!(reply["type"], "auth_error", "{reply}");
+    assert_eq!(reply.get("code"), None, "{reply}");
+}
+
+/// Run `program` over an admin `/ws` session; its `result` frame.
 async fn admin_execute(server: &Server, program: &str) -> Value {
     let mut admin = Client::connect(server, Login::Password("admin", ADMIN_PASSWORD)).await;
     let reply = admin.execute(program).await;

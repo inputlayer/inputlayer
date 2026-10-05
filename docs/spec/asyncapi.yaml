@@ -1160,11 +1160,17 @@ components:
           format: int64
         message:
           type: string
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+          description: |
+            `access_denied` when the subscriber may no longer read the knowledge
+            graph. Absent for a failed re-evaluation.
       examples:
         - type: subscription_error
           subscription: late_orders
           generation: 1
           message: Access denied
+          code: access_denied
 
     SubscriptionDeltaStartResponse:
       type: object
@@ -1907,9 +1913,17 @@ components:
         message:
           type: string
           description: Human-readable authentication error
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+          description: |
+            `access_denied` when the credential is valid but may not use the
+            knowledge graph. Absent for failed credentials.
       examples:
         - type: auth_error
           message: "Invalid username or password"
+        - type: auth_error
+          message: "Access denied"
+          code: access_denied
 
     ResultResponse:
       type: object

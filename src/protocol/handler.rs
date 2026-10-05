@@ -1339,10 +1339,7 @@ impl Handler {
     pub fn create_session(&self, knowledge_graph: &str) -> Result<SessionId, String> {
         // Block direct access to the system KG
         if knowledge_graph == crate::auth::INTERNAL_KG {
-            return Err(format!(
-                "Access denied: '{}' is a system knowledge graph",
-                crate::auth::INTERNAL_KG
-            ));
+            return Err(internal_kg_denied());
         }
 
         // Validate KG exists (or auto-create if configured)
@@ -1360,14 +1357,17 @@ impl Handler {
         &self,
         knowledge_graph: &str,
         principal: &crate::auth::Principal,
-    ) -> Result<SessionId, String> {
+    ) -> Result<SessionId, ProgramError> {
         let auth = principal.identity()?;
         // Admins skip per-KG checks
         if auth.role != crate::auth::Role::Admin && self.kg_access(knowledge_graph, &auth).is_none()
         {
-            return Err("Access denied".to_string());
+            return Err(ProgramError::access_denied("Access denied".to_string()));
         }
-        self.create_session(knowledge_graph)
+        if knowledge_graph == crate::auth::INTERNAL_KG {
+            return Err(ProgramError::access_denied(internal_kg_denied()));
+        }
+        Ok(self.create_session(knowledge_graph)?)
     }
 
     /// Close a session.

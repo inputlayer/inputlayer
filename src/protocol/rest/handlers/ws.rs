@@ -347,8 +347,14 @@ async fn handle_global_ws_connection(
             id
         }
         Err(e) => {
-            warn!(kg = %kg, error = %e, "ws_session_create_failed");
-            auth::auth_error(&mut sender, auth_request, e).await;
+            warn!(kg = %kg, error = %e.message, "ws_session_create_failed");
+            sender
+                .send_frame(&ServerFrame::AuthError {
+                    id: auth_request,
+                    message: e.message,
+                    code: e.code,
+                })
+                .await;
             sender.close().await;
             return;
         }

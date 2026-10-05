@@ -55,6 +55,7 @@ export interface WsAuthErrorMessage {
   type: "auth_error"
   id?: string
   message: string
+  code?: WsErrorCode
 }
 
 // --- Proof Tree Types ---
@@ -301,6 +302,7 @@ export interface WsSubscriptionErrorMessage {
   subscription: string
   generation: number
   message: string
+  code?: WsErrorCode
 }
 
 /** The server ended a subscription it could not keep current; subscribe again. */

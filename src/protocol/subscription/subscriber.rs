@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use inputlayer_ws_protocol::{GroupMemberDelta, SubscriptionPush};
+use inputlayer_ws_protocol::{ErrorCode, GroupMemberDelta, SubscriptionPush};
 
 use super::publication::{
     Doorbell, Outcome, Publication, RowChange, SubscriberId, ViewCell, ViewResult,
@@ -146,16 +146,19 @@ impl Subscriber {
         }
         if !readable(&self.knowledge_graph) {
             self.seen = publication.number;
-            return Some(self.error(format!(
-                "Access denied to knowledge graph '{}'. The subscription keeps its last \
-                 delivered result; once access is restored, its next delta is relative to it.",
-                self.knowledge_graph
-            )));
+            return Some(self.error(
+                format!(
+                    "Access denied to knowledge graph '{}'. The subscription keeps its last \
+                     delivered result; once access is restored, its next delta is relative to it.",
+                    self.knowledge_graph
+                ),
+                Some(ErrorCode::AccessDenied),
+            ));
         }
         let changes = match &publication.outcome {
             Outcome::Failed(message) if publication.result_number == self.base_number => {
                 self.seen = publication.number;
-                return Some(self.error(message.clone()));
+                return Some(self.error(message.clone(), None));
             }
             Outcome::Delta { base, changes } if *base == self.base_number => changes.clone(),
             Outcome::Delta { .. } | Outcome::Snapshot | Outcome::Failed(_) => {
@@ -235,11 +238,12 @@ impl Subscriber {
         self.base_number = publication.result_number;
     }
 
-    fn error(&self, message: String) -> SubscriptionPush {
+    fn error(&self, message: String, code: Option<ErrorCode>) -> SubscriptionPush {
         SubscriptionPush::SubscriptionError {
             subscription: self.name.clone(),
             generation: self.generation,
             message,
+            code,
         }
     }
 }

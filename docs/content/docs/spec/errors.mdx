@@ -197,6 +197,8 @@ Code `access_denied`. The caller may not run the statement, and nothing ran. Eve
 - No access to the knowledge graph (`Access denied`), including the system knowledge graph
 - A credential that was revoked or has expired
 
+The code comes on whichever frame refuses: an `error` answering a request, the `auth_error` refusing a session on a knowledge graph, or the `subscription_error` pushed when a live subscription loses read access.
+
 Ask an owner of the knowledge graph for the role or grant (`.kg acl grant`), or use a credential that has it.
 
 ## Aggregation Errors
