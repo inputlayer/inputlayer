@@ -688,9 +688,12 @@ export class Connection {
     if (call.id && this.inFlight.get(call.id) === call) {
       // The engine's own deadline answers now; cancel in case it does not.
       this.sendCancel(call, 'deadline');
-      this.probeServer();
       call.graced = true;
+      // Arm the grace before the probe: both wait `timeoutGraceMs`, and each
+      // `setTimeout` reads the clock anew, so this order lets the call fail
+      // overdue before an unanswered probe drops the connection.
       this.armOverdue(call);
+      this.probeServer();
       return;
     }
     // Queued, or waiting to be resent after `rate_limited`: nothing ran.
