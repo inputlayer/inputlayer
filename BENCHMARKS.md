@@ -74,7 +74,7 @@ Base graph: 500 nodes, 1K edges, TC rules registered.
 
 Deleting 10 edges costs the same as a baseline query. Deleting 100 edges (10% of the graph) roughly doubles it - the re-query evaluates the recursive rules again over the changed graph.
 
-**No other IQL engine handles retraction through recursive fixpoints.** Souffle is append-only - once a fact is derived, it can never be removed. PostgreSQL materialized views require full recomputation (`REFRESH MATERIALIZED VIEW`). Neo4j has no materialized recursive views at all. InputLayer's results are correct after deletions through chains of recursive rules because every query recomputes from the current facts.
+**A re-query after a delete is correct without a full-closure refresh step.** Souffle is append-only - once a fact is derived, it can never be removed without re-running the program. PostgreSQL materialized views require full recomputation (`REFRESH MATERIALIZED VIEW`). Neo4j has no materialized recursive views at all. InputLayer's results are correct after deletions through chains of recursive rules because every query recomputes from the current facts.
 
 ---
 

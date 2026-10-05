@@ -225,11 +225,11 @@ Clear separation of concerns:
 
 | Syntax | Purpose | Persisted | Type Checking |
 |--------|---------|-----------|---------------|
-| `type` | Value type definitions | Yes | N/A |
+| `type` | Value type definitions | No | N/A |
 | `+name(col: type, ...)` | Schema declaration | Yes | **Yes** |
 | `+name(...) <- body` | Persistent rule (view, evaluated on each query) | Yes (rule catalog) | Only if schema exists |
 | `name(...) <- body` | Session rule (transient) | No | Only if schema exists |
-| `+`/`-` (facts) | Base data manipulation | Yes (WAL + relation store) | Only if schema exists |
+| `+`/`-` (facts) | Base data manipulation | Yes (WAL + Parquet) | Only if schema exists |
 
 Neither kind of rule stores its results: both are evaluated from the base facts on every query that reads them. Planned: persistent rules become incrementally maintained views ([#305](https://github.com/inputlayer/inputlayer/issues/305), not yet shipped).
 
