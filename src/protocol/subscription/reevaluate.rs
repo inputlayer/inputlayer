@@ -3,8 +3,8 @@
 //!
 //! Each evaluation pins the KG's current snapshot and runs the query on it
 //! through the normal query path ([`Handler::query_snapshot`]), which runs on
-//! the blocking pool under the query semaphore and reuses the query's compiled
-//! plan while the rules stay the same.
+//! the blocking pool under a standing-query permit and reuses the query's
+//! compiled plan while the rules stay the same.
 //!
 //! The evaluation runs for no one in particular: its rows depend only on the
 //! knowledge graph (data and persistent rules) and the query. Whoever receives
@@ -47,8 +47,8 @@ pub struct Evaluated {
     pub result: Arc<ResultSet>,
     pub dependencies: Dependencies,
     pub revision: u64,
-    /// Engine time of the evaluation, excluding waits for a compute permit
-    /// and compiling its plan.
+    /// Engine time of the evaluation, excluding waits for a permit and
+    /// compiling its plan.
     pub cost: Duration,
     /// Whether the evaluation reused a compiled plan: `cost` includes no
     /// compilation.
@@ -208,8 +208,8 @@ pub struct QueryRows {
     pub columns: Option<Vec<String>>,
     /// Every row, as the engine returned it (distinct as engine values).
     pub rows: Vec<Row>,
-    /// Engine time of the evaluation, excluding waits for a compute permit
-    /// and compiling its plan, plus converting its rows.
+    /// Engine time of the evaluation, excluding waits for a permit and
+    /// compiling its plan, plus converting its rows.
     pub cost: Duration,
     /// Whether the evaluation reused a compiled plan: `cost` includes no
     /// compilation.
