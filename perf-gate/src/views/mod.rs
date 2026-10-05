@@ -494,6 +494,17 @@ struct Arrival {
     at: Instant,
 }
 
+/// From a write sent at `start` to the last of its waiters' delta
+/// `arrivals`, which may come before the write's reply: `None` when a delta
+/// did not arrive in time, `Some(None)` without waiters.
+fn write_to_delta(
+    start: Instant,
+    arrivals: impl IntoIterator<Item = Option<Instant>>,
+) -> Option<Option<Duration>> {
+    let arrivals: Vec<Instant> = arrivals.into_iter().collect::<Option<_>>()?;
+    Some(arrivals.into_iter().max().map(|last| last - start))
+}
+
 /// One subscriber connection: a task reads its frames and publishes the
 /// latest delta it applied.
 struct Subscriber {
@@ -836,14 +847,13 @@ impl<'a> Bench<'a> {
             let (read_start, read_reply) = self.admin.execute(&format!("?r1({h},Y)")).await?;
             read.push(read_reply.at - read_start);
             let deadline = tokio::time::Instant::from_std(start + DELTA_TIMEOUT);
-            let mut last = Some(reply.at);
+            let mut arrivals = Vec::new();
             for waiter in waiters(i) {
-                let arrived = subs[waiter].reached(revision, deadline).await;
-                last = last.zip(arrived).map(|(a, b)| a.max(b));
+                arrivals.push(subs[waiter].reached(revision, deadline).await);
             }
-            match last {
-                Some(at) if !subs.is_empty() => delta.push(at - start),
-                Some(_) => {}
+            match write_to_delta(start, arrivals) {
+                Some(Some(took)) => delta.push(took),
+                Some(None) => {}
                 None => late += 1,
             }
         }
@@ -1140,6 +1150,22 @@ mod tests {
         let none = Counters::parse("inputlayer_queries_total 4\n");
         assert_eq!(none, Counters::default());
         assert_eq!(after.per(none, 30).rule_evaluations, None);
+    }
+
+    #[test]
+    fn write_to_delta_is_the_last_arrival_and_not_floored_at_the_ack() {
+        let start = Instant::now();
+        let at = |ms| Some(start + Duration::from_millis(ms));
+        assert_eq!(
+            write_to_delta(start, [at(3), at(7), at(5)]),
+            Some(Some(Duration::from_millis(7)))
+        );
+        assert_eq!(
+            write_to_delta(start, [at(1)]),
+            Some(Some(Duration::from_millis(1)))
+        );
+        assert_eq!(write_to_delta(start, [at(3), None]), None);
+        assert_eq!(write_to_delta(start, []), Some(None));
     }
 
     #[test]
