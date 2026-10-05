@@ -16,6 +16,8 @@ pub struct Profile {
     pub delta_fanout: DeltaParams,
     pub delta_first: FirstDeltaParams,
     pub interference: InterferenceParams,
+    /// The engine suite's fixtures (not gated; see `fixtures::engine`).
+    pub engine: EngineParams,
 }
 
 /// A warm read query: a serial latency phase, then a concurrent throughput phase.
@@ -70,6 +72,141 @@ pub struct InterferenceParams {
     pub delta: DeltaParams,
     /// Large results the slow consumer requests and never reads.
     pub slow_consumer_requests: usize,
+}
+
+/// Parameters of the engine suite: the cases the gate's fixtures leave out.
+#[derive(Debug, Clone, Serialize)]
+pub struct EngineParams {
+    /// `?two_hop(1, Z)`: a warm non-recursive rule, bound.
+    pub rule_query: QueryParams,
+    /// `?reach(X, Y)`: the whole transitive closure, unbound.
+    pub unbound_query: QueryParams,
+    pub writes: WriteParams,
+    pub claims: ClaimParams,
+    pub why: WhyParams,
+    pub sessions: SessionParams,
+    pub memory: MemoryParams,
+    pub recovery: RecoveryParams,
+}
+
+/// Durable retractions and conditional writes against preloaded facts.
+#[derive(Debug, Clone, Serialize)]
+pub struct WriteParams {
+    pub preload: usize,
+    /// Serial plain deletes, then as many conditional deletes and updates.
+    pub each: usize,
+}
+
+/// Guarded inserts (`claim`): wins, losses, and racers on one key.
+#[derive(Debug, Clone, Serialize)]
+pub struct ClaimParams {
+    /// Serial claims of fresh keys (each wins), then of the same keys (each loses).
+    pub serial: usize,
+    /// Connections racing for each contested key.
+    pub racers: usize,
+    pub contested_keys: usize,
+}
+
+/// `.why` proofs of a non-recursive and a recursive rule.
+#[derive(Debug, Clone, Serialize)]
+pub struct WhyParams {
+    pub nodes: u64,
+    pub edges: usize,
+    pub warmup: usize,
+    pub serial: usize,
+}
+
+/// Many sessions, each subscribed to its own bound standing query, in one
+/// knowledge graph; one external writer touches one session per write.
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionParams {
+    pub nodes: u64,
+    pub edges: usize,
+    pub sessions: usize,
+    pub writes: usize,
+    pub interval_ms: u64,
+}
+
+/// Resident memory: idle, per loaded knowledge graph, per base fact.
+#[derive(Debug, Clone, Serialize)]
+pub struct MemoryParams {
+    pub nodes: u64,
+    pub edges: usize,
+    pub graphs: usize,
+    /// Facts loaded into one more graph to measure bytes per fact.
+    pub facts: usize,
+}
+
+/// Crash (SIGKILL) and restart on the same data directory.
+#[derive(Debug, Clone, Serialize)]
+pub struct RecoveryParams {
+    pub nodes: u64,
+    pub edges: usize,
+    /// Durable facts written in batches before the first crash.
+    pub facts: usize,
+    pub batch_size: usize,
+    pub restarts: usize,
+}
+
+impl EngineParams {
+    /// The engine suite at the standard profile's sizes.
+    fn standard() -> Self {
+        Self {
+            rule_query: QueryParams {
+                nodes: 2_500,
+                edges: 10_000,
+                warmup: 20,
+                serial: 300,
+                clients: 8,
+                per_client: 100,
+            },
+            // A closure of 11,785 rows, under the default 100K result cap.
+            unbound_query: QueryParams {
+                nodes: 200,
+                edges: 300,
+                warmup: 3,
+                serial: 40,
+                clients: 4,
+                per_client: 10,
+            },
+            writes: WriteParams {
+                preload: 2_000,
+                each: 150,
+            },
+            claims: ClaimParams {
+                serial: 150,
+                racers: 8,
+                contested_keys: 40,
+            },
+            why: WhyParams {
+                nodes: 200,
+                edges: 300,
+                warmup: 1,
+                serial: 20,
+            },
+            sessions: SessionParams {
+                nodes: 2_500,
+                edges: 10_000,
+                sessions: 100,
+                writes: 100,
+                interval_ms: 200,
+            },
+            memory: MemoryParams {
+                nodes: 2_500,
+                edges: 10_000,
+                graphs: 8,
+                // Under the default 100K result cap: the fixture reads them all.
+                facts: 90_000,
+            },
+            recovery: RecoveryParams {
+                nodes: 2_500,
+                edges: 10_000,
+                facts: 50_000,
+                batch_size: 1_000,
+                restarts: 3,
+            },
+        }
+    }
 }
 
 impl Profile {
@@ -136,6 +273,7 @@ impl Profile {
                 },
                 slow_consumer_requests: 8,
             },
+            engine: EngineParams::standard(),
         }
     }
 
@@ -157,6 +295,22 @@ impl Profile {
         profile.delta_fanout.subscribers /= 4;
         profile.delta_first.cycles /= 4;
         profile.interference.delta.writes /= 5;
+        let engine = &mut profile.engine;
+        for query in [&mut engine.rule_query, &mut engine.unbound_query] {
+            query.warmup = 1;
+            query.serial /= 5;
+            query.per_client /= 5;
+        }
+        engine.writes.each /= 5;
+        engine.claims.serial /= 5;
+        engine.claims.contested_keys /= 4;
+        engine.why.serial /= 4;
+        engine.sessions.sessions /= 4;
+        engine.sessions.writes /= 4;
+        engine.memory.graphs /= 2;
+        engine.memory.facts /= 10;
+        engine.recovery.facts /= 5;
+        engine.recovery.restarts = 1;
         profile
     }
 }

@@ -2,6 +2,7 @@
 //! raw samples, and verifies every result it times.
 
 mod delta;
+mod engine;
 mod first_delta;
 mod insert;
 mod interference;
@@ -39,10 +40,54 @@ pub enum Fixture {
     DeltaFirst,
     /// Writer to a probe agent, beside a long request and a slow consumer.
     Interference,
+    // The engine suite (not gated; see `engine`).
+    /// Warm bound non-recursive rule (`?two_hop(1, Z)`).
+    RuleQuery,
+    /// Whole transitive closure (`?reach(X, Y)`).
+    UnboundQuery,
+    /// Durable deletes, conditional deletes and conditional updates.
+    Writes,
+    /// Guarded inserts: wins, losses and racing connections.
+    Claims,
+    /// `.why` proofs of a non-recursive and a recursive rule.
+    Why,
+    /// Many sessions with their own bound standing queries in one graph.
+    Sessions,
+    /// Resident memory per base fact.
+    MemoryFacts,
+    /// Resident memory per knowledge graph.
+    MemoryGraphs,
+    /// Crash and restart on the same data directory.
+    Recovery,
+    /// `insert_single` with asynchronous durability: the WAL's share.
+    InsertAsync,
 }
 
 impl Fixture {
-    pub const ALL: [Fixture; 8] = [
+    /// Every fixture, by name.
+    pub const ALL: [Fixture; 18] = [
+        Fixture::CheapQuery,
+        Fixture::BoundQuery,
+        Fixture::InsertSingle,
+        Fixture::InsertBatch,
+        Fixture::DeltaSingle,
+        Fixture::DeltaFanout,
+        Fixture::DeltaFirst,
+        Fixture::Interference,
+        Fixture::RuleQuery,
+        Fixture::UnboundQuery,
+        Fixture::Writes,
+        Fixture::Claims,
+        Fixture::Why,
+        Fixture::Sessions,
+        Fixture::MemoryFacts,
+        Fixture::MemoryGraphs,
+        Fixture::Recovery,
+        Fixture::InsertAsync,
+    ];
+
+    /// The gate's fixtures: the default of `run`, and what the policy judges.
+    pub const GATE: [Fixture; 8] = [
         Fixture::CheapQuery,
         Fixture::BoundQuery,
         Fixture::InsertSingle,
@@ -63,6 +108,38 @@ impl Fixture {
             Fixture::DeltaFanout => "delta_fanout",
             Fixture::DeltaFirst => "delta_first",
             Fixture::Interference => "interference",
+            Fixture::RuleQuery => "rule_query",
+            Fixture::UnboundQuery => "unbound_query",
+            Fixture::Writes => "writes",
+            Fixture::Claims => "claims",
+            Fixture::Why => "why",
+            Fixture::Sessions => "sessions",
+            Fixture::MemoryFacts => "memory_facts",
+            Fixture::MemoryGraphs => "memory_graphs",
+            Fixture::Recovery => "recovery",
+            Fixture::InsertAsync => "insert_async",
+        }
+    }
+
+    /// Fixtures named by `name`: one fixture, or the group `gate`, `engine`
+    /// (the engine suite) or `all`.
+    pub fn parse_group(name: &str) -> Result<Vec<Self>> {
+        Ok(match name {
+            "gate" => Self::GATE.to_vec(),
+            "engine" => Self::ALL
+                .into_iter()
+                .filter(|f| !Self::GATE.contains(f))
+                .collect(),
+            "all" => Self::ALL.to_vec(),
+            _ => vec![Self::parse(name)?],
+        })
+    }
+
+    /// Environment this fixture's server needs on top of the gate's overrides.
+    pub fn server_env(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Fixture::InsertAsync => &[engine::ASYNC_DURABILITY],
+            _ => &[],
         }
     }
 
@@ -74,16 +151,29 @@ impl Fixture {
     }
 
     /// Run against `server` (fresh, empty) with `profile`'s parameters.
-    pub async fn run(self, server: &RunningServer, profile: &Profile) -> Result<Measurement> {
+    pub async fn run(self, server: &mut RunningServer, profile: &Profile) -> Result<Measurement> {
+        let engine = &profile.engine;
         let mut measurement = match self {
             Fixture::CheapQuery => query::cheap(server, &profile.cheap_query).await,
             Fixture::BoundQuery => query::bound(server, &profile.bound_query).await,
-            Fixture::InsertSingle => insert::single(server, &profile.insert).await,
+            // The same workload; `server_env` makes the async server.
+            Fixture::InsertSingle | Fixture::InsertAsync => {
+                insert::single(server, &profile.insert).await
+            }
             Fixture::InsertBatch => insert::batch(server, &profile.insert).await,
             Fixture::DeltaSingle => delta::run(server, &profile.delta_single).await,
             Fixture::DeltaFanout => delta::run(server, &profile.delta_fanout).await,
             Fixture::DeltaFirst => first_delta::run(server, &profile.delta_first).await,
             Fixture::Interference => interference::run(server, &profile.interference).await,
+            Fixture::RuleQuery => engine::rule_query(server, &engine.rule_query).await,
+            Fixture::UnboundQuery => engine::unbound_query(server, &engine.unbound_query).await,
+            Fixture::Writes => engine::writes(server, &engine.writes).await,
+            Fixture::Claims => engine::claims(server, &engine.claims).await,
+            Fixture::Why => engine::why(server, &engine.why).await,
+            Fixture::Sessions => engine::sessions(server, &engine.sessions).await,
+            Fixture::MemoryFacts => engine::memory_facts(server, &engine.memory).await,
+            Fixture::MemoryGraphs => engine::memory_graphs(server, &engine.memory).await,
+            Fixture::Recovery => engine::recovery(server, &engine.recovery).await,
         }?;
         if let Some(rss) = server.peak_rss_kb() {
             measurement.gauges.insert("server_peak_rss_kb".into(), rss);

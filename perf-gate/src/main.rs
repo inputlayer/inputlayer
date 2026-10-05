@@ -22,6 +22,7 @@ mod schema;
 mod server;
 mod sessions;
 mod stats;
+mod summary;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -55,6 +56,17 @@ enum Command {
     Genbi(genbi::GenbiArgs),
     /// Measure standing-query cost as sessions grow (voice-agent pack).
     Sessions(sessions::SessionsArgs),
+    /// Absolute numbers from a run file (a baseline table), not a verdict;
+    /// exit 3 when a fixture run failed.
+    Summary(SummaryArgs),
+}
+
+#[derive(clap::Args)]
+struct SummaryArgs {
+    run: PathBuf,
+    /// Arms to include (default: all; an A/A run's arms are one binary).
+    #[arg(long, value_delimiter = ',')]
+    arms: Vec<String>,
 }
 
 #[derive(clap::Args)]
@@ -76,7 +88,8 @@ struct RunArgs {
     /// Rounds per arm.
     #[arg(long, default_value_t = 10)]
     rounds: u32,
-    /// Comma-separated fixture subset (default: all).
+    /// Comma-separated fixtures or groups: `gate` (the default), `engine`
+    /// (the engine suite, not gated) or `all`.
     #[arg(long, value_delimiter = ',')]
     fixtures: Vec<String>,
     /// Pin servers to this `taskset -c` CPU list.
@@ -112,6 +125,7 @@ fn main() -> ExitCode {
         Command::Compare(args) => compare(&args),
         Command::Genbi(args) => genbi::run(&args),
         Command::Sessions(args) => sessions::run(&args),
+        Command::Summary(args) => summarize(&args),
     };
     result.unwrap_or_else(|e| {
         eprintln!("perf-gate: {e:#}");
@@ -123,12 +137,17 @@ fn run(args: &RunArgs) -> Result<()> {
     let profile = Profile::named(&args.profile)
         .with_context(|| format!("unknown profile '{}'", args.profile))?;
     let fixtures = if args.fixtures.is_empty() {
-        Fixture::ALL.to_vec()
+        Fixture::GATE.to_vec()
     } else {
-        args.fixtures
-            .iter()
-            .map(|name| Fixture::parse(name))
-            .collect::<Result<_>>()?
+        let mut fixtures: Vec<Fixture> = Vec::new();
+        for name in &args.fixtures {
+            for fixture in Fixture::parse_group(name)? {
+                if !fixtures.contains(&fixture) {
+                    fixtures.push(fixture);
+                }
+            }
+        }
+        fixtures
     };
     std::fs::create_dir_all(&args.data_root)
         .with_context(|| format!("create {}", args.data_root.display()))?;
@@ -206,6 +225,17 @@ fn compare(args: &CompareArgs) -> Result<ExitCode> {
         Status::Inconclusive => 2,
         Status::Invalid => 3,
     }))
+}
+
+/// Exit 0, or 3 when a fixture run failed (it is listed, not summarized).
+fn summarize(args: &SummaryArgs) -> Result<ExitCode> {
+    let text = std::fs::read_to_string(&args.run)
+        .with_context(|| format!("read {}", args.run.display()))?;
+    let record: RunRecord =
+        serde_json::from_str(&text).with_context(|| format!("parse {}", args.run.display()))?;
+    print!("{}", summary::markdown(&record, &args.arms));
+    let failed = record.runs.iter().any(|run| run.error.is_some());
+    Ok(ExitCode::from(if failed { 3 } else { 0 }))
 }
 
 /// Resolves on SIGINT or SIGTERM.

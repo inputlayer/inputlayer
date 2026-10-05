@@ -10,10 +10,14 @@
 #   --profile NAME        standard (default) or quick (smoke only, never passes)
 #   --fixtures LIST       comma-separated fixture subset (default: all)
 #   --server-cpus LIST    pin servers with taskset -c LIST
+#   --gate-cpus LIST      pin the gate's own clients with taskset -c LIST
+#   --no-verdict          only measure and summarize (the engine suite)
 #
 # Exit status: 0 pass, 1 fail, 2 inconclusive, 3 invalid (or a setup error).
-# The run file (all raw samples), report.md and verdict.json land in
-# target/perf-gate/runs/<utc-time>/; target/perf-gate/latest points there.
+# With --no-verdict: 0, or 3 when a fixture run failed.
+# The run file (all raw samples), report.md, verdict.json and summary.md
+# (absolute numbers) land in target/perf-gate/runs/<utc-time>/;
+# target/perf-gate/latest points there.
 set -euo pipefail
 
 ROOT=$(git rev-parse --show-toplevel)
@@ -23,14 +27,18 @@ OUT=$ROOT/target/perf-gate
 BASELINE_REV=""
 CANDIDATE_BIN=""
 AA=0
+NO_VERDICT=0
 RUN_ARGS=()
+GATE_PIN=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --baseline-rev) BASELINE_REV=$2; shift 2 ;;
         --candidate-bin) CANDIDATE_BIN=$2; shift 2 ;;
         --aa) AA=1; shift ;;
         --rounds|--profile|--fixtures|--server-cpus) RUN_ARGS+=("$1" "$2"); shift 2 ;;
-        -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+        --gate-cpus) GATE_PIN=(taskset -c "$2"); shift 2 ;;
+        --no-verdict) NO_VERDICT=1; shift ;;
+        -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
         *) echo "perf-gate: unknown option $1" >&2; exit 3 ;;
     esac
 done
@@ -83,7 +91,7 @@ fi
 RUN_DIR=$OUT/runs/$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p "$RUN_DIR"
 echo "=== Measure (baseline $BASELINE_SHA vs candidate $CANDIDATE_LABEL) ==="
-"$GATE" run \
+"${GATE_PIN[@]}" "$GATE" run \
     --baseline "$BASELINE_BIN" --baseline-label "$BASELINE_SHA" \
     --candidate "$CANDIDATE_BIN" --candidate-label "$CANDIDATE_LABEL" \
     --data-root "$RUN_DIR/servers" \
@@ -91,6 +99,15 @@ echo "=== Measure (baseline $BASELINE_SHA vs candidate $CANDIDATE_LABEL) ==="
     --out "$RUN_DIR/run.json" \
     "${RUN_ARGS[@]}"
 ln -sfn "$RUN_DIR" "$OUT/latest"
+
+STATUS=0
+"$GATE" summary "$RUN_DIR/run.json" > "$RUN_DIR/summary.md" || STATUS=$?
+if [ "$NO_VERDICT" = 1 ]; then
+    cat "$RUN_DIR/summary.md"
+    echo ""
+    echo "Summary: $RUN_DIR/summary.md"
+    exit "$STATUS"
+fi
 
 echo "=== Judge ==="
 STATUS=0

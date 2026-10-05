@@ -16,7 +16,39 @@ scripts/perf-gate.sh --help             # all options
 ```
 
 The report lands in `target/perf-gate/latest/report.md`. Next to it are
-`run.json`, which holds every raw sample, and `verdict.json`.
+`run.json`, which holds every raw sample, `verdict.json`, and `summary.md`
+(the absolute numbers of each arm, from `perf-gate summary <run.json>`).
+
+## The benchmark host
+
+Heavy perf runs go to the dedicated benchmark host, `sam-dev-benchmarks`
+(32 vCPU AMD EPYC-Genoa, 125 GB, nothing else running), not to a shared
+development box. On the development box, run only the mandatory fast checks
+and send the measurement there:
+
+```bash
+make perf-gate-remote                           # the gate for HEAD (commit first)
+make perf-gate-remote REV=<commit> PERF_GATE_ARGS="--aa --rounds 20"
+make pre-pr PRE_PR_PERF=perf-gate-remote        # pre-pr with the gate measured there
+make bench-engine-remote REV=origin/main        # the engine suite (below), not judged
+make bench-sessions-remote REV=origin/main      # the session-scale benchmark (below)
+```
+
+`scripts/perf-gate-remote.sh` fetches the commit into the host's clone
+(`~/bench/inputlayer`), or pushes it there when origin does not have it yet,
+checks it out, builds release binaries there, runs `scripts/perf-gate.sh`
+detached (a dropped connection does not stop it; `--attach <stamp>`
+collects it), and copies `run.json`, `report.md`, `verdict.json`,
+`summary.md`, the log and `bench.txt` back to
+`target/perf-gate/remote/<stamp>/` (`target/perf-gate/remote/latest`). It
+follows the host's rules (`~/README-bench.txt`): one benchmark at a time (a
+lock, and a refusal while any `inputlayer-server` runs), `nproc`, the commit
+and the command recorded in `bench.txt` with every result, and no server left
+running afterwards. The lock is `~/perf-gate-remote/lock` on the host: any
+other benchmark there should hold it too (`flock`), and `--wait-lock
+<seconds>` queues a run behind one that does. The gate's clients run on CPUs 0-7 and the servers on
+8-31, whole SMT core pairs each (`--gate-cpus`, `--server-cpus`).
+`PERF_GATE_HOST` selects another host.
 
 ## How it measures
 
@@ -77,6 +109,34 @@ reply.)
 The `quick` profile is for developing the gate. It has too few samples for
 p99 and therefore never passes.
 
+## Engine suite (not gated)
+
+The gate's fixtures cover protocol overhead, a bound recursive query,
+durable inserts and write-to-delta latency. The engine suite measures what
+they leave out, with the same harness, servers and correctness checks. Its
+fixtures are not in the policy's `required` set: they are measured and
+reported, not gated. `--fixtures engine` runs them, `--fixtures all` runs
+both groups, and the default stays the gate's eight.
+
+| Fixture | Workload (profile `standard`) | Series / rates / gauges |
+|---|---|---|
+| `rule_query` | warm `?two_hop(1, Z)` (non-recursive join rule) on 2.5K nodes / 10K edges: 300 serial, 8 clients x 100 | `latency_us`, `concurrent_latency_us`, `queries_per_sec` |
+| `unbound_query` | `?reach(X, Y)`, the whole transitive closure of 200 nodes / 300 edges (about 12K rows): 40 serial, 4 x 10 | same |
+| `writes` | 150 durable deletes `-event(i, i)`, 150 conditional deletes `-event(X, Y) <- event(X, Y), X = i`, 150 conditional updates `-event(K, V), +event(K, 0) <- event(K, V), K = i` | `delete_ack_us`, `conditional_delete_ack_us`, `update_ack_us` |
+| `claims` | the guarded insert an SDK `claim()` sends (`-il_ghost(0), +claim(K, o) <- task(K), K = k, !claim(K, _)`): 150 wins on fresh keys, 150 losses on held keys, then 8 connections racing for each of 40 keys (exactly one winner each, checked) | `win_ack_us`, `lose_ack_us`, `race_ack_us` |
+| `why` | `.why ?two_hop(1, Z)` and `.why ?reach(1, Y)` on 200 nodes / 300 edges, 20 each | `two_hop_us`, `reach_us` |
+| `sessions` | 100 sessions in one graph (2.5K nodes / 10K edges), session `k` subscribed to `?two_hop(k, Z)`; an external writer, open loop, every 200 ms, 100 writes, each changing one session's answer | `delta_us` (write to the target session's delta), `ack_us`, `subscribe_us`, `subscriptions_per_sec`, `rss_per_session_kb` |
+| `memory_facts` | a fresh server: 90K two-integer facts loaded, then read back | `rss_idle_kb`, `rss_bytes_per_fact` (after loading), `peak_bytes_per_fact` (high-water mark after reading them back) |
+| `memory_graphs` | a fresh server: 8 graphs of 2.5K nodes / 10K edges with the two-hop rule, each queried once | `rss_idle_kb`, `rss_first_graph_kb`, `rss_per_graph_kb` (mean growth over the next 7) |
+| `recovery` | 10K edges, the two-hop rule and 50K durable facts in 1K batches; then 3 times: SIGKILL, restart on the same data directory | `restart_ready_us` (kill to first accepted login), `first_query_us` (first `?two_hop(1, Z)` after it; every fact is checked) |
+| `insert_async` | `insert_single` on a server with `storage.persist.durability_mode = async` (recorded in the run file): with `insert_single`, the synchronous WAL's share of a write | as `insert_single` |
+
+`delta_single`, `delta_fanout` and `delta_first` already cover write-to-delta
+latency with one and with 64 agents on one query; `sessions` adds many
+sessions with different bound queries in one graph, at a gentle write rate.
+The session-scale benchmark (below) loads them until they saturate. Every fixture records
+`server_peak_rss_kb`.
+
 ## How it judges
 
 The policy lives in `policy.toml`. The unit of replication is the round:
@@ -127,7 +187,16 @@ other CPUs. Per-PR CI does not measure: a shared runner is too noisy to
 give a verdict, so the fast gate only lints and tests the tool
 (`make perf-gate-check`).
 
-## At release checkpoints (CI)
+## At release checkpoints
+
+At a release checkpoint, run the heavy measurements on the benchmark host:
+the gate against the approved baseline (`make perf-gate-remote REV=<checkpoint>
+PERF_GATE_ARGS="--rounds 20"`) and the engine suite (`make
+bench-engine-remote REV=<checkpoint>`), and keep the benchmark host busy
+with them between checkpoints rather than measuring on a development box.
+The CI job below measures the same commit on a hosted runner.
+
+### CI
 
 The full suite (`.github/workflows/full-suite.yml`, job `Performance gate`)
 runs the gate on every release checkpoint, on a dedicated 32-vCPU runner
@@ -301,12 +370,18 @@ concurrent password logins from one address are throttled by design.
   server CPU (user plus system, from `/proc`) over the loaded window, plus
   peak RSS.
 
-A run fails when a probe's delta does not arrive within 10 s, when any delta
-arrives that no probe caused, or on an error. `--max-delta-p99-ms`
+A probe waits 10 s for its delta. A delta that comes later still counts, as
+**late**: it is reported with its latency (`late_delta_ms`) but kept out of
+the latency summaries. Once the load stops, overdue probes get 60 s more.
+A run fails when a probe's delta never arrives (**missing**), when any delta
+arrives that no probe caused (**stray**), or on an error. A saturated server
+can be late, never missing or stray. `--max-delta-p99-ms`
 additionally fails the working tree's run at any size up to
-`--budget-sessions` whose loaded write-to-delta p99 is over budget.
+`--budget-sessions` whose loaded write-to-delta p99 is over budget or that
+has any late delta (a late delta is over any budget below the probe timeout).
 `target/bench-sessions/latest/` holds `result.json` (schema
-`inputlayer-perf-gate/sessions/v1`) and `summary.md`.
+`inputlayer-perf-gate/sessions/v2`; v1 counted late deltas as missing and
+then stray) and `summary.md`.
 
 ## Extending
 

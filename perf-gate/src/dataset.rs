@@ -67,6 +67,11 @@ impl Graph {
         seen.len()
     }
 
+    /// Rows of the whole closure `reach(X, Y)` over nodes `1..=nodes`.
+    pub fn closure(&self, nodes: u64) -> usize {
+        (1..=nodes).map(|node| self.reachable(node)).sum()
+    }
+
     /// Distinct `z` with `edge(src, y), edge(y, z)` (`two_hop(src, Z)`).
     pub fn two_hop(&self, src: u64) -> usize {
         self.successors(src)
@@ -128,6 +133,8 @@ pub const TWO_HOP_RULE: &str = "+two_hop(X, Z) <- edge(X, Y), edge(Y, Z)";
 mod tests {
     use super::*;
 
+    const SEED_FOR_TESTS: u64 = crate::profile::SEED;
+
     fn line() -> Graph {
         let mut g = Graph {
             edges: BTreeSet::new(),
@@ -165,6 +172,15 @@ mod tests {
         assert_eq!(a.edges, b.edges);
         assert_eq!(a.edges.len(), 300);
         assert!(a.edges.iter().all(|&(s, d)| s != d && s >= 1 && d <= 100));
+    }
+
+    #[test]
+    fn engine_suite_graphs_stay_under_the_result_cap() {
+        let g = Graph::random(200, 300, SEED_FOR_TESTS);
+        let closure = g.closure(200);
+        assert!(closure > 1_000 && closure < 100_000, "closure {closure}");
+        assert!(g.reachable(1) > 0);
+        assert!(g.two_hop(1) > 0);
     }
 
     #[test]

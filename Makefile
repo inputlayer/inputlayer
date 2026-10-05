@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check perf-gate-remote bench-engine-remote bench-sessions-remote secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -599,7 +599,10 @@ lint:
 # then the same-host performance gate. Formatting always runs; PRE_PR_BASE
 # routes Rust inputs to lint, workspace tests and affected snapshots, SDK
 # inputs to their tests (plus JS type checking), perf-gate/ to its checks, and
-# Makefile or scripts/ changes to the pre-pr gate's own tests.
+# Makefile or scripts/ changes to the pre-pr gate's own tests. On a shared
+# development box, measure on the benchmark host instead (commit first):
+# make pre-pr PRE_PR_PERF=perf-gate-remote.
+PRE_PR_PERF ?= perf-gate
 PRE_PR_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null)
 PRE_PR_RUST_INPUTS := src tests benches examples gateway ontology-client testkit ws-protocol docs/spec Cargo.toml Cargo.lock config.toml clippy.toml Makefile scripts/test-affected.sh scripts/run_snapshot_tests.sh
 pre-pr:
@@ -626,7 +629,7 @@ pre-pr:
 		targets="$$targets pre-pr-selftest"; \
 	fi; \
 	$(MAKE) --no-print-directory -j6 --output-sync=target $$targets
-	$(MAKE) --no-print-directory perf-gate
+	$(MAKE) --no-print-directory $(PRE_PR_PERF)
 
 pre-pr-snapshots:
 	./scripts/test-affected.sh "$(PRE_PR_BASE)"
@@ -642,6 +645,24 @@ pre-pr-selftest:
 # Pass options through PERF_GATE_ARGS, e.g. PERF_GATE_ARGS="--aa".
 perf-gate:
 	./scripts/perf-gate.sh $(PERF_GATE_ARGS)
+
+# The same gate on the dedicated benchmark host (PERF_GATE_HOST, default
+# sam-dev-benchmarks) for commit REV (default HEAD); results are copied to
+# target/perf-gate/remote/latest. Heavy perf runs go there, not to a shared
+# development box; see perf-gate/README.md.
+REV ?= HEAD
+perf-gate-remote:
+	./scripts/perf-gate-remote.sh --rev $(REV) $(PERF_GATE_ARGS)
+
+# The engine suite (perf-gate/README.md) on the benchmark host: absolute
+# numbers for commit REV's server, measured A/A, summarized, not judged.
+bench-engine-remote:
+	./scripts/perf-gate-remote.sh --aa --baseline-rev $(REV) --fixtures engine --no-verdict $(PERF_GATE_ARGS)
+
+# The session-scale benchmark (bench-sessions) for commit REV on the
+# benchmark host; options via SESSIONS_ARGS as for bench-sessions.
+bench-sessions-remote:
+	./scripts/perf-gate-remote.sh --rev $(REV) --bench sessions -- $(SESSIONS_ARGS)
 
 # Reactive agent benchmark on the genbi-trust suite (read in place from
 # GENBI_TRUST_DIR); see perf-gate/README.md. Options via GENBI_ARGS, e.g.

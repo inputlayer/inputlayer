@@ -217,6 +217,53 @@ Refresh cost no longer grows with KG size. Recovery pays for building the dedup 
 
 ---
 
+## Engine Baseline (2026-10-04)
+
+A separate, dated baseline of the engine alone, end to end over its WebSocket
+protocol (not Criterion): main `25058f16` on the dedicated benchmark host
+`sam-dev-benchmarks` (AMD EPYC-Genoa, `nproc` 32, 125 GB, server pinned to
+CPUs 8-31), measured with the perf-gate harness, `make bench-engine-remote`
+and `make perf-gate-remote`. Medians over runs of each run's p50 and p99.
+The tables above were measured elsewhere, on other hardware and with
+another method, and are unchanged. The full tables, every command, and the
+raw samples are in
+[`perf-gate/baselines/engine-baseline-2026-10-04.md`](perf-gate/baselines/engine-baseline-2026-10-04.md).
+
+| What | p50 | p99 |
+|---|---|---|
+| Query, base relation (`?edge(1, Y)`, 4K edges) | 0.366 ms | 0.408 ms |
+| Query, non-recursive rule (`?two_hop(1, Z)`, 10K edges) | 2.00 ms | 2.20 ms |
+| Query, bound recursive rule (`?reach(1, Y)`, 4K edges) | 8.36 ms | 8.64 ms |
+| Query, whole closure (`?reach(X, Y)`, 11,785 rows) | 45.5 ms | 46.0 ms |
+| Durable insert, one fact | 1.56 ms | 7.01 ms |
+| Durable insert, 1,000-fact batch | 3.88 ms | 16.6 ms |
+| Durable delete, one fact | 1.95 ms | 7.49 ms |
+| Conditional update, one fact | 2.11 ms | 8.19 ms |
+| Guarded insert (`claim`): win / lose | 1.89 / 0.43 ms | 7.15 / 0.49 ms |
+| Write to delta, 1 agent | 7.23 ms | 13.5 ms |
+| Write to delta, 64 agents on one query | 7.99 ms | 15.0 ms |
+| Write to delta, 100 sessions with their own bound queries | 8.30 ms | 14.1 ms |
+| `.why` proof, non-recursive / recursive rule | 3.38 ms / 1.67 s | 3.52 ms / 1.68 s |
+| Crash recovery to first login (10K edges, 50K facts) | 104 ms | 154 ms |
+
+Throughput: 13,244 base-relation queries/s and 899 bound recursive
+queries/s from 8 clients; 560 durable single-fact inserts/s serially and
+177,583 facts/s in 1,000-fact batches.
+Memory: an idle server holds 36 MB of resident memory, each further
+10K-edge graph with its rule adds 2.1 MB, a base fact takes 81 bytes
+resident (402 at the peak of reading 90K facts back), and a session with
+its own standing query takes about 87 KB.
+
+Sessions at scale (main `8b574ef2`, the voice-agent pack, one graph, each
+session committing 1 write/s): 100 sessions answer a write with their delta
+in 40 ms p50 / 78 ms p99 on 1.8 cores; the graph saturates between 250 and
+500 sessions at about 250 writes/s. At 0.1 write/s per session, 1,000
+sessions run at 266 ms p50 / 509 ms p99 on 10 cores. No delta was lost or
+spurious at any size; see
+[`perf-gate/baselines/session-scale-2026-10-05.md`](perf-gate/baselines/session-scale-2026-10-05.md).
+
+---
+
 ## Running the Benchmarks
 
 ```bash
