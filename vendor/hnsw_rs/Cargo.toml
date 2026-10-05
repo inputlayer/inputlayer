@@ -1,0 +1,47 @@
+# hnsw_rs 0.3.4 from crates.io with the patches in PATCHES.md, used through
+# [patch.crates-io] in the engine's Cargo.toml. The package metadata,
+# features and dependencies are upstream's; examples, tests and benches are
+# not vendored.
+
+[package]
+name = "hnsw_rs"
+version = "0.3.4"
+authors = ["jeanpierre.both@gmail.com"]
+description = "Ann based on Hierarchical Navigable Small World Graphs from Yu.A. Malkov and D.A Yashunin"
+license = "MIT/Apache-2.0"
+readme = "README.md"
+keywords = ["algorithms", "ann", "hnsw"]
+repository = "https://github.com/jean-pierreBoth/hnswlib-rs"
+documentation = "https://docs.rs/hnsw_rs"
+edition = "2024"
+publish = false
+autoexamples = false
+autotests = false
+autobenches = false
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+simdeez_f = ["anndists/simdeez_f"]
+stdsimd = ["anndists/stdsimd"]
+
+[dependencies]
+anndists = "0.1"
+anyhow = "1.0"
+bincode = "1.3"
+cfg-if = "1.0"
+cpu-time = "1.0"
+env_logger = "0.11"
+hashbrown = "0.15"
+indexmap = ">= 2.11"
+lazy_static = "1.4"
+log = "0.4"
+mmap-rs = "0.7"
+num-traits = "0.2"
+num_cpus = "1.16"
+parking_lot = "0.12"
+rand = "0.9"
+rayon = "1.11"
+serde = { version = "1.0", features = ["derive"] }

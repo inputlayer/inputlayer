@@ -17,6 +17,7 @@ use crate::index_manager::{DistanceMetric, HnswConfig, TupleId};
 use crate::size_limits::MAX_EF_CONSTRUCTION;
 use hnsw_rs::prelude::{DistL2, Hnsw};
 use parking_lot::{Mutex, RwLock};
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -32,6 +33,24 @@ const MIN_CAPACITY: usize = 1024;
 /// Indexes with at most this many graph entries are searched exhaustively:
 /// exact results, and cheaper than a graph walk at this size.
 pub const EXACT_SEARCH_MAX: usize = 1024;
+
+/// Why [`HnswIndex::build_unless`] built no index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BuildError {
+    /// A row's vector cannot be indexed.
+    Invalid(String),
+    /// The caller's `stop` asked the build to stop.
+    Stopped,
+}
+
+impl std::fmt::Display for BuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(message) => f.write_str(message),
+            Self::Stopped => f.write_str("index build stopped"),
+        }
+    }
+}
 
 struct Entry {
     id: TupleId,
@@ -82,12 +101,22 @@ impl HnswIndex {
     ///
     /// Later rows win when an id repeats. Fails on the first invalid vector.
     pub fn build(config: HnswConfig, rows: Vec<(TupleId, Vec<f32>)>) -> Result<Self, String> {
+        Self::build_unless(config, rows, || false).map_err(|e| e.to_string())
+    }
+
+    /// [`Self::build`], giving up as soon as `stop` returns true. `stop` is
+    /// asked before each vector is inserted, from the inserting threads.
+    pub fn build_unless(
+        config: HnswConfig,
+        rows: Vec<(TupleId, Vec<f32>)>,
+        stop: impl Fn() -> bool + Sync,
+    ) -> Result<Self, BuildError> {
         let mut slot_of: HashMap<TupleId, usize> = HashMap::with_capacity(rows.len());
         let mut unique: Vec<(TupleId, Vec<f32>)> = Vec::with_capacity(rows.len());
         let mut dimension = 0;
         for (id, vector) in rows {
             validate_vector(&config, dimension, &vector)
-                .map_err(|e| format!("row id={id}: {e}"))?;
+                .map_err(|e| BuildError::Invalid(format!("row id={id}: {e}")))?;
             dimension = vector.len();
             let prepared = prepare(&config, &vector);
             match slot_of.get(&id) {
@@ -100,12 +129,20 @@ impl HnswIndex {
         }
 
         let graph = new_graph(&config, unique.len().max(MIN_CAPACITY));
-        let batch: Vec<(&Vec<f32>, usize)> = unique
-            .iter()
-            .enumerate()
-            .map(|(slot, (_, v))| (v, slot))
-            .collect();
-        graph.parallel_insert(&batch);
+        // `hnsw_rs` links a vector only once the graph has an entry point:
+        // vectors inserted in parallel into an empty graph would be
+        // unreachable. So the first goes in alone.
+        let insert = |slot: usize| -> Result<(), BuildError> {
+            if stop() {
+                return Err(BuildError::Stopped);
+            }
+            graph.insert((unique[slot].1.as_slice(), slot));
+            Ok(())
+        };
+        if !unique.is_empty() {
+            insert(0)?;
+        }
+        (1..unique.len()).into_par_iter().try_for_each(insert)?;
 
         let entries = unique
             .iter()

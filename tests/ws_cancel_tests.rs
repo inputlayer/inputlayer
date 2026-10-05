@@ -54,6 +54,10 @@ async fn start_server() -> Server {
     config.http.auth.credentials_file = Some(tmp.path().join("credentials.toml"));
     config.http.rate_limit.ws_max_messages_per_sec = 0;
     config.http.gui.enabled = false;
+    // The server's computations use 4 threads (the first engine in this
+    // binary sizes the pool), as on CI, so the timing budgets hold on a
+    // larger host.
+    config.storage.performance.num_threads = 4;
     let handler = Arc::new(Handler::from_config(config).unwrap());
     handler.bootstrap_auth().unwrap();
     handler.get_storage().create_knowledge_graph(KG).unwrap();
@@ -369,4 +373,141 @@ async fn cancel_stops_a_running_read() {
         ]}))
         .await;
     assert_eq!(client.reply_to("again").await["type"], "snapshot");
+}
+
+/// Rows of `vec(id, v)` (dimension [`DIM`]): building an index over them
+/// runs well past the timing budgets. A release build is many times faster,
+/// so it needs more rows.
+const VECTORS: usize = if cfg!(debug_assertions) {
+    3_000
+} else {
+    30_000
+};
+const DIM: usize = 16;
+const INDEX_CREATE: &str = ".index create vec_idx on vec(v) metric cosine";
+
+/// A deterministic vector of [`DIM`] values in (0, 1].
+fn vector(id: usize) -> String {
+    let values: Vec<String> = (0..DIM)
+        .map(|d| format!("0.{:03}", (id * 7919 + d * 104_729) % 1000 + 1))
+        .collect();
+    format!("[{}]", values.join(", "))
+}
+
+impl Server {
+    async fn write_vectors(&self) {
+        self.write("+vec(id: int, v: vector)").await;
+        let ids: Vec<usize> = (0..VECTORS).collect();
+        for chunk in ids.chunks(2_000) {
+            let rows: Vec<String> = chunk
+                .iter()
+                .map(|&id| format!("({id}, {})", vector(id)))
+                .collect();
+            self.write(&format!("+vec[{}]", rows.join(", "))).await;
+        }
+    }
+
+    fn index_names(&self) -> Vec<String> {
+        self.handler
+            .list_indexes(KG)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect()
+    }
+}
+
+/// An index build runs under the request's deadline like a query: it stops
+/// there and creates nothing, so the same create with time to finish builds
+/// the whole index.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_index_build_stops_at_its_deadline_and_creates_nothing() {
+    let server = start_server().await;
+    server.write_vectors().await;
+    let mut client = Client::connect(&server).await;
+    let sent = Instant::now();
+    client
+        .send(json!({"type": "execute", "id": "i", "program": INDEX_CREATE, "timeout_ms": 150}))
+        .await;
+    let reply = client.reply_to("i").await;
+    let took = sent.elapsed();
+    assert_stopped(&reply, "deadline_exceeded");
+    assert!(
+        took < Duration::from_millis(150) + STOP_BUDGET,
+        "took {took:?}"
+    );
+    assert_eq!(server.index_names(), Vec::<String>::new());
+
+    client.execute("again", INDEX_CREATE).await;
+    let reply = client.reply_to("again").await;
+    assert_eq!(reply["type"], "result", "{reply}");
+    assert!(
+        reply.to_string().contains(&format!("({VECTORS} vectors)")),
+        "{reply}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancel_stops_an_index_build() {
+    let server = start_server().await;
+    server.write_vectors().await;
+    let mut client = Client::connect(&server).await;
+    client.execute("i", INDEX_CREATE).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let cancelled_at = Instant::now();
+    client.cancel("c", "i").await;
+    let reply = client.reply_to("i").await;
+    assert_stopped(&reply, "cancelled");
+    assert!(cancelled_at.elapsed() < STOP_BUDGET);
+    assert_ack(&client.reply_to("c").await, "i", "cancelled");
+    assert_eq!(server.index_names(), Vec::<String>::new());
+}
+
+/// An index build holds no lock on the knowledge graph: another connection's
+/// writes and reads are answered while it runs, and those writes reach the
+/// index it installs.
+#[tokio::test(flavor = "multi_thread")]
+async fn writes_and_reads_are_served_while_an_index_builds() {
+    let server = start_server().await;
+    server.write_vectors().await;
+    let mut builder = Client::connect(&server).await;
+    let mut other = Client::connect(&server).await;
+    builder.execute("i", INDEX_CREATE).await;
+    let build = tokio::spawn(async move {
+        let reply = builder.reply_to("i").await;
+        (reply, Instant::now())
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let late = VECTORS + 1;
+    other
+        .execute("w", &format!("+vec({late}, {})", vector(late)))
+        .await;
+    assert_eq!(other.reply_to("w").await["type"], "result");
+    let read_sent = Instant::now();
+    other.execute("r", &format!("?vec({late}, V)")).await;
+    let read = other.reply_to("r").await;
+    let served_at = Instant::now();
+    assert_eq!(read["type"], "result", "{read}");
+    assert_eq!(read["rows"].as_array().map(Vec::len), Some(1), "{read}");
+
+    let (reply, built_at) = build.await.unwrap();
+    assert!(
+        served_at < built_at,
+        "the build finished {:?} before the write and read were answered: grow VECTORS",
+        served_at - built_at
+    );
+    // A read that waited for the build would be answered just before it ends.
+    let (read_took, build_left) = (served_at - read_sent, built_at - read_sent);
+    assert!(
+        read_took * 2 < build_left,
+        "the read took {read_took:?} of the {build_left:?} the build still ran: it waited for the build"
+    );
+    assert_eq!(reply["type"], "result", "{reply}");
+    assert!(
+        reply
+            .to_string()
+            .contains(&format!("({} vectors)", VECTORS + 1)),
+        "{reply}"
+    );
 }

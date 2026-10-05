@@ -63,7 +63,6 @@ async fn shop_pack_installs_and_derives_its_anchors() -> Checked<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "quarantined: rare engine hang in .index create (#377); nightly tier runs it"]
 async fn shop_pack_vector_serves_the_near_rule() -> Checked<()> {
     let engine = engine().start().await.expect("start engine");
     let pack = Fixture::shop_pack(Size::Vector);

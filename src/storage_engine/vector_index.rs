@@ -5,9 +5,14 @@
 //! tombstones exceed `COMPACT_RATIO`, and rebuilt from base data on restart
 //! (only definitions are persisted, in `indexes.json`). Each snapshot captures
 //! index views at the epoch matching its base data.
+//!
+//! `.index create` and `.index rebuild` build without holding the KG lock,
+//! under the request's deadline, then take the write lock to apply the writes
+//! made during the build and install the index.
 
-use super::{KnowledgeGraph, StorageEngine, StorageResult};
-use crate::hnsw_index::{validate_vector, HnswIndex};
+use super::{KnowledgeGraph, StorageEngine, StorageError, StorageResult};
+use crate::execution::{RequestControl, Stop};
+use crate::hnsw_index::{validate_vector, BuildError, HnswIndex};
 use crate::index_manager::{
     DistanceMetric, HnswConfig, IdType, IndexStats, IndexType, ManagedIndex, RegisteredIndex,
     TupleId, INDEX_DEFINITIONS_FILE,
@@ -16,9 +21,10 @@ use crate::replication::EngineEvent;
 use crate::schema::SchemaType;
 use crate::size_limits::{MAX_EF_CONSTRUCTION, MAX_EF_SEARCH};
 use crate::statement::IndexCreateOptions;
-use crate::value::Tuple;
+use crate::value::{Relation, Tuple};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 /// Tombstone fraction that triggers an automatic rebuild.
 pub const COMPACT_RATIO: f64 = 0.3;
@@ -48,6 +54,138 @@ fn index_row<'t>(
             )
         })?;
     Ok((id, id_type, vector))
+}
+
+/// An index built outside the knowledge graph's lock, with the rows it was
+/// built from, to catch it up with the writes made since.
+struct BuiltIndex {
+    managed: ManagedIndex,
+    built_from: Relation,
+}
+
+/// The pool index builds run in. A build keeps every thread of its pool busy
+/// until it ends, so on the global pool it would starve the queries sharing
+/// it; this one has half the global pool's threads, leaving queries the rest.
+fn build_pool() -> &'static rayon::ThreadPool {
+    static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+    POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads((rayon::current_num_threads() / 2).max(1))
+            .thread_name(|n| format!("index-build-{n}"))
+            .build()
+            .expect("index build thread pool")
+    })
+}
+
+/// Build an index for `def` from `rows`, giving up when `stop` returns true.
+fn build_from(
+    def: RegisteredIndex,
+    rows: &Relation,
+    stop: impl Fn() -> bool + Sync,
+) -> Result<ManagedIndex, BuildError> {
+    let mut id_type = IdType::default();
+    let mut vectors = Vec::with_capacity(rows.len());
+    for tuple in rows.iter() {
+        let (id, t, vector) = index_row(&def, tuple).map_err(BuildError::Invalid)?;
+        id_type = t;
+        vectors.push((id, vector.to_vec()));
+    }
+    let config = def.index_type.hnsw_config().clone();
+    let index = build_pool()
+        .install(|| HnswIndex::build_unless(config, vectors, &stop))
+        .map_err(|e| match e {
+            BuildError::Invalid(e) => {
+                BuildError::Invalid(format!("Cannot build index '{}': {e}", def.name))
+            }
+            BuildError::Stopped => BuildError::Stopped,
+        })?;
+    Ok(ManagedIndex::new(def, index, id_type))
+}
+
+/// Build an index for `def` from `rows` on behalf of a request: it stops
+/// when `control` stops the request (its deadline passes or it is
+/// cancelled).
+fn build_for_request(
+    def: RegisteredIndex,
+    rows: Relation,
+    control: Option<&RequestControl>,
+) -> StorageResult<BuiltIndex> {
+    let stopped = || control.is_some_and(RequestControl::expire_if_due);
+    match build_from(def, &rows, stopped) {
+        Ok(managed) => Ok(BuiltIndex {
+            managed,
+            built_from: rows,
+        }),
+        Err(BuildError::Invalid(message)) => Err(StorageError::Other(message)),
+        Err(BuildError::Stopped) => Err(StorageError::Other(stop_message(control))),
+    }
+}
+
+/// Enter the commit of the request `control` belongs to, if any.
+fn begin_commit(control: Option<&RequestControl>) -> Result<(), String> {
+    match control {
+        Some(control) => control
+            .begin_commit()
+            .map_err(|stop| stop.message().to_string()),
+        None => Ok(()),
+    }
+}
+
+fn stop_message(control: Option<&RequestControl>) -> String {
+    control
+        .and_then(RequestControl::stopped)
+        .map_or("Index build stopped", Stop::message)
+        .to_string()
+}
+
+/// Each id's vector in `rows` for `def` (a later row wins over an earlier
+/// one with the same id, as in a build), and the type of the last id.
+fn vectors_by_id<'r>(
+    def: &RegisteredIndex,
+    rows: &'r Relation,
+) -> Result<(HashMap<TupleId, &'r [f32]>, Option<IdType>), String> {
+    let mut vectors = HashMap::with_capacity(rows.len());
+    let mut id_type = None;
+    for tuple in rows.iter() {
+        let (id, t, vector) = index_row(def, tuple)?;
+        id_type = Some(t);
+        vectors.insert(id, vector);
+    }
+    Ok((vectors, id_type))
+}
+
+/// Bring `managed`, built from `before`, up to date with `after`: index the
+/// ids `after` added or whose vector it changed, and drop the ids it lost.
+fn catch_up(managed: &mut ManagedIndex, before: &Relation, after: &Relation) -> Result<(), String> {
+    if after.shares_tuples_with(before) {
+        return Ok(());
+    }
+    let name = managed.definition.name.clone();
+    let (old, _) = vectors_by_id(&managed.definition, before)?;
+    let (new, id_type) = vectors_by_id(&managed.definition, after)?;
+    let mut deletes: Vec<TupleId> = old
+        .keys()
+        .filter(|id| !new.contains_key(id))
+        .copied()
+        .collect();
+    let mut upserts: Vec<(TupleId, Vec<f32>)> = new
+        .iter()
+        .filter(|(id, vector)| old.get(id) != Some(vector))
+        .map(|(id, vector)| (*id, vector.to_vec()))
+        .collect();
+    if let Some(id_type) = id_type {
+        managed.id_type = id_type;
+    }
+    if deletes.is_empty() && upserts.is_empty() {
+        return Ok(());
+    }
+    deletes.sort_unstable();
+    upserts.sort_unstable_by_key(|(id, _)| *id);
+    managed
+        .index
+        .apply(&upserts, &deletes)
+        .map(drop)
+        .map_err(|e| format!("Cannot build index '{name}': {e}"))
 }
 
 impl KnowledgeGraph {
@@ -134,34 +272,57 @@ impl KnowledgeGraph {
 
     /// Build a fresh index for `def` from the relation's current rows.
     fn build_index(&self, def: RegisteredIndex) -> Result<ManagedIndex, String> {
-        let tuples = self.store.get(&def.relation);
-        let mut id_type = IdType::default();
-        let mut rows = Vec::with_capacity(tuples.map_or(0, |t| t.len()));
-        for tuple in tuples.into_iter().flatten() {
-            let (id, t, vector) = index_row(&def, tuple)?;
-            id_type = t;
-            rows.push((id, vector.to_vec()));
-        }
-        let index = HnswIndex::build(def.index_type.hnsw_config().clone(), rows)
-            .map_err(|e| format!("Cannot build index '{}': {e}", def.name))?;
-        Ok(ManagedIndex::new(def, index, id_type))
+        let rows = self.relation_rows(&def.relation);
+        build_from(def, &rows, || false).map_err(|e| e.to_string())
     }
 
-    fn save_index_definitions(&self) -> Result<(), String> {
-        self.indexes
-            .save_definitions(&self.index_definitions_path())
+    /// The rows of `relation` (none if it does not exist), sharing their
+    /// storage with the store.
+    fn relation_rows(&self, relation: &str) -> Relation {
+        self.store.get(relation).cloned().unwrap_or_default()
     }
 
-    /// Create, build, and persist an index; publishes a snapshot that sees it.
-    pub fn create_index(&mut self, opts: &IndexCreateOptions) -> Result<IndexStats, String> {
-        if self.indexes.contains(&opts.name) {
+    fn check_index_absent(&self, name: &str) -> Result<(), String> {
+        if self.indexes.contains(name) {
             return Err(format!(
-                "Index '{}' already exists. Drop it first with `.index drop {}`.",
-                opts.name, opts.name
+                "Index '{name}' already exists. Drop it first with `.index drop {name}`."
             ));
         }
+        Ok(())
+    }
+
+    /// The definition `.index create` resolves `opts` to, and the rows to
+    /// build it from.
+    fn plan_index(&self, opts: &IndexCreateOptions) -> Result<(RegisteredIndex, Relation), String> {
+        self.check_index_absent(&opts.name)?;
         let def = self.index_definition(opts)?;
-        let managed = self.build_index(def)?;
+        let rows = self.relation_rows(&def.relation);
+        Ok((def, rows))
+    }
+
+    /// Install `built`, the index `.index create` built for `opts`, caught
+    /// up with the rows written since; persist it and publish a snapshot
+    /// that sees it. The request enters its commit only here.
+    fn install_created_index(
+        &mut self,
+        opts: &IndexCreateOptions,
+        built: BuiltIndex,
+        control: Option<&RequestControl>,
+    ) -> Result<IndexStats, String> {
+        self.check_index_absent(&opts.name)?;
+        let BuiltIndex {
+            mut managed,
+            built_from,
+        } = built;
+        if self.index_definition(opts)? != managed.definition {
+            return Err(format!(
+                "Relation '{}' changed while index '{}' was built; nothing was created. Retry.",
+                opts.relation, opts.name
+            ));
+        }
+        let rows = self.relation_rows(&opts.relation);
+        catch_up(&mut managed, &built_from, &rows)?;
+        begin_commit(control)?;
         let stats = managed.stats();
         self.indexes.insert(managed)?;
         if let Err(e) = self.save_index_definitions() {
@@ -170,6 +331,11 @@ impl KnowledgeGraph {
         }
         self.publish_snapshot();
         Ok(stats)
+    }
+
+    fn save_index_definitions(&self) -> Result<(), String> {
+        self.indexes
+            .save_definitions(&self.index_definitions_path())
     }
 
     /// Make index `def` exist exactly as defined, built from the current
@@ -200,14 +366,47 @@ impl KnowledgeGraph {
         Ok(())
     }
 
-    /// Rebuild an index from base data (drops tombstones).
-    ///
-    /// The new index replaces the old one; snapshots already handed out keep
-    /// the old one until they are dropped.
-    pub fn rebuild_index(&mut self, name: &str) -> Result<IndexStats, String> {
-        self.rebuild_index_quiet(name)?;
+    /// The definition of index `name` and the rows to rebuild it from.
+    fn plan_rebuild(&self, name: &str) -> Result<(RegisteredIndex, Relation), String> {
+        let def = self
+            .indexes
+            .get(name)
+            .ok_or_else(|| self.indexes.not_found(name))?
+            .definition
+            .clone();
+        let rows = self.relation_rows(&def.relation);
+        Ok((def, rows))
+    }
+
+    /// Replace an index with `built`, its rebuild from base data (without
+    /// tombstones), caught up with the rows written since. Snapshots already
+    /// handed out keep the old index until they are dropped. The request
+    /// enters its commit only here.
+    fn install_rebuilt_index(
+        &mut self,
+        built: BuiltIndex,
+        control: Option<&RequestControl>,
+    ) -> Result<IndexStats, String> {
+        let BuiltIndex {
+            mut managed,
+            built_from,
+        } = built;
+        let name = managed.definition.name.clone();
+        let current = self
+            .indexes
+            .get(&name)
+            .ok_or_else(|| self.indexes.not_found(&name))?;
+        if current.definition != managed.definition {
+            return Err(format!(
+                "Index '{name}' was redefined while it was rebuilt; nothing was rebuilt. Retry."
+            ));
+        }
+        let rows = self.relation_rows(&managed.definition.relation);
+        catch_up(&mut managed, &built_from, &rows)?;
+        begin_commit(control)?;
+        self.indexes.replace(managed);
         self.publish_snapshot();
-        self.indexes.stats(name)
+        self.indexes.stats(&name)
     }
 
     fn rebuild_index_quiet(&mut self, name: &str) -> Result<(), String> {
@@ -402,13 +601,23 @@ impl KnowledgeGraph {
 impl StorageEngine {
     /// Create and build an HNSW index (`.index create`). Returns its stats
     /// and the revision of the snapshot that sees it.
+    ///
+    /// The index is built from the relation's rows without holding the
+    /// knowledge graph's lock, so reads and writes go on meanwhile; writes
+    /// made during the build are applied to it before it is installed. The
+    /// build stops when `control` stops the request: then nothing is created.
     pub fn create_index_in(
         &self,
         kg: &str,
         opts: &IndexCreateOptions,
+        control: Option<&RequestControl>,
     ) -> StorageResult<(IndexStats, u64)> {
+        self.check_client_write()?;
+        let _loaded = self.pin_knowledge_graph(kg)?;
+        let (def, rows) = self.with_kg_read(kg, |db| db.plan_index(opts))?;
+        let built = build_for_request(def, rows, control)?;
         self.with_kg_mut(kg, |db| {
-            let stats = db.create_index(opts)?;
+            let stats = db.install_created_index(opts, built, control)?;
             if let Some(managed) = db.indexes.get(&opts.name) {
                 self.replicate(&EngineEvent::CreateIndex {
                     kg: kg.to_string(),
@@ -434,9 +643,22 @@ impl StorageEngine {
 
     /// Rebuild an index from base data (`.index rebuild`). Returns its stats
     /// and the revision of the snapshot that sees the rebuilt index.
-    pub fn rebuild_index_in(&self, kg: &str, name: &str) -> StorageResult<(IndexStats, u64)> {
+    ///
+    /// Built like [`Self::create_index_in`]: outside the knowledge graph's
+    /// lock, caught up with the writes made meanwhile, and stopped with the
+    /// request, leaving the old index in place.
+    pub fn rebuild_index_in(
+        &self,
+        kg: &str,
+        name: &str,
+        control: Option<&RequestControl>,
+    ) -> StorageResult<(IndexStats, u64)> {
+        self.check_client_write()?;
+        let _loaded = self.pin_knowledge_graph(kg)?;
+        let (def, rows) = self.with_kg_read(kg, |db| db.plan_rebuild(name))?;
+        let built = build_for_request(def, rows, control)?;
         self.with_kg_mut(kg, |db| {
-            let stats = db.rebuild_index(name)?;
+            let stats = db.install_rebuilt_index(built, control)?;
             Ok((stats, db.snapshot.load().revision))
         })
     }
@@ -446,3 +668,7 @@ impl StorageEngine {
         self.with_kg_read(kg, |db| db.index_stats(name))
     }
 }
+
+#[cfg(test)]
+#[path = "vector_index_tests.rs"]
+mod tests;

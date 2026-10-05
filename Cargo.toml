@@ -51,7 +51,7 @@ regex = "1.10"
 # Channel for DD worker communication (already a transitive dep via timely)
 crossbeam-channel = "0.5"
 
-# HNSW vector indexing for similarity search
+# HNSW vector indexing for similarity search (patched copy: see [patch.crates-io])
 hnsw_rs = "0.3"
 
 # Parallel execution
@@ -223,6 +223,11 @@ distributed = []
 # Expose test-only seams (e.g. sharing regardless of cost); never enable
 # this for a shipped build.
 test-support = []
+
+# hnsw_rs 0.3.4 with fixes for a parallel-insert deadlock (#377) and for
+# reverse links at the wrong layer (#302); see vendor/hnsw_rs/PATCHES.md.
+[patch.crates-io]
+hnsw_rs = { path = "vendor/hnsw_rs" }
 
 [profile.release]
 lto = false

@@ -142,7 +142,7 @@ Rebuilds the index from the relation's current rows, dropping tombstones:
 .index rebuild doc_emb_idx
 ```
 
-Queries already running keep the index they started with.
+Queries already running keep the index they started with. Like a create, a rebuild does not block queries or writes, includes the rows written while it runs, and stops at the request's deadline or a `cancel`, which leave the old index in place.
 
 ### Drop an Index
 
@@ -214,6 +214,8 @@ One search runs per distinct vector bound to `QV`, so `?documents(7, _, QV), hns
 ### Build
 
 `.index create` builds the index from the relation's existing rows (parallel insert) and registers it. Rows the index cannot hold (non-integer id, missing or zero-norm vector for `cosine`/`dot`, wrong dimension) make the create fail with the offending row id.
+
+The build does not block the knowledge graph: queries and writes go on while it runs, and the rows written meanwhile are in the index when it is registered. It runs under the request's [deadline](websocket-api#deadlines-and-cancellation) like a query, and a `cancel` stops it too: a build stopped either way registers nothing and fails with `deadline_exceeded` or `cancelled`. The deadline is `storage.performance.query_timeout_ms` (30 s by default), so raise it before indexing a relation that takes longer to build (10K rows of dimension 384 take about 4 s, see the table above).
 
 ### Maintenance
 

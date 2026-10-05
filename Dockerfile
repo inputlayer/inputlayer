@@ -30,6 +30,8 @@ COPY ws-protocol/Cargo.toml ./ws-protocol/
 # A workspace member, though no image binary depends on it: cargo refuses to
 # load the workspace without its manifest.
 COPY testkit/Cargo.toml ./testkit/
+# Patched dependencies ([patch.crates-io]): needed to resolve the workspace.
+COPY vendor/ ./vendor/
 RUN mkdir src && echo "fn main() {}" > src/main.rs && \
     mkdir -p src/bin && echo "fn main() {}" > src/bin/server.rs && \
     echo "" > src/lib.rs && \

@@ -240,13 +240,16 @@ mod index_commands {
     use crate::statement::meta::IndexCreateOptions;
     use crate::StorageEngine;
 
+    /// Build under the request running on this thread, if any: its stop
+    /// stops the build, and it enters its commit only to install the index.
     pub(super) fn create(
         storage: &StorageEngine,
         kg: &str,
         opts: &IndexCreateOptions,
     ) -> Result<(String, u64), ProgramError> {
+        let control = crate::code_generator::current_request_control();
         let (stats, revision) = storage
-            .create_index_in(kg, opts)
+            .create_index_in(kg, opts, control.as_deref())
             .map_err(ProgramError::from)?;
         let message = format!(
             "Index '{}' created on {}.{} ({} vectors).",
@@ -266,13 +269,15 @@ mod index_commands {
         Ok((format!("Index '{name}' dropped."), revision))
     }
 
+    /// Built like [`create`].
     pub(super) fn rebuild(
         storage: &StorageEngine,
         kg: &str,
         name: &str,
     ) -> Result<(String, u64), ProgramError> {
+        let control = crate::code_generator::current_request_control();
         let (stats, revision) = storage
-            .rebuild_index_in(kg, name)
+            .rebuild_index_in(kg, name, control.as_deref())
             .map_err(ProgramError::from)?;
         let message = format!("Index '{name}' rebuilt ({} vectors).", stats.tuple_count);
         Ok((message, revision))
