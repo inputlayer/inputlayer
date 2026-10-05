@@ -68,7 +68,7 @@ class _LoopThread:
             return future.result(timeout=self._timeout)
         except concurrent.futures.TimeoutError as e:
             if future.done():
-                raise
+                return future.result()
             # Python 3.10's concurrent.futures.TimeoutError is not the
             # builtin TimeoutError (they merged in 3.11); raise the builtin
             # so callers catch the same type on every supported version.
