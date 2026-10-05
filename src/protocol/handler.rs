@@ -3777,7 +3777,10 @@ impl Handler {
                 } else {
                     run()
                 }
-                .map_err(|e| ProgramError::from(format!("Query execution failed: {e}")))?;
+                .map_err(|e| ProgramError {
+                    code: Some(supervise::computation_failure_code(ErrorCode::Validation)),
+                    message: format!("Query execution failed: {e}"),
+                })?;
                 let row_capped = crate::last_result_truncated();
 
                 // Record timing in Prometheus histograms

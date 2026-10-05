@@ -373,6 +373,26 @@ async fn a_large_cross_product_is_refused_before_it_runs_on_shipped_defaults() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_cross_product_in_a_session_rule_is_refused_with_a_code() {
+    let server = start_server(|_| {}).await;
+    wide(&server, 30_000).await;
+    let mut client = Client::connect(&server).await;
+
+    let reply = client.execute("rule", "cross(X, Y) <- a(X), b(Y)").await;
+    assert_ne!(reply["type"], "error", "{reply}");
+
+    // The rule is evaluated with every query in the session, so each one
+    // is refused with the same typed error until the rule is removed.
+    for program in ["?cross(X, Y)", "?a(X), X < 2"] {
+        let reply = client.execute("query", program).await;
+        assert_eq!(reply["type"], "error", "{program}: {reply}");
+        assert_eq!(reply["code"], "validation", "{program}: {reply}");
+        let message = reply["message"].as_str().unwrap();
+        assert!(message.contains("max_query_cost"), "{program}: {reply}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_cross_product_is_estimated_with_the_rows_its_filters_keep() {
     let server = start_server(|_| {}).await;
     wide(&server, 30_000).await;
