@@ -286,8 +286,9 @@ debug builds.
 Quarantined scenarios are ignored unconditionally, so the PR gate (plain
 `cargo test`) stays deterministic, and run in the nightly tier. Until a
 nightly workflow exists, `make e2e-reactive` stands in for it and passes
-`--include-ignored`. Today: `harness::shop_pack_vector_serves_the_near_rule`,
-quarantined for a rare engine hang in `.index create` (#377).
+`--include-ignored`. No scenario is quarantined today
+(`harness::shop_pack_vector_serves_the_near_rule` returned to the PR gate
+once #377 was fixed).
 
 Tracked defects run as **expected failures** through
 `inputlayer_testkit::KnownDefect`, naming the issue that fixes them (today:
