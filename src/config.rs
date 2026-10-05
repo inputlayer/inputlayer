@@ -506,7 +506,11 @@ pub struct GuiConfig {
 #[serde(deny_unknown_fields)]
 pub struct AuthConfig {
     /// Initial admin password (set via INPUTLAYER_ADMIN_PASSWORD env var or config).
-    /// If unset on first boot, a random password is generated and printed to stderr.
+    /// If unset or blank on first boot, a random password is generated and
+    /// saved to the credentials file. A supplied one needs at least
+    /// [`crate::auth::MIN_PASSWORD_CHARS`] characters or the server refuses
+    /// to start on first boot; once the admin exists a short one is ignored
+    /// with a warning.
     #[serde(default)]
     pub bootstrap_admin_password: Option<String>,
 
@@ -1207,8 +1211,9 @@ mod tests {
         // config fields; they must not break config parsing.
         figment::Jail::expect_with(|jail| {
             jail.create_file("server.toml", "[storage]\ndata_dir = \"/tmp/x\"\n")?;
-            jail.set_env("INPUTLAYER_BOOTSTRAP_API_KEY", "secret");
-            jail.set_env("INPUTLAYER_ADMIN_PASSWORD", "secret");
+            // Blank, so tests bootstrapping meanwhile still generate theirs.
+            jail.set_env("INPUTLAYER_BOOTSTRAP_API_KEY", "");
+            jail.set_env("INPUTLAYER_ADMIN_PASSWORD", "");
             jail.set_env("INPUTLAYER_API_KEY", "client-key");
             let config = Config::from_file("server.toml").expect("parse must succeed");
             assert_eq!(config.storage.data_dir, PathBuf::from("/tmp/x"));

@@ -239,7 +239,9 @@ static_dir = "./gui/dist"
 # -----------------------------------------------------------------------------
 [http.auth]
 # On first boot, an admin user and bootstrap API key are created.
-# Set a known password, or omit to auto-generate one (printed to stderr).
+# Set a known password (at least 12 characters, or the first boot refuses
+# to start), or omit it or leave it empty to have one generated and saved to
+# credentials.toml in the data directory.
 # bootstrap_admin_password = "your-secure-password"
 
 # Session timeout in seconds (default: 24 hours)
@@ -294,7 +296,7 @@ export INPUTLAYER_HTTP__ENABLED=true
 export INPUTLAYER_HTTP__PORT=9090
 
 # Authentication
-export INPUTLAYER_ADMIN_PASSWORD=your-secure-password   # Admin password (first boot only)
+export INPUTLAYER_ADMIN_PASSWORD=your-secure-password   # Admin password (first boot only, 12+ characters)
 export INPUTLAYER_API_KEY=your-api-key                  # CLI client authentication
 
 # Performance limits
@@ -351,7 +353,7 @@ host = "0.0.0.0"
 port = 8080
 
 [http.auth]
-# Set a known admin password for production deployments
+# Set a known admin password for production deployments (12+ characters)
 bootstrap_admin_password = "your-secure-password-here"
 
 [http.rate_limit]

@@ -197,7 +197,12 @@ static_dir = "./gui/dist"
 #   3. The credentials file (below), from an earlier boot
 #   4. Auto-generated random password
 #
-# A bootstrap API key is also created (INPUTLAYER_BOOTSTRAP_API_KEY, or generated).
+# The supplied password that is used needs at least 12 characters or the
+# server refuses to start on first boot (a config value overridden by the
+# environment variable is ignored); once the admin exists a short one is
+# ignored with a warning. An empty one counts as unset.
+# A bootstrap API key is also created (INPUTLAYER_BOOTSTRAP_API_KEY, or
+# generated), with the same rules for a supplied one.
 # Generated secrets are saved, owner-only, to the credentials file.
 # Use the key with the CLI: inputlayer-client --api-key <key>
 

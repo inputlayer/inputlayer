@@ -344,7 +344,7 @@ mod ws {
         config.http.rate_limit.ws_max_messages_per_sec = 0;
         config.http.gui.enabled = false;
         let handler = Arc::new(Handler::from_config(config).expect("handler"));
-        handler.bootstrap_auth();
+        handler.bootstrap_auth().expect("bootstrap auth");
         let app = create_router(Arc::clone(&handler), &handler.config().http);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await

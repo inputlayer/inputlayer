@@ -83,6 +83,105 @@ pub struct ScopedKey {
     pub owner_role: Role,
 }
 
+// ── Password Policy ─────────────────────────────────────────────────────────
+
+/// Fewest characters a password the engine sets may have: the bootstrap
+/// admin password, `.user create` and `.user password`. Also the floor for
+/// a supplied bootstrap API key that bootstrap stores.
+pub const MIN_PASSWORD_CHARS: usize = 12;
+
+/// `Err` when `password` has fewer than [`MIN_PASSWORD_CHARS`] characters.
+pub fn check_password_strength(password: &str) -> Result<(), String> {
+    if password.chars().count() < MIN_PASSWORD_CHARS {
+        return Err(format!(
+            "Password too short: use at least {MIN_PASSWORD_CHARS} characters"
+        ));
+    }
+    Ok(())
+}
+
+/// A supplied bootstrap secret and the setting it came from: `None` when
+/// empty or only whitespace, so it counts as unset and bootstrap generates
+/// one.
+fn supplied_secret(source: &'static str, value: Option<String>) -> Option<(&'static str, String)> {
+    value.filter(|v| !v.trim().is_empty()).map(|v| (source, v))
+}
+
+/// The supplied bootstrap secrets admin bootstrap stores: the admin password
+/// (`INPUTLAYER_ADMIN_PASSWORD`, else `configured`, from
+/// `http.auth.bootstrap_admin_password`) and `INPUTLAYER_BOOTSTRAP_API_KEY`.
+/// `bootstrap` is `None` when the admin user already exists, else whether
+/// bootstrap issues an API key. Blank values count as unset. `Err` naming
+/// the setting when the admin password or key bootstrap would store is
+/// shorter than [`MIN_PASSWORD_CHARS`]; a short value it ignores only draws
+/// a warning, and a config password overridden by the environment on first
+/// boot is ignored whatever its length.
+pub fn bootstrap_secrets(
+    configured: Option<&str>,
+    bootstrap: Option<bool>,
+) -> Result<(Option<String>, Option<String>), String> {
+    let env_password = supplied_secret(
+        "INPUTLAYER_ADMIN_PASSWORD",
+        std::env::var("INPUTLAYER_ADMIN_PASSWORD").ok(),
+    );
+    let mut config_password = supplied_secret(
+        "http.auth.bootstrap_admin_password",
+        configured.map(str::to_string),
+    );
+    if bootstrap.is_some() && env_password.is_some() && config_password.take().is_some() {
+        eprintln!(
+            "NOTE: http.auth.bootstrap_admin_password is ignored because \
+             INPUTLAYER_ADMIN_PASSWORD is set."
+        );
+    }
+    let api_key = supplied_secret(
+        "INPUTLAYER_BOOTSTRAP_API_KEY",
+        std::env::var("INPUTLAYER_BOOTSTRAP_API_KEY").ok(),
+    );
+
+    let unused = |reason: &'static str| (false, reason);
+    let password_use = match bootstrap {
+        Some(_) => (true, ""),
+        None => unused("the admin user already exists"),
+    };
+    let key_use = match bootstrap {
+        Some(true) => (true, ""),
+        Some(false) => unused("bootstrap already issued an API key for this data directory"),
+        None => unused("the admin user already exists"),
+    };
+    let supplied = [
+        (&env_password, password_use),
+        (&config_password, password_use),
+        (&api_key, key_use),
+    ];
+    let weak = supplied.iter().filter_map(|(secret, usage)| {
+        let (source, value) = secret.as_ref()?;
+        (value.chars().count() < MIN_PASSWORD_CHARS).then_some((*source, *usage))
+    });
+    if let Some((source, _)) = weak.clone().find(|(_, (used, _))| *used) {
+        return Err(format!(
+            "{source} is shorter than {MIN_PASSWORD_CHARS} characters. Set a longer \
+             value, or unset it to have the server generate one on first boot and \
+             save it to credentials.toml."
+        ));
+    }
+    for (source, (_, reason)) in weak {
+        tracing::warn!(setting = source, reason, "weak bootstrap secret ignored");
+        eprintln!(
+            "WARNING: {source} is shorter than {MIN_PASSWORD_CHARS} characters and is \
+             ignored because {reason}. Remove it from the environment or config."
+        );
+    }
+
+    let password = if bootstrap.is_some() {
+        env_password.or(config_password).map(|(_, v)| v)
+    } else {
+        None
+    };
+    let api_key = api_key.filter(|_| bootstrap == Some(true)).map(|(_, v)| v);
+    Ok((password, api_key))
+}
+
 // ── Password Hashing (argon2id) ─────────────────────────────────────────────
 
 /// Hash a password using argon2id with a random salt.
@@ -112,12 +211,14 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
 }
 
 /// Verify `password` against `hash`, or against a dummy hash when there is
-/// none, so unknown users cost the same as known ones. `false` without a hash.
+/// none, so unknown users cost the same as known ones. `false` without a hash,
+/// and for an empty password: an admin bootstrapped with a blank password
+/// before blank ones were refused cannot sign in with it.
 pub fn verify_password_or_dummy(password: &str, hash: Option<&str>) -> bool {
     static DUMMY_HASH: LazyLock<String> =
         LazyLock::new(|| hash_password(&generate_api_key()).unwrap_or_default());
     let verified = verify_password(password, hash.unwrap_or(&DUMMY_HASH));
-    verified && hash.is_some()
+    verified && hash.is_some() && !password.is_empty()
 }
 
 // ── Login Throttling ────────────────────────────────────────────────────────
@@ -1185,6 +1286,54 @@ mod tests {
         assert!(!verify_password_or_dummy("nope", Some(&hash)));
         assert!(!verify_password_or_dummy("pw", None));
         assert!(!verify_password_or_dummy("", None));
+        let blank = hash_password("").unwrap();
+        assert!(verify_password("", &blank));
+        assert!(!verify_password_or_dummy("", Some(&blank)));
+    }
+
+    #[test]
+    fn test_password_strength_counts_characters() {
+        assert!(check_password_strength("eleven-char").is_err());
+        assert!(check_password_strength("twelve-chars").is_ok());
+        // Twelve characters, more than twelve bytes.
+        assert!(check_password_strength("ééééééééééé").is_err());
+        assert!(check_password_strength("éééééééééééé").is_ok());
+        let err = check_password_strength("").unwrap_err();
+        assert!(err.contains("12 characters"), "{err}");
+    }
+
+    #[test]
+    fn test_supplied_secret_blank_is_unset() {
+        for blank in [None, Some(""), Some("   "), Some("\t\n")] {
+            assert_eq!(
+                supplied_secret("SRC", blank.map(str::to_string)),
+                None,
+                "{blank:?}"
+            );
+        }
+        let supplied = supplied_secret("SRC", Some("eleven-char".into()));
+        assert_eq!(supplied, Some(("SRC", "eleven-char".to_string())));
+    }
+
+    #[test]
+    fn test_bootstrap_secrets_check_only_what_bootstrap_stores() {
+        let err = bootstrap_secrets(Some("eleven-char"), Some(false)).unwrap_err();
+        assert!(
+            err.contains("http.auth.bootstrap_admin_password") && err.contains("12 characters"),
+            "{err}"
+        );
+        assert_eq!(
+            bootstrap_secrets(Some("eleven-char"), None).unwrap(),
+            (None, None)
+        );
+        assert_eq!(
+            bootstrap_secrets(Some("twelve-chars"), Some(true))
+                .unwrap()
+                .0
+                .as_deref(),
+            Some("twelve-chars")
+        );
+        assert_eq!(bootstrap_secrets(Some("  "), Some(true)).unwrap().0, None);
     }
 
     fn ip(last: u8) -> IpAddr {

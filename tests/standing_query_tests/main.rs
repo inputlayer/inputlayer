@@ -323,10 +323,10 @@ async fn test_limit_duplicates_and_invalid_queries_are_errors() {
 async fn test_read_access_is_checked_on_subscribe_and_every_evaluation() {
     let server = start_server(64).await;
     server.write("+a(1)").await;
-    admin(&server, ".user create mallory pw12345678 viewer").await;
+    admin(&server, ".user create mallory pw1234567890 viewer").await;
     admin(&server, &format!(".kg acl grant {KG} mallory viewer")).await;
 
-    let mut client = Client::connect_as(&server, KG, "mallory", "pw12345678").await;
+    let mut client = Client::connect_as(&server, KG, "mallory", "pw1234567890").await;
     let snapshot = client.subscribe("s", "?a(X)").await;
     assert_eq!(rows(&snapshot["rows"]), vec![json!([1])]);
 

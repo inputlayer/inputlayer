@@ -11,7 +11,7 @@ Run InputLayer in production with Docker, systemd, reverse proxies, and Kubernet
 | Data directory | `./data` | `--data-dir` | `INPUTLAYER_STORAGE__DATA_DIR` | `storage.data_dir` |
 | Log level | `info` | -- | `INPUTLAYER_TRACE_LEVEL` | `logging.level` |
 | Log format | `text` | -- | `INPUTLAYER_TRACE_JSON=1` | `logging.format` |
-| Admin password | auto-generated | -- | `INPUTLAYER_ADMIN_PASSWORD` | `http.auth.bootstrap_admin_password` |
+| Admin password (12+ characters) | generated | -- | `INPUTLAYER_ADMIN_PASSWORD` | `http.auth.bootstrap_admin_password` |
 | Config file | `config.toml` | `--config` | -- | -- |
 
 ## Environment Variables
@@ -141,7 +141,7 @@ docker run -d \
   inputlayer:latest
 ```
 
-`-e INPUTLAYER_ADMIN_PASSWORD` passes the admin password from your shell's environment (set it from your secret store, not on the command line). Without it, the first boot generates the password and an admin API key and saves them to `/var/lib/inputlayer/data/credentials.toml` (see [Credentials](installation#credentials)).
+`-e INPUTLAYER_ADMIN_PASSWORD` passes the admin password from your shell's environment (set it from your secret store, not on the command line). A supplied password needs at least 12 characters or the first boot refuses to start (once the admin exists a short one only draws a warning); an empty one counts as unset. Without it, the first boot generates the password and an admin API key and saves them to `/var/lib/inputlayer/data/credentials.toml` (see [Credentials](installation#credentials)).
 
 The image includes a built-in `HEALTHCHECK` that polls `/health` every 10 seconds:
 
@@ -198,7 +198,7 @@ services:
       INPUTLAYER_STORAGE__DATA_DIR: "/var/lib/inputlayer/data"
       INPUTLAYER_STORAGE__PERSIST__ENABLED: "true"
       INPUTLAYER_STORAGE__PERSIST__DURABILITY_MODE: "immediate"
-      INPUTLAYER_ADMIN_PASSWORD: "${INPUTLAYER_ADMIN_PASSWORD}"
+      INPUTLAYER_ADMIN_PASSWORD: "${INPUTLAYER_ADMIN_PASSWORD:?Set INPUTLAYER_ADMIN_PASSWORD (at least 12 characters)}"
       INPUTLAYER_TRACE_LEVEL: "info"
       INPUTLAYER_TRACE_JSON: "1"
     healthcheck:
@@ -245,7 +245,7 @@ services:
       INPUTLAYER_HTTP__HOST: "0.0.0.0"
       INPUTLAYER_HTTP__PORT: "8080"
       INPUTLAYER_STORAGE__DATA_DIR: "/var/lib/inputlayer/data"
-      INPUTLAYER_ADMIN_PASSWORD: "${INPUTLAYER_ADMIN_PASSWORD}"
+      INPUTLAYER_ADMIN_PASSWORD: "${INPUTLAYER_ADMIN_PASSWORD:?Set INPUTLAYER_ADMIN_PASSWORD (at least 12 characters)}"
       INPUTLAYER_TRACE_JSON: "1"
     labels:
       - "traefik.enable=true"
@@ -425,7 +425,7 @@ kubectl apply -k my-overlays/acme
 kubectl -n inputlayer-acme rollout status statefulset/inputlayer
 ```
 
-If you leave out `bootstrap-api-key`, the engine generates an admin API key on
+Both secrets need at least 12 characters; with a shorter one on first boot the engine refuses to start and the pod restarts until you fix the secret. Once the admin exists, a short one is ignored with a warning. If you leave out `bootstrap-api-key`, the engine generates an admin API key on
 first boot and stores it in `credentials.toml` on the volume:
 
 ```bash
@@ -652,9 +652,9 @@ inputlayer    hard    nofile    65536
 
 ### Authentication
 
-InputLayer requires WebSocket authentication for all data operations. On first boot, if no admin password is configured, a random password is generated and printed to stderr. For production:
+InputLayer requires WebSocket authentication for all data operations. On first boot, if no admin password is configured (or it is empty), a random password is generated and saved to `credentials.toml` in the data directory. A configured password shorter than 12 characters stops the server on first boot with an error naming the setting; once the admin exists it is ignored with a warning. For production:
 
-1. Always set `INPUTLAYER_ADMIN_PASSWORD` explicitly
+1. Set `INPUTLAYER_ADMIN_PASSWORD` explicitly, or keep the generated password and protect `credentials.toml`; in Compose, require it with `${INPUTLAYER_ADMIN_PASSWORD:?...}` so an unset variable fails the deploy instead of passing an empty value
 2. Use Kubernetes Secrets or Docker secrets for the password
 3. Rotate credentials periodically
 

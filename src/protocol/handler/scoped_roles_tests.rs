@@ -13,10 +13,10 @@ async fn fixture() -> (Arc<Handler>, tempfile::TempDir) {
     let tmp = tempfile::tempdir().unwrap();
     let mut config = Config::default();
     config.storage.data_dir = tmp.path().join("data");
-    config.http.auth.bootstrap_admin_password = Some("admin-pw".to_string());
+    config.http.auth.bootstrap_admin_password = Some("admin-password".to_string());
     config.http.auth.credentials_file = Some(tmp.path().join("credentials.toml"));
     let handler = Arc::new(Handler::from_config(config).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     for kg in [KG, "other"] {
         handler.storage.read().create_knowledge_graph(kg).unwrap();
     }
@@ -36,7 +36,7 @@ fn restart(handler: Arc<Handler>) -> Arc<Handler> {
     handler.shutdown();
     drop(handler);
     let handler = Arc::new(Handler::from_config(config).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     handler
 }
 
@@ -215,7 +215,7 @@ async fn decider_key_writes_only_its_relations() {
 async fn scoped_key_lists_only_its_own_kgs_acl() {
     let (handler, _tmp) = fixture().await;
     handler
-        .handle_user_create("bob", "bob-pw", "viewer")
+        .handle_user_create("bob", "bob-password", "viewer")
         .unwrap();
     admin(&handler, ".kg acl grant other bob editor")
         .await
@@ -270,7 +270,7 @@ async fn writer_key_writes_any_facts_but_no_policy() {
 async fn acl_grants_carry_relations_and_survive_restart() {
     let (handler, _tmp) = fixture().await;
     handler
-        .handle_user_create("agent", "agent-pw", "viewer")
+        .handle_user_create("agent", "agent-password", "viewer")
         .unwrap();
     admin(
         &handler,
@@ -291,7 +291,9 @@ async fn acl_grants_carry_relations_and_survive_restart() {
     let agent = handler.authenticate_api_key(&key).unwrap();
     run(&handler, &agent, "+attempt(\"o1\", 1)").await.unwrap();
     assert_cannot_change_policy(&handler, &agent).await;
-    let password = handler.authenticate_user("agent", "agent-pw").unwrap();
+    let password = handler
+        .authenticate_user("agent", "agent-password")
+        .unwrap();
     assert!(run(&handler, &password, "+decision(\"d1\", \"o1\")")
         .await
         .is_err());
@@ -330,7 +332,7 @@ async fn acl_grants_carry_relations_and_survive_restart() {
 async fn grants_refuse_relation_lists_that_do_not_fit_the_role() {
     let (handler, _tmp) = fixture().await;
     handler
-        .handle_user_create("agent", "agent-pw", "viewer")
+        .handle_user_create("agent", "agent-password", "viewer")
         .unwrap();
     for (program, why) in [
         (
@@ -359,7 +361,7 @@ async fn grants_refuse_relation_lists_that_do_not_fit_the_role() {
 async fn a_scope_never_widens_its_owner() {
     let (handler, _tmp) = fixture().await;
     handler
-        .handle_user_create("bob", "bob-pw", "editor")
+        .handle_user_create("bob", "bob-password", "editor")
         .unwrap();
     handler.handle_kg_acl_grant(KG, "bob", "viewer").unwrap();
     let writer = crate::auth::KeyScope::new(KG, crate::auth::KgRole::Writer.into()).unwrap();
