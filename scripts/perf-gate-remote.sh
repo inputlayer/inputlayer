@@ -17,6 +17,8 @@
 #                   benchmark) instead of the gate, under the same rules
 #   --bench soak -- ARGS
 #                   run scripts/soak.sh ARGS (the sustained concurrency soak)
+#   --bench views -- ARGS
+#                   run scripts/bench-views.sh ARGS (the views benchmark)
 #   Everything else goes to scripts/perf-gate.sh: --aa, --rounds N,
 #   --baseline-rev REV, --fixtures LIST, --profile NAME, --server-cpus LIST,
 #   --gate-cpus LIST, --no-verdict. A working tree is never measured, only
@@ -68,7 +70,7 @@ while [ $# -gt 0 ]; do
             GATE_ARGS+=("$1" "$(git rev-parse --verify "$2^{commit}")"); shift 2 ;;
         --rounds|--profile|--fixtures|--server-cpus|--gate-cpus) GATE_ARGS+=("$1" "$2"); shift 2 ;;
         --aa|--no-verdict) GATE_ARGS+=("$1"); shift ;;
-        -h|--help) sed -n '2,37p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,39p' "$0"; exit 0 ;;
         *) echo "perf-gate-remote: unknown option $1" >&2; exit 3 ;;
     esac
 done
@@ -76,7 +78,8 @@ case "$BENCH" in
     gate) SCRIPT=scripts/perf-gate.sh LATEST=target/perf-gate/latest ;;
     sessions) SCRIPT=scripts/bench-sessions.sh LATEST=target/bench-sessions/latest ;;
     soak) SCRIPT=scripts/soak.sh LATEST=target/soak/latest ;;
-    *) echo "perf-gate-remote: unknown benchmark $BENCH (gate, sessions or soak)" >&2; exit 3 ;;
+    views) SCRIPT=scripts/bench-views.sh LATEST=target/bench-views/latest ;;
+    *) echo "perf-gate-remote: unknown benchmark $BENCH (gate, sessions, soak or views)" >&2; exit 3 ;;
 esac
 
 SSH=(ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=6 "$HOST")
@@ -159,7 +162,8 @@ git checkout -q --detach "$SHA" || finish 3
 CPUS=$(nproc)
 PIN=()
 case " $* " in *" --server-cpus "*|*" --gate-cpus "*) ;; *)
-    # bench-sessions.sh pins only servers; its clients float on 0-7 too.
+    # bench-sessions.sh and bench-views.sh pin only servers; their clients
+    # float on 0-7 too.
     if [ "$CPUS" -ge 16 ]; then
         PIN=(--server-cpus "8-$((CPUS - 1))")
         [ "$SCRIPT" = scripts/perf-gate.sh ] && PIN+=(--gate-cpus 0-7)
@@ -219,8 +223,8 @@ if [ -s "$OUT/bench.txt" ]; then
     RUN_DIR=$(sed -n 's/^run dir: //p' "$OUT/bench.txt")
 fi
 if [ -n "$RUN_DIR" ]; then
-    # The gate's files, or the session benchmark's or soak's (result.json,
-    # summary.md, settings.txt).
+    # The gate's files, or the session benchmark's, soak's or views
+    # benchmark's (result.json, summary.md, settings.txt).
     for f in run.json report.md verdict.json summary.md result.json settings.txt; do
         scp -q "$HOST:$RUN_DIR/$f" "$OUT/$f" 2> /dev/null || true
     done

@@ -142,7 +142,7 @@ pub struct Summary {
 }
 
 impl Summary {
-    fn of(samples: &[Duration]) -> Self {
+    pub(crate) fn of(samples: &[Duration]) -> Self {
         let mut ms: Vec<f64> = samples.iter().map(|d| d.as_secs_f64() * 1e3).collect();
         ms.sort_by(f64::total_cmp);
         // Ceiling rank, as the review's harness computed it.

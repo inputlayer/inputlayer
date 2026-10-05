@@ -150,6 +150,15 @@ inputlayer_store_read_only 0
 # HELP inputlayer_rejections_total Requests and connections refused before they ran, by reason.
 # TYPE inputlayer_rejections_total counter
 inputlayer_rejections_total{reason="http_rate_limit"} 0
+# HELP inputlayer_view_reads_total Reads of persistent rules answered from a view, without evaluating a rule.
+# TYPE inputlayer_view_reads_total counter
+inputlayer_view_reads_total 0
+# HELP inputlayer_rule_evaluations_total Reads of persistent rules answered by evaluating the rules from base facts.
+# TYPE inputlayer_rule_evaluations_total counter
+inputlayer_rule_evaluations_total 4200
+# HELP inputlayer_view_maintenance_us_total Microseconds spent keeping views current with commits.
+# TYPE inputlayer_view_maintenance_us_total counter
+inputlayer_view_maintenance_us_total 0
 ...
 ```
 

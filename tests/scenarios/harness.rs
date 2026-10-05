@@ -5,9 +5,7 @@
 use std::collections::BTreeSet;
 use std::time::Instant;
 
-use inputlayer_testkit::{
-    Checked, Counters, Fixture, KnownDefect, Reproduction, Size, Violation, WsClient,
-};
+use inputlayer_testkit::{Checked, Counters, Fixture, Size, Violation, WsClient};
 use serde_json::Value;
 
 use crate::engine;
@@ -89,14 +87,11 @@ async fn counters_scrape_the_running_engine() -> Checked<()> {
         Counters::require("queries", delta.queries)? >= 1,
         "a query is counted: {delta:?}"
     );
-
-    KnownDefect {
-        plan_item: "#308",
-        summary: "rule_evaluations is not exported, so a read cannot prove it skipped evaluation",
-        signature: |v| matches!(v, Violation::NotMeasurable(_)),
-        reproduction: Reproduction::Deterministic,
-    }
-    .judge(Counters::require("rule_evaluations", delta.rule_evaluations).map(drop));
+    assert_eq!(
+        Counters::require("rule_evaluations", delta.rule_evaluations)?,
+        1,
+        "a read of a deployed rule evaluates it once: {delta:?}"
+    );
     Ok(())
 }
 

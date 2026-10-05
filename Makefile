@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check perf-gate-remote bench-engine-remote bench-sessions-remote soak soak-remote secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions test test-fast test-release unit-test xfail-list integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check perf-gate-remote bench-engine-remote bench-sessions-remote bench-views-remote soak soak-remote secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions bench-views test test-fast test-release unit-test xfail-list integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -706,6 +706,11 @@ bench-sessions-remote:
 soak-remote:
 	./scripts/perf-gate-remote.sh --rev $(REV) --bench soak -- $(SOAK_ARGS)
 
+# The views benchmark (bench-views) for commit REV on the benchmark host,
+# under its shared lock; options via VIEWS_ARGS as for bench-views.
+bench-views-remote:
+	./scripts/perf-gate-remote.sh --rev $(REV) --bench views -- $(VIEWS_ARGS)
+
 # Reactive agent benchmark on the genbi-trust suite (read in place from
 # GENBI_TRUST_DIR); see perf-gate/README.md. Options via GENBI_ARGS, e.g.
 # GENBI_ARGS="--cases priority --repeat 3".
@@ -717,6 +722,12 @@ bench-genbi:
 # SESSIONS_ARGS="--baseline-rev origin/main --sessions 10,100".
 bench-sessions:
 	./scripts/bench-sessions.sh $(SESSIONS_ARGS)
+
+# Write and read cost against deployed rules by graph size, rule count and
+# subscriber count; see perf-gate/README.md. Options via VIEWS_ARGS, e.g.
+# VIEWS_ARGS="--edges 10000,100000 --baseline-rev origin/main".
+bench-views:
+	./scripts/bench-views.sh $(VIEWS_ARGS)
 
 # Lint and unit-test the performance gate tool itself (its own workspace)
 perf-gate-check:
