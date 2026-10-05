@@ -141,14 +141,32 @@ fn an_ambiguous_row_fails_the_partition() {
 
 #[test]
 fn a_round_shares_while_no_slower_than_the_views_own_evaluations_in_parallel() {
-    // 8 bindings on 4 permits: two waves of own evaluations, 200us.
-    assert!(keeps_sharing(150, 100, 8, 4), "faster");
+    // 8 bindings on 1 permit: own evaluations one after another, 800us, more
+    // than half their combined work.
+    assert!(keeps_sharing(600, 100, 8, 1), "faster");
+    assert!(keeps_sharing(800, 100, 8, 1), "as fast");
+    assert!(!keeps_sharing(801, 100, 8, 1), "slower");
+    assert!(!keeps_sharing(5_000, 100, 8, 1));
+}
+
+#[test]
+fn a_round_shares_while_it_does_at_most_half_the_views_combined_work() {
+    // 8 bindings on 4 permits: two waves of own evaluations take 200us, and
+    // 800us of work in all.
     assert!(keeps_sharing(200, 100, 8, 4), "as fast");
-    assert!(!keeps_sharing(201, 100, 8, 4), "slower");
-    assert!(!keeps_sharing(1_000, 100, 8, 4));
+    assert!(keeps_sharing(400, 100, 8, 4), "slower, but half the work");
+    assert!(!keeps_sharing(401, 100, 8, 4), "slower, and more");
     // Many more bindings than permits.
-    assert!(keeps_sharing(5_000, 100, 200, 4));
-    assert!(!keeps_sharing(5_001, 100, 200, 4));
+    assert!(keeps_sharing(10_000, 100, 200, 4));
+    assert!(!keeps_sharing(10_001, 100, 200, 4));
+    // Issue #378: 100 keyed views of a rule over 100k edges, 1ms each on 18
+    // permits, and a 7ms round. Six waves of own evaluations finish sooner,
+    // at 14 times the work, and every request waits for the permits they
+    // hold.
+    assert!(keeps_sharing(7_000, 1_000, 100, 18));
+    // No overflow.
+    assert!(keeps_sharing(u64::MAX, u64::MAX, u64::MAX, 1));
+    assert!(!keeps_sharing(u64::MAX, 1, 1, 1));
 }
 
 #[test]
@@ -476,6 +494,67 @@ mod rounds {
         assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 4])]);
         assert!(!family.probing.load(Ordering::Relaxed), "backing off");
         assert_eq!(metrics.shared_evaluations(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_family_judged_while_views_subscribe_probes_again_once_its_bindings_double() {
+        let (handler, _tmp) = handler();
+        write(&handler, "+item[(\"s1\", 1), (\"s2\", 2)]").await;
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
+        let _idle = idle(
+            &families,
+            &handler,
+            &metrics,
+            &[
+                r#"?item("s2", X)"#,
+                r#"?item("s3", X)"#,
+                r#"?item("s4", X)"#,
+            ],
+        );
+        one.refresh().await.unwrap();
+        let family = Arc::clone(&one.family);
+
+        // The first views' own evaluations are far faster than any round:
+        // the probe, judged with 4 bindings, stops sharing.
+        let gate = family.probe_gate.write().await;
+        write(&handler, "+item(\"x\", 1)").await;
+        one.refresh().await.unwrap();
+        assert!(family.probing.load(Ordering::Relaxed), "probe started");
+        family.own_cost_us.store(1, Ordering::Relaxed);
+        drop(gate);
+        probed(&family).await;
+        assert!(!family.shares(), "the probe was judged too slow");
+        assert_eq!(family.stops.load(Ordering::Relaxed), 1);
+        write(&handler, "+item(\"x\", 2)").await;
+        one.refresh().await.unwrap();
+        assert!(!family.probing.load(Ordering::Relaxed), "backing off");
+
+        // Twice the bindings: the verdict no longer holds, and the next own
+        // evaluation probes at once.
+        let _more = idle(
+            &families,
+            &handler,
+            &metrics,
+            &[
+                r#"?item("s5", X)"#,
+                r#"?item("s6", X)"#,
+                r#"?item("s7", X)"#,
+                r#"?item("s8", X)"#,
+            ],
+        );
+        let gate = family.probe_gate.write().await;
+        write(&handler, "+item(\"x\", 3)").await;
+        one.refresh().await.unwrap();
+        assert!(family.probing.load(Ordering::Relaxed), "probed again");
+        // Own evaluations slower than any round here.
+        family.own_cost_us.store(1_000_000_000, Ordering::Relaxed);
+        drop(gate);
+        probed(&family).await;
+        assert!(family.shares(), "the second probe kept sharing");
+        assert_eq!(metrics.shared_evaluations(), 2);
+        assert_eq!(family.stops.load(Ordering::Relaxed), 0);
     }
 
     /// Views of `?reach("nK", Y)` for `bindings` nodes near the end of a

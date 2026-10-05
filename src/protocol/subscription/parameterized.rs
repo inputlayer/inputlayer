@@ -34,24 +34,29 @@
 //! `max_result_rows` allows. A lifted query computes every binding's rows,
 //! subscribed or not, and every view waits for it. A family therefore never
 //! shares while its views' own evaluations fit on the compute permits at
-//! once, and otherwise shares only while a round is, on average, no slower
-//! than those evaluations run in parallel on the permits. Costs leave out
-//! waiting for a permit and compiling a plan, and a view's own cost counts
-//! only evaluations that reused a compiled plan. Costs hold under the rules
-//! they were measured with: a rule change stops sharing and starts them
-//! over. A family never evaluates its lifted query while a parameter binds
-//! an atom that reads, under the current rules, a recursive relation: the
-//! constant lets Magic Sets restrict the work, and the lifted query may
-//! compute the whole closure. Otherwise, once it has a view's own cost to
-//! compare with, a family probes: it evaluates the round of that revision,
-//! which no view waits for, under the server's probe permit rather than a
-//! compute permit, and starts sharing only when that round is fast enough.
-//! Views that then share at the probe's revision read the probe's round, so
-//! the lifted query is evaluated at most once per revision. With too few
-//! compute permits for that, a family shares without a probe. It stops when
-//! rounds are slower on average, and probes (or decides) again after some
-//! commits, waiting longer after each failure. While sharing, a view
-//! evaluates its own query now and then to keep that cost current.
+//! once. Otherwise it shares while a round is, on average, no slower than
+//! those evaluations run in parallel on the permits, or does at most half
+//! their combined work: the views' own evaluations take the compute permits
+//! every request needs, so saving them a little latency on an idle server
+//! must not cost the server many times the work. Costs leave out waiting
+//! for a permit and compiling a plan, and a view's own cost counts only
+//! evaluations that reused a compiled plan. Costs hold under the rules they
+//! were measured with: a rule change stops sharing and starts them over. A
+//! family never evaluates its lifted query while a parameter binds an atom
+//! that reads, under the current rules, a recursive relation: the constant
+//! lets Magic Sets restrict the work, and the lifted query may compute the
+//! whole closure. Otherwise, once it has a view's own cost to compare with,
+//! a family probes: it evaluates the round of that revision, which no view
+//! waits for, under the server's probe permit rather than a compute permit,
+//! and starts sharing only when that round is fast enough. Views that then
+//! share at the probe's revision read the probe's round, so the lifted query
+//! is evaluated at most once per revision. With too few compute permits for
+//! that, a family shares without a probe. It stops when rounds are slower on
+//! average, and probes (or decides) again after some commits, waiting longer
+//! after each failure, or as soon as it has twice the bindings it had when
+//! it stopped: a verdict reached while views were still subscribing must
+//! not hold for the many more that follow. While sharing, a view evaluates
+//! its own query now and then to keep that cost current.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -93,12 +98,19 @@ const MAX_PROBE_BACKOFF: u64 = 6;
 /// Rounds between a view's own evaluations while sharing.
 const SAMPLE_EVERY: u64 = 64;
 
-/// Whether a family keeps sharing with rounds of `shared_us`: unless they
-/// are slower than its `bindings` views' own evaluations of `own_us` each,
-/// run `permits` at a time.
+/// A round doing at most its views' own evaluations' combined work divided
+/// by this keeps sharing, however soon they would finish in parallel.
+const SHARED_WORK_DIVISOR: u64 = 2;
+
+/// Whether a family keeps sharing with rounds of `shared_us`, against its
+/// `bindings` views' own evaluations of `own_us` each on `permits` compute
+/// permits: while a round is no slower than those evaluations run `permits`
+/// at a time, or does at most their combined work divided by
+/// [`SHARED_WORK_DIVISOR`].
 fn keeps_sharing(shared_us: u64, own_us: u64, bindings: u64, permits: u64) -> bool {
-    let unshared = own_us.saturating_mul(bindings.div_ceil(permits.max(1)).max(1));
-    shared_us <= unshared
+    let parallel = own_us.saturating_mul(bindings.div_ceil(permits.max(1)).max(1));
+    let combined = own_us.saturating_mul(bindings) / SHARED_WORK_DIVISOR;
+    shared_us <= parallel.max(combined)
 }
 
 /// Fold `cost` into the running `average` of costs in microseconds (0: none
@@ -490,6 +502,8 @@ pub struct Family {
     own_since_stop: AtomicU64,
     /// Times sharing stopped since a round last kept it.
     stops: AtomicU64,
+    /// Bindings when sharing last stopped.
+    stopped_at_bindings: AtomicU64,
     /// Recent cost of a view's own evaluation, in microseconds (0: unknown).
     own_cost_us: AtomicU64,
     /// Recent cost of a round since sharing last stopped, in microseconds
@@ -584,6 +598,7 @@ impl Family {
         self.shared_cost_us.store(0, Ordering::Relaxed);
         self.own_since_stop.store(0, Ordering::Relaxed);
         self.stops.store(0, Ordering::Relaxed);
+        self.stopped_at_bindings.store(0, Ordering::Relaxed);
         verdict
     }
 
@@ -775,6 +790,10 @@ impl Family {
         self.own_since_stop.store(0, Ordering::Relaxed);
         self.shared_cost_us.store(0, Ordering::Relaxed);
         self.stops.fetch_add(1, Ordering::Relaxed);
+        self.stopped_at_bindings.store(
+            self.bindings.load(Ordering::Relaxed) as u64,
+            Ordering::Relaxed,
+        );
         self.sharing.store(false, Ordering::Relaxed);
     }
 
@@ -782,7 +801,8 @@ impl Family {
     /// compiled plan (`None` when it compiled one). Whether to probe: no
     /// parameter binds recursion under `snapshot`'s rules, the own cost is
     /// known, there are more bindings than compute permits, and the family
-    /// never shared or enough own evaluations passed since it stopped.
+    /// never stopped sharing, enough own evaluations passed since it did, or
+    /// it has twice the bindings it had then.
     fn record_own(&self, cost: Option<Duration>, snapshot: &KnowledgeGraphSnapshot) -> bool {
         let rules = snapshot.persistent_rules();
         if self.binds_recursion(snapshot) || !self.judges(rules) {
@@ -801,9 +821,14 @@ impl Family {
         let since_stop = self.own_since_stop.fetch_add(1, Ordering::Relaxed) + 1;
         let bindings = self.bindings.load(Ordering::Relaxed) as u64;
         let stops = self.stops.load(Ordering::Relaxed);
+        let grown = bindings
+            >= self
+                .stopped_at_bindings
+                .load(Ordering::Relaxed)
+                .saturating_mul(2);
         average > 0
             && self.outnumbers_permits()
-            && (stops == 0 || since_stop >= probe_after(bindings, stops))
+            && (stops == 0 || grown || since_stop >= probe_after(bindings, stops))
     }
 
     /// Evaluate the round of `snapshot`'s revision (the pending round, which
@@ -880,6 +905,7 @@ impl Families {
                         round_gate: tokio::sync::RwLock::default(),
                         own_since_stop: AtomicU64::new(0),
                         stops: AtomicU64::new(0),
+                        stopped_at_bindings: AtomicU64::new(0),
                         own_cost_us: AtomicU64::new(0),
                         shared_cost_us: AtomicU64::new(0),
                         rounds: AtomicU64::new(0),
