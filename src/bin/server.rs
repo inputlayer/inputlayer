@@ -158,6 +158,11 @@ async fn serve() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Box::<dyn std::error::Error + Send + Sync>::from(e.clone())
     })?);
 
+    // Load the knowledge graphs that were in memory before the restart, in
+    // the background: startup and logins do not wait for them
+    let warm_handler = Arc::clone(&handler);
+    tokio::task::spawn_blocking(move || warm_handler.warm_knowledge_graphs());
+
     // Bootstrap auth: create _internal KG and admin user if needed
     handler.bootstrap_auth().map_err(|e| {
         eprintln!("ERROR: {e}");

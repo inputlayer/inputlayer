@@ -1385,6 +1385,29 @@ impl Handler {
         })
     }
 
+    /// Load the knowledge graphs that were in memory before the restart, one
+    /// after another. Runs in the background after startup; a request for a
+    /// graph not loaded yet loads it itself. Takes the storage lock per graph,
+    /// as a request does.
+    pub fn warm_knowledge_graphs(&self) {
+        let start = std::time::Instant::now();
+        let names = self.get_storage().resident_knowledge_graphs();
+        let mut warmed = 0usize;
+        for kg in &names {
+            match self.get_storage().warm_knowledge_graph(kg) {
+                Ok(true) => warmed += 1,
+                Ok(false) => {}
+                Err(e) => warn!(kg = %kg, error = %e, "kg_warm_failed"),
+            }
+        }
+        info!(
+            knowledge_graphs = names.len(),
+            warmed,
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            "kg_warm_complete"
+        );
+    }
+
     /// Get access to the storage engine (for HTTP handlers).
     pub fn get_storage(&self) -> parking_lot::RwLockReadGuard<'_, StorageEngine> {
         self.storage.read()

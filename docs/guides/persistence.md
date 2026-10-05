@@ -24,7 +24,10 @@ On startup, InputLayer:
    already hold, and flushes them to batch files
 
 Startup reads no batch files. Each knowledge graph's batch files are read and
-consolidated when it is first used.
+consolidated when it is first used. The knowledge graphs that were
+in memory before the restart are loaded in the background once the server is
+up, so their first request does not wait for the load; a request that arrives
+first loads its graph itself.
 
 ---
 
