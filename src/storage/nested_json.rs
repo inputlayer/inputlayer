@@ -14,7 +14,7 @@ const MAX_DEPTH: usize = 4 * crate::parser::MAX_NESTING_DEPTH_CEILING + 64;
 /// `serde_json`'s own recursion limit.
 const SERDE_JSON_DEPTH: usize = 128;
 
-/// Deserialize `json`, accepting nesting up to [`MAX_DEPTH`]. Input within
+/// Deserialize `json`, accepting nesting up to `MAX_DEPTH`. Input within
 /// `serde_json`'s limit takes the ordinary path; deeper input is decoded on
 /// a thread with an engine-sized stack.
 pub fn from_slice<T: DeserializeOwned + Send>(json: &[u8]) -> Result<T, String> {
