@@ -9,7 +9,8 @@
 //! `--test e2e_reactive` (as `make e2e-reactive`, `test-all` and CI do).
 //!
 //! `stream` covers the notification stream and snapshot handoff contract,
-//! `delivery` results and deltas too large for one frame. Expected failures
+//! `delivery` results and deltas too large for one frame, `saturation`
+//! sessions' deltas while writers overload the engine. Expected failures
 //! for defects the reactive plan still tracks go in a `known_defects` module
 //! (see `inputlayer_testkit::KnownDefect`); none is open.
 //!
@@ -20,6 +21,7 @@
 
 mod delivery;
 mod reactive;
+mod saturation;
 mod stream;
 mod wire;
 
