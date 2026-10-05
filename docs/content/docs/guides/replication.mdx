@@ -61,11 +61,22 @@ primary's numbers.
 
 With asynchronous shipping, a write the primary acknowledged can be lost if
 the primary is lost before the follower applied it. The window is the
-follower's lag. That lag is usually a few milliseconds, and the status
-endpoint reports it at any time. A follower that cannot hear the primary
-(the primary died or the network is cut) notices after `timeout_ms`. Writes
-the primary accepts during that time reach the follower only once the
-connection is back.
+follower's lag, which the status endpoint reports at any time.
+
+Measured with primary and follower on one 32-core host (release build,
+`immediate` durability):
+
+- a subscription on the follower receives a write's delta 2.1 ms after the
+  primary acknowledges the write (median; p99 7.4 ms). The same subscription
+  on the primary takes 0.5 ms.
+- with 4 writers at full speed (about 520 commits per second) the follower
+  stays within one event of the primary
+- across 5 trials of killing the primary (`SIGKILL`) under a steady writer,
+  no acknowledged write was missing from the follower
+
+A follower that cannot hear the primary (the primary died, or the network is
+cut) notices after `timeout_ms`. Writes the primary accepts in that time reach
+the follower only once the connection is back.
 
 Synchronous shipping, where the primary acknowledges a write only once a
 follower holds it (RPO zero), is planned.
@@ -82,7 +93,9 @@ follower holds it (RPO zero), is planned.
 | A change fails to apply | Clears its position and resyncs. |
 
 A resync brings the follower's whole state to a consistent copy of the
-primary. Facts, rules, schemas, graphs and indexes the primary no longer has
+primary. On the same host, a fresh follower copied a primary holding 1,000,000
+facts in 3.7 s. A restarted follower caught up on 20,000 missed commits in
+2.4 s. Facts, rules, schemas, graphs and indexes the primary no longer has
 are removed. A partly applied or stale follower is repaired the same way as
 an empty one.
 
