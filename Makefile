@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check perf-gate-remote bench-engine-remote bench-sessions-remote secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check perf-gate-remote bench-engine-remote bench-sessions-remote soak soak-remote secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -313,6 +313,12 @@ integration-test:
 # Scale random histories with INPUTLAYER_ORACLE_SEEDS=<n>.
 oracle-test:
 	cargo test --all-features --test differential_oracle
+
+# Concurrency soak (tests/differential_oracle/soak): the sustained profile by
+# default; SOAK_ARGS as for scripts/soak.sh, e.g. SOAK_ARGS="--secs 120".
+# The sustained run belongs on the benchmark host: soak-remote.
+soak:
+	./scripts/soak.sh $(SOAK_ARGS)
 
 # Tier 3: E2E snapshot tests (parallel, against live server)
 e2e-test:
@@ -663,6 +669,11 @@ bench-engine-remote:
 # benchmark host; options via SESSIONS_ARGS as for bench-sessions.
 bench-sessions-remote:
 	./scripts/perf-gate-remote.sh --rev $(REV) --bench sessions -- $(SESSIONS_ARGS)
+
+# The sustained concurrency soak (scripts/soak.sh) for commit REV on the
+# benchmark host; options via SOAK_ARGS.
+soak-remote:
+	./scripts/perf-gate-remote.sh --rev $(REV) --bench soak -- $(SOAK_ARGS)
 
 # Reactive agent benchmark on the genbi-trust suite (read in place from
 # GENBI_TRUST_DIR); see perf-gate/README.md. Options via GENBI_ARGS, e.g.

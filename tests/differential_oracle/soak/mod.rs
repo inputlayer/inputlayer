@@ -131,10 +131,12 @@ impl Default for Config {
 
 fn var<T: FromStr>(name: &str) -> Option<T> {
     let raw = std::env::var(format!("INPUTLAYER_SOAK_{name}")).ok()?;
-    match raw.parse() {
-        Ok(value) => Some(value),
-        Err(_) => panic!("INPUTLAYER_SOAK_{name}={raw:?} does not parse"),
-    }
+    let parsed = raw.parse().ok();
+    assert!(
+        parsed.is_some(),
+        "INPUTLAYER_SOAK_{name}={raw:?} does not parse"
+    );
+    parsed
 }
 
 impl Config {
@@ -370,14 +372,13 @@ pub async fn run(server: &str, config: Config) -> Report {
     let write_secs = write_started.elapsed().as_secs_f64();
 
     // Everything committed; every consumer must now settle on this revision.
-    let final_revision = admin
-        .read(&[("final", "?edge(X, Y)")])
-        .await
-        .map(|snapshot| snapshot.revision)
-        .unwrap_or_else(|e| {
+    let final_revision = match admin.read(&[("final", "?edge(X, Y)")]).await {
+        Ok(snapshot) => snapshot.revision,
+        Err(e) => {
             shared.fail(format!("final read: {e}"));
             0
-        });
+        }
+    };
     shared
         .final_revision
         .store(final_revision.max(1), Ordering::SeqCst);

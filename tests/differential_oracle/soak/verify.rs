@@ -314,9 +314,7 @@ impl Verifier {
             self.advance();
         }
         // Nothing more can commit.
-        for ack in &mut self.acks {
-            *ack = None;
-        }
+        self.acks.fill(None);
         self.advance();
         if !self.backlog.is_empty() {
             self.fail(format!(

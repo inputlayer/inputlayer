@@ -64,6 +64,24 @@ INPUTLAYER_ORACLE_SEEDS=500 make oracle-test      # More random histories
 INPUTLAYER_ORACLE_SEED=17 cargo test --all-features --test differential_oracle seeded  # One seed
 ```
 
+#### Concurrency soak
+
+The adapters above replay one history at a time, in process. `tests/differential_oracle/soak/` holds a real server under concurrent load to the same reference evaluator:
+
+- **Writers** commit concurrently. Each owns a disjoint share of the base facts, so it knows exactly what each program must change and checks the effective counts the engine reports.
+- **A rule churner** atomically replaces rule variants (recursion shape, negation, aggregates) while the writers run.
+- **Consumers** maintain standing queries from pushed deltas: fast ones; slow ones reading behind a one-frame inbox and a 4 KB socket buffer; ones that stop reading for a while; subscription groups; short-lived connections attaching to shared views; and auditors that `read` every query at one revision.
+
+Every write reply names the revision it committed at, and every snapshot, delta and read names the revision it is exact at. A verifier thread replays the commits in revision order through the reference and checks each observation at its revision. Each writer commits one program at a time, so every commit at or below the lowest of the writers' last acknowledged revisions is known; observations above it wait. When the writers stop, every consumer must settle on the reference's final state. Slow and stalled consumers may be disconnected only as the protocol documents (`slow_consumer`, or the send timeout), then reconnect. Fast consumers must never be disconnected. Server memory is sampled once a second.
+
+The default is a smoke of a few seconds that runs with the oracle. `INPUTLAYER_SOAK_*` variables scale it (see `Config` in `soak/mod.rs`). `scripts/soak.sh` runs it in release and writes `result.json` and `summary.md` to `target/soak/latest`. The sustained profile (30 minutes, ~400 consumers) is for the benchmark host:
+
+```bash
+make soak SOAK_ARGS="--profile smoke"                      # Locally, with a report
+make soak SOAK_ARGS="--secs 120 --set FAST=50"             # Sustained profile, shorter and smaller
+make soak-remote                                           # Sustained soak on the benchmark host
+```
+
 ### Tier 3: Snapshot Tests (E2E)
 
 ~995 IQL scripts in `examples/iql/` organized across 33 categories. Each `.iql` file has a corresponding `.iql.out` file with expected output. The test runner starts a server, executes each script via the client binary, and compares actual output against the snapshot.
