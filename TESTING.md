@@ -98,12 +98,13 @@ make e2e-update                            # Regenerate all .dl.out files
 Options:
 | Flag | Description |
 |------|-------------|
-| `-f PATTERN` | Filter tests by grep pattern (e.g., `recursion`, `06_joins\|08_negation`) |
+| `-f PATTERN` | Filter tests by grep pattern (e.g., `recursion`, `06_joins\|08_negation`); a pattern matching no spec fails the run |
 | `-j N` | Parallel jobs (default: 4, use 1 for sequential) |
 | `-v` | Verbose mode with full diffs (forces sequential) |
 | `-u` | Update mode  - regenerate `.iql.out` files |
 | `--skip-build` | Use the binaries already built instead of running `cargo build` |
-| `--debug` | Use the `target/debug` binaries (the ones `cargo test` builds) instead of `target/release` |
+| `--profile NAME` | Cargo profile of the binaries to build and run (default `release`; `dev` uses `target/debug`) |
+| `--debug` | Same as `--profile dev`: the `target/debug` binaries `cargo test` builds |
 | `--affected REF` | Run only the categories the changes since `REF` affect (see [Affected-Only Tests](#affected-only-tests)) |
 
 The PR gate runs `./scripts/run_snapshot_tests.sh --debug --skip-build --affected <base>` right after `make unit-test`, against the binaries that build left in `target/debug`; pushes to `main` run every spec the same way (`.github/workflows/main.yml`).

@@ -53,8 +53,8 @@ DIRTY=0
 # Mode flags
 UPDATE_MODE=0
 SKIP_BUILD=0
-# Cargo profile of the server and client binaries: release, or dev with
-# --debug (target/debug, the binaries `cargo test` builds)
+# Cargo profile of the server and client binaries (dev, or --debug, uses
+# target/debug: the binaries `cargo test` builds)
 PROFILE=release
 VERBOSE=0
 FILTER=""
@@ -466,6 +466,7 @@ while [[ $# -gt 0 ]]; do
         -f|--filter)    FILTER="$2"; shift 2 ;;
         -u|--update)    UPDATE_MODE=1; shift ;;
         --skip-build)   SKIP_BUILD=1; shift ;;
+        --profile)      PROFILE="$2"; shift 2 ;;
         --debug)        PROFILE=dev; shift ;;
         --affected)     AFFECTED_REF="$2"; shift 2 ;;
         -j|--jobs)      PARALLEL_JOBS="$2"; shift 2 ;;
@@ -478,7 +479,8 @@ while [[ $# -gt 0 ]]; do
             echo "  -u, --update     Update .out files with actual output (forces sequential)"
             echo "  -j, --jobs N     Parallel jobs (default: $PARALLEL_JOBS, 0 or 1 = sequential)"
             echo "  --skip-build     Skip cargo build"
-            echo "  --debug          Use the target/debug binaries (the ones cargo test builds)"
+            echo "  --profile NAME   Cargo profile of the binaries (default: release; dev = target/debug)"
+            echo "  --debug          Same as --profile dev: the binaries cargo test builds"
             echo "  --affected REF   Only run the categories the changes since REF affect"
             echo "  -h, --help       Show this help message"
             exit 0
@@ -542,8 +544,8 @@ if [[ -z "$TARGET_DIR" ]]; then
     TARGET_DIR="$PROJECT_DIR/target"
 fi
 
-# Cargo writes the dev profile to target/debug
-PROFILE_DIR=release
+# Cargo writes the dev profile to target/debug, every other profile to its name
+PROFILE_DIR="$PROFILE"
 if [[ "$PROFILE" == "dev" ]]; then
     PROFILE_DIR=debug
 fi
@@ -618,6 +620,13 @@ if [[ -z "$TEST_FILES" ]]; then
     TEST_TOTAL=0
 else
     TEST_TOTAL=$(echo "$TEST_FILES" | wc -l | tr -d ' ')
+fi
+
+# A filter that matches nothing would pass vacuously (a renamed spec drops
+# out of its gate), so fail it
+if [[ -n "$FILTER" ]] && [[ "$TEST_TOTAL" == "0" ]]; then
+    echo -e "${RED}No tests match filter: $FILTER${NC}"
+    exit 1
 fi
 
 PENDING_COUNT=$(find "$EXAMPLES_DIR" -name "*_pending_*.iql" -type f | wc -l | tr -d ' ')
