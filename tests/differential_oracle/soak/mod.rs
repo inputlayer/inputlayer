@@ -88,8 +88,9 @@ pub struct Config {
     pub server_cpus: Option<String>,
     /// Committed revisions the verifier keeps reference digests for.
     pub horizon: usize,
-    /// Fail when the server's resident memory at the end exceeds the level
-    /// after warm-up by more than this percentage.
+    /// Fail when the server's resident memory grew by more than this
+    /// percentage over the second half of the run: buffers and caches fill
+    /// early, a leak keeps growing.
     pub max_rss_growth_pct: Option<f64>,
     /// Fail when a fast consumer's p99 commit-to-delta lag exceeds this.
     pub max_fast_p99_ms: Option<f64>,
@@ -492,8 +493,8 @@ impl Report {
             .collect()
     }
 
-    /// Resident memory after warm-up (the mean of the samples between 20%
-    /// and 30% of the run) and at the end (the mean of the last 10%), in kB.
+    /// Resident memory at mid-run (the mean of the samples between 45% and
+    /// 55% of the run) and at the end (the mean of the last 10%), in kB.
     pub fn rss_levels(&self) -> Option<(u64, u64)> {
         let n = self.rss.len();
         if n < 10 {
@@ -502,7 +503,7 @@ impl Report {
         let mean =
             |slice: &[(f64, u64)]| slice.iter().map(|(_, kb)| kb).sum::<u64>() / slice.len() as u64;
         Some((
-            mean(&self.rss[n * 2 / 10..n * 3 / 10]),
+            mean(&self.rss[n * 45 / 100..n * 55 / 100]),
             mean(&self.rss[n * 9 / 10..]),
         ))
     }
@@ -533,13 +534,12 @@ impl Report {
         {
             failures.push(format!("the server log has {n} line(s) with '{name}'"));
         }
-        if let (Some(limit), Some((warm, end))) =
-            (self.config.max_rss_growth_pct, self.rss_levels())
+        if let (Some(limit), Some((mid, end))) = (self.config.max_rss_growth_pct, self.rss_levels())
         {
-            let growth = (end as f64 - warm as f64) * 100.0 / warm.max(1) as f64;
+            let growth = (end as f64 - mid as f64) * 100.0 / mid.max(1) as f64;
             if growth > limit {
                 failures.push(format!(
-                    "server memory grew {growth:.1}% after warm-up ({warm} kB to {end} kB), \
+                    "server memory grew {growth:.1}% over the second half ({mid} kB to {end} kB), \
                      over the {limit}% limit"
                 ));
             }
@@ -602,13 +602,19 @@ impl Report {
             "- reference: {} revisions judged, slowest {:.1} ms, most observations waiting {}\n",
             self.verdict.revisions_judged, self.verdict.max_judge_ms, self.verdict.max_backlog
         ));
-        if let Some((warm, end)) = self.rss_levels() {
+        if let Some((mid, end)) = self.rss_levels() {
             let peak = self.rss.iter().map(|(_, kb)| *kb).max().unwrap_or(0);
+            let at = |q: usize| self.rss[(self.rss.len() - 1) * q / 4].1 / 1024;
             out.push_str(&format!(
-                "- server memory: {} MiB after warm-up, {} MiB at the end, peak {} MiB\n",
-                warm / 1024,
+                "- server memory: {} MiB mid-run, {} MiB at the end, peak {} MiB \
+                 (at 25/50/75/100% of the run: {}/{}/{}/{} MiB)\n",
+                mid / 1024,
                 end / 1024,
-                peak / 1024
+                peak / 1024,
+                at(1),
+                at(2),
+                at(3),
+                at(4)
             ));
         }
         let log: Vec<String> = self
