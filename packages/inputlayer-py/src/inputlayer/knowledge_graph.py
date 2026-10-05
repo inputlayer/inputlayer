@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from inputlayer import _meta
 from inputlayer._ast import AggExpr, BoolExpr, Expr, OrderedColumn
 from inputlayer._ast import Column as AstColumn
+from inputlayer._literal import collect_params, ms_to_datetime
 from inputlayer._literal import encode as encode_literal
-from inputlayer._literal import ms_to_datetime
 from inputlayer._proxy import ColumnProxy, RelationProxy, RelationRef
 from inputlayer.auth import AclEntry
 from inputlayer.compiler import (
@@ -271,14 +271,22 @@ class KnowledgeGraph:
         # il_txn_pending, il_assert).
         self._guard_relations_declared = False
 
-    async def _execute(self, iql: str, *, timeout: float | None = None) -> ResultResponse:
+    async def _execute(
+        self,
+        iql: str,
+        *,
+        timeout: float | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> ResultResponse:
         """Execute a statement on this KG's own connection.
 
         The connection is bound to this KG when it opens (``?kg=``), so no
         statement ever switches it. Engine failures raise ``QueryError``
-        naming *iql*.
+        naming *iql*. *params* are the values of its ``$name`` references.
         """
-        return await _naming_query(iql, self._conn.execute(iql, timeout=timeout))
+        return await _naming_query(
+            iql, self._conn.execute(iql, timeout=timeout, params=params)
+        )
 
     @property
     def name(self) -> str:
@@ -353,37 +361,39 @@ class KnowledgeGraph:
         data: dict | list[dict] | Any | None = None,
     ) -> InsertResult:
         """Insert facts into the knowledge graph."""
-        if isinstance(facts, type) and issubclass(facts, Relation):
-            # Bulk mode: relation class + data
-            if data is None:
-                raise ValueError("Must provide data when passing a Relation class")
-            rel_cls = facts
-            if isinstance(data, dict):
-                instances = [rel_cls(**data)]
-            elif isinstance(data, list):
-                instances = [rel_cls(**d) for d in data]
+        # Values travel as parameters: the engine binds them without parsing.
+        with collect_params() as params:
+            if isinstance(facts, type) and issubclass(facts, Relation):
+                # Bulk mode: relation class + data
+                if data is None:
+                    raise ValueError("Must provide data when passing a Relation class")
+                rel_cls = facts
+                if isinstance(data, dict):
+                    instances = [rel_cls(**data)]
+                elif isinstance(data, list):
+                    instances = [rel_cls(**d) for d in data]
+                else:
+                    # Try pandas DataFrame
+                    try:
+                        instances = [rel_cls(**row) for row in data.to_dict("records")]
+                    except Exception as err:
+                        raise TypeError(
+                            f"Unsupported data type: {type(data).__name__}"
+                        ) from err
+                if len(instances) == 1:
+                    iql = compile_insert(instances[0])
+                else:
+                    iql = compile_bulk_insert(rel_cls, instances)
+            elif isinstance(facts, list):
+                if not facts:
+                    return InsertResult(count=0)
+                iql = compile_bulk_insert(type(facts[0]), facts)
+            elif isinstance(facts, Relation):
+                iql = compile_insert(facts)
             else:
-                # Try pandas DataFrame
-                try:
-                    instances = [rel_cls(**row) for row in data.to_dict("records")]
-                except Exception as err:
-                    raise TypeError(
-                        f"Unsupported data type: {type(data).__name__}"
-                    ) from err
-            if len(instances) == 1:
-                iql = compile_insert(instances[0])
-            else:
-                iql = compile_bulk_insert(rel_cls, instances)
-        elif isinstance(facts, list):
-            if not facts:
-                return InsertResult(count=0)
-            iql = compile_bulk_insert(type(facts[0]), facts)
-        elif isinstance(facts, Relation):
-            iql = compile_insert(facts)
-        else:
-            raise TypeError(f"Unsupported facts type: {type(facts).__name__}")
+                raise TypeError(f"Unsupported facts type: {type(facts).__name__}")
 
-        result = await self._execute(iql)
+        result = await self._execute(iql, params=params)
         return InsertResult(count=_inserted_count(result))
 
     # ── Delete ────────────────────────────────────────────────────────
@@ -395,24 +405,27 @@ class KnowledgeGraph:
         where: Callable | None = None,
     ) -> DeleteResult:
         """Delete facts from the knowledge graph."""
-        if isinstance(facts, type) and issubclass(facts, Relation) and where is not None:
-            # Conditional delete
-            rel_cls = facts
-            proxy = RelationProxy(
-                Relation._resolve_name(rel_cls), columns=tuple(Relation._get_columns(rel_cls))
-            )
-            condition = where(proxy)
-            iql = compile_conditional_delete(rel_cls, condition)
-        elif isinstance(facts, list):
-            if facts:
-                await self._execute("\n".join(compile_delete(fact) for fact in facts))
-            return DeleteResult(count=len(facts))
-        elif isinstance(facts, Relation):
-            iql = compile_delete(facts)
-        else:
-            raise TypeError(f"Unsupported facts type: {type(facts).__name__}")
+        with collect_params() as params:
+            if isinstance(facts, type) and issubclass(facts, Relation) and where is not None:
+                # Conditional delete
+                rel_cls = facts
+                proxy = RelationProxy(
+                    Relation._resolve_name(rel_cls), columns=tuple(Relation._get_columns(rel_cls))
+                )
+                condition = where(proxy)
+                iql = compile_conditional_delete(rel_cls, condition)
+            elif isinstance(facts, list):
+                if not facts:
+                    return DeleteResult(count=0)
+                iql = "\n".join(compile_delete(fact) for fact in facts)
+            elif isinstance(facts, Relation):
+                iql = compile_delete(facts)
+            else:
+                raise TypeError(f"Unsupported facts type: {type(facts).__name__}")
 
-        result = await self._execute(iql)
+        result = await self._execute(iql, params=params)
+        if isinstance(facts, list):
+            return DeleteResult(count=len(facts))
         return DeleteResult(count=len(result.rows) if result.rows else 0)
 
     async def retract(
@@ -441,10 +454,11 @@ class KnowledgeGraph:
     async def _commit_program(self, program: Program, strict: bool) -> ProgramResult:
         if program.guarded:
             await self._ensure_guard_relations()
-        compiled = program.compile(strict)
+        with collect_params() as params:
+            compiled = program.compile(strict)
         iql = compiled.iql
         try:
-            result = await self._execute(iql)
+            result = await self._execute(iql, params=params)
         except StatementFailedError as err:
             if compiled.assert_index is not None and err.errors[0].index == compiled.assert_index:
                 raise PreconditionFailed(iql, err.result) from err
@@ -467,7 +481,9 @@ class KnowledgeGraph:
         )
         if strict and not applied:
             raise PreconditionFailed(iql, result)
-        return ProgramResult(applied=applied, inserted=inserted, deleted=deleted, iql=iql)
+        return ProgramResult(
+            applied=applied, inserted=inserted, deleted=deleted, iql=iql, params=params
+        )
 
     async def claim(
         self,
@@ -493,9 +509,10 @@ class KnowledgeGraph:
         is *row* when won, the row already there when lost, and None when the
         *when* guard did not hold.
         """
-        iql = compile_claim(row, when=when, unless=unless, key=key).iql
+        with collect_params() as params:
+            iql = compile_claim(row, when=when, unless=unless, key=key).iql
         try:
-            result = await self._execute(iql)
+            result = await self._execute(iql, params=params)
         except QueryError as err:
             raise _as_conflict(err, iql) from err
         rel = type(row)
@@ -898,20 +915,21 @@ class KnowledgeGraph:
 
     async def define_rules(self, *targets: type[Derived]) -> None:
         """Deploy persistent rule definitions in one program."""
-        clauses = [
-            compile_rule(
-                Relation._resolve_name(target),
-                Relation._get_columns(target),
-                clause.select_map,
-                clause.relations,
-                clause.condition,
-                persistent=True,
-            )
-            for target in targets
-            for clause in target.rules
-        ]
+        with collect_params() as params:
+            clauses = [
+                compile_rule(
+                    Relation._resolve_name(target),
+                    Relation._get_columns(target),
+                    clause.select_map,
+                    clause.relations,
+                    clause.condition,
+                    persistent=True,
+                )
+                for target in targets
+                for clause in target.rules
+            ]
         if clauses:
-            await self._execute("\n".join(clauses))
+            await self._execute("\n".join(clauses), params=params)
 
     async def list_rules(self) -> list[RuleInfo]:
         """List all rules in this KG."""
@@ -945,15 +963,16 @@ class KnowledgeGraph:
         else:
             head_name = name
             head_columns = list(clause.select_map.keys())
-        iql = compile_rule(
-            head_name,
-            head_columns,
-            clause.select_map,
-            clause.relations,
-            clause.condition,
-            persistent=True,
-        )
-        await self._execute(f"{_meta.rule_remove(head_name, index)}\n{iql}")
+        with collect_params() as params:
+            iql = compile_rule(
+                head_name,
+                head_columns,
+                clause.select_map,
+                clause.relations,
+                clause.condition,
+                persistent=True,
+            )
+        await self._execute(f"{_meta.rule_remove(head_name, index)}\n{iql}", params=params)
 
     async def clear_rule(self, name: str | type) -> None:
         """Clear a rule's clauses."""
@@ -1147,14 +1166,29 @@ class KnowledgeGraph:
             details=[(row[0], int(row[1])) for row in result.rows if len(row) > 1],
         )
 
-    async def execute(self, iql: str, *, timeout: float | None = None) -> ResultSet:
+    async def execute(
+        self,
+        iql: str,
+        *,
+        timeout: float | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> ResultSet:
         """Execute raw IQL.
 
         ``timeout`` (seconds) is the request's deadline, default the client's
         ``default_timeout``; past it the engine stops the program before it
         commits and ``DeadlineExceeded`` is raised.
+
+        ``params`` binds the program's ``$name`` references to values sent
+        beside its text, never parsed as IQL: pass every value you did not
+        write yourself this way::
+
+            await kg.execute("+eta($shipment, $due)", params={"shipment": s, "due": d})
+
+        A value is typed by its JSON form; ``{"float": 2}`` and
+        ``{"int": "9007199254740993"}`` name the type explicitly.
         """
-        result = await self._execute(iql, timeout=timeout)
+        result = await self._execute(iql, timeout=timeout, params=params)
         return ResultSet(
             columns=result.columns,
             rows=result.rows,

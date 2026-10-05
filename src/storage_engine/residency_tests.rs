@@ -183,6 +183,7 @@ fn an_unloaded_knowledge_graph_reloads_unchanged_under_its_revision() {
 
     let first = storage.get_snapshot_for("a").unwrap();
     let revision = first.revision;
+    let changes = first.changes().clone();
     let tuples = rows(&storage, "a", "e");
     drop(first);
     storage.get_snapshot_for("b").unwrap();
@@ -196,6 +197,11 @@ fn an_unloaded_knowledge_graph_reloads_unchanged_under_its_revision() {
 
     let again = storage.get_snapshot_for("a").unwrap();
     assert_eq!(again.revision, revision, "same state, same revision");
+    assert_eq!(
+        *again.changes(),
+        changes,
+        "an expect_revision precondition checks as before the unload"
+    );
     assert_eq!(rows(&storage, "a", "e"), tuples);
     drop(again);
 

@@ -62,13 +62,13 @@ Query Plan:
     |- Input 1:
         Scan(edge)[X, Y]
     |- Input 2:
-        Map[[2, 1]] -> [X, Z]
+        Map[[0, 2]] -> [X, Z]
           Distinct
-            Join[L:[0], R:[1]] -> [Y, Z, X]
+            Join[L:[1], R:[0]] -> [X, Y, Z]
             |- Left:
-                Scan(path)[Y, Z]
-            `- Right:
                 Scan(edge)[X, Y]
+            `- Right:
+                Scan(path)[Y, Z]
 
   Rule 2 Optimized IR:
     Scan(path)[X, Y]

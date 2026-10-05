@@ -86,6 +86,8 @@ pub fn eval_expr(expr: &ArithExpr, lookup: &dyn Fn(&str) -> Option<Value>) -> Op
         ArithExpr::Constant(v) => Value::Int64(*v),
         ArithExpr::FloatConstant(bits) => Value::Float64(f64::from_bits(*bits)),
         ArithExpr::Variable(name) => lookup(name)?,
+        // Bound before evaluation; an unbound one has no value.
+        ArithExpr::Param(_) => return None,
         ArithExpr::Binary { op, left, right } => {
             let l = eval_expr(left, lookup)?;
             let r = eval_expr(right, lookup)?;

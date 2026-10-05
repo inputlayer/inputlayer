@@ -56,12 +56,12 @@ On success:
   "knowledge_graph": "default",
   "version": "0.1.0",
   "role": "admin",
-  "protocol_version": 3,
+  "protocol_version": 4,
   "stream_epoch": "3f9c2a7e01b4d865"
 }
 ```
 
-`protocol_version` is the version of this protocol the server speaks (currently 3). `stream_epoch` identifies this run of the engine: notification `seq` numbers and knowledge graph revisions belong to it, and a restarted engine has a new one (see [Reconnection](#reconnection)).
+`protocol_version` is the version of this protocol the server speaks (currently 4; version 4 added [parameters](#parameters)). `stream_epoch` identifies this run of the engine: notification `seq` numbers and knowledge graph revisions belong to it, and a restarted engine has a new one (see [Reconnection](#reconnection)).
 
 On failure:
 
@@ -88,6 +88,47 @@ Send any InputLayer statement or meta command:
 ```
 
 The `program` field accepts any valid InputLayer statement: queries, inserts, rule definitions, meta commands, etc.
+
+### Parameters
+
+Send values beside the program instead of inside it. The program names each value `$name`, and `params` maps names to values:
+
+```json
+{
+  "type": "execute",
+  "program": "+eta($shipment, $date)\n-pending($shipment)",
+  "params": {"shipment": "S-77", "date": "2026-10-10"}
+}
+```
+
+The engine binds each value to the program's parsed statements. A value is never lexed or parsed, so it cannot change what the program does, whatever characters it holds: `"S-77\"), +admin(1"` is stored as that string. Use parameters for every value you did not write yourself (customer data, model output); string-escaping is then no longer the injection boundary.
+
+A parameter stands where a literal may stand, and binds exactly the value its literal would:
+
+| Where | Example |
+|---|---|
+| Fact arguments | `+order($id, $total)`, `-order($id, T)`, `+r[($a, 1), ($b, 2)]` |
+| Rule heads and bodies | `+vip(C) <- spend(C, S), S >= $threshold` |
+| Query goals and filters | `?order($id, T)`, `?order(I, T), T > $min, !refunded(I)` |
+| Arithmetic and function arguments | `?price(I, P), Q = P * $rate`, `?doc(I, T), L = len($needle)` |
+| Updates and conditional deletes | `-stock($item, N), +stock($item, M) <- stock($item, N), M = N - $qty` |
+| A vector search query | `hnsw_nearest("docs_idx", $embedding, 5, Id, Dist)` |
+
+A parameter cannot name a relation or variable, or set an aggregate's or `limit(...)`'s arguments. Meta commands take none: `.why`, `.debug`, `.subscribe` and `.rule edit` refuse a `$name` in their IQL. Inside a string literal, `"$name"` is plain text. A persistent rule stores the value bound when it was registered.
+
+Values are typed by their JSON form, or explicitly with a one-key object:
+
+| Type | Bare JSON | Explicit |
+|---|---|---|
+| int (64-bit) | `42` (no fraction or exponent) | `{"int": 42}`, `{"int": "9007199254740993"}` |
+| float (finite) | `0.5`, `1e-3` | `{"float": 1}` |
+| string | `"S-77"` | `{"string": "S-77"}` |
+| bool | `true` | `{"bool": true}` |
+| vector | `[0.1, 0.2]` | `{"vector": [0.1, 0.2]}` |
+
+Nothing is converted silently. JavaScript writes `1.0` as `1`, so send a float with an integral value as `{"float": 1}`; send an int beyond JavaScript's safe integer range as a decimal string, `{"int": "..."}`. A frame whose `params` cannot be bound exactly gets an `invalid_request` error naming the parameter, and nothing runs: `null` (what `JSON.stringify` writes for `NaN` and the infinities), an integer outside int64, a bare integral number of magnitude 2^63 or more, a bare negative zero (`-0` and `-0.0` read alike: send `0` for an int or `{"float": -0.0}` for a float), `{"float": n}` for an integer within int64 or uint64 range that no float equals, `{"int": ...}` with a fraction, an unknown type tag, a name given twice, or a name that is not an identifier (`[A-Za-z_][A-Za-z0-9_]*`, at most 64 bytes). `{"float": n}` for a larger integer binds the float nearest `n`, as the same float literal in IQL would.
+
+Every parameter the program references must be given, and every one given must be referenced; otherwise the request fails with code `validation` (a missing one is reported in `validation_errors` against its statement) and nothing runs. A value that cannot stand where it is referenced, such as a string in arithmetic, fails the same way. Parameter values count toward `storage.performance.max_query_size_bytes`. The request log records the program text and the number of parameters, not their values.
 
 ### Request IDs
 
@@ -137,9 +178,30 @@ Every `execute` runs under **one deadline**, counted from when the server reads 
 
 A `cancel` is read like any other frame: while `http.rate_limit.ws_max_in_flight_requests` requests are unanswered the server reads nothing, so keep a slot free if you may need to cancel.
 
-A request whose deadline passes is stopped the same way and fails with code `deadline_exceeded`; a write that already began committing completes and returns its result. Code `outcome_unknown` means the commit itself failed in a way that may have left the changes applied: read the state back before retrying.
+A request whose deadline passes is stopped the same way and fails with code `deadline_exceeded`; a write that already began committing completes and returns its result. A stopped query stops computing within milliseconds, even in the middle of a join forming millions of rows, and its compute slot is free again once it has. Code `outcome_unknown` means the commit itself failed in a way that may have left the changes applied: read the state back before retrying.
 
 Writes of facts are idempotent: inserting a fact that is present, or deleting one that is absent, changes nothing. After `cancelled`, `deadline_exceeded`, `outcome_unknown` or a lost connection, a client can resend the same write without duplicating it.
+
+### Revision Preconditions
+
+An `execute` that writes can say which state it was decided on. `expect_revision` is a revision the client observed, for example a subscription's `revision` or a push's. The program's writes then commit only if no relation in scope and no persistent rule changed after that revision. The engine checks this under the knowledge graph's write lock, together with the commit, so a write that lands between the check and the commit cannot slip through.
+
+```json
+{"type": "execute", "id": "d1", "program": "+claim(\"s1\", \"call_carrier\")",
+ "expect_revision": 1731, "expect_relations": ["eta"], "expect_epoch": "4f1c9a0b2d6e8f13"}
+```
+
+| Field | Meaning |
+|---|---|
+| `expect_revision` | The revision the program was decided on. |
+| `expect_relations` | The scope: these relations and every relation they are derived from through persistent rules. Without it, the scope is the whole knowledge graph. A name that is not a relation, rule or schema of the knowledge graph fails with `validation`, so a misspelling cannot pass silently. |
+| `expect_epoch` | The stream epoch (`authenticated.stream_epoch`) the revision belongs to. Revisions restart with the engine, so a revision from another run fails the precondition. |
+
+If anything in scope changed, the program applies nothing and fails with code `precondition_failed`. The message names the relation (or the rules) that changed and the revision it changed at. Sending the same request again cannot succeed: read the state again and decide again. Of several writers that expect the same revision of the same scope, at most one commits, but only when each writer's program writes a relation in that scope. Writes outside the scope do not refuse each other: in the example above, two deciders writing `claim` with `expect_relations: ["eta"]` can both commit. Racing deciders that write a claim relation should include it in `expect_relations`, or rely on the claim guard.
+
+The check is relation-level: any write to a relation in scope refuses the program, even one that does not change the rows the program depends on. Writes to relations outside the scope never refuse it. A revision that is newer than any the engine has issued, or older than the knowledge graph's first state in this engine run (it was created again, or the engine restarted), also fails with `precondition_failed`.
+
+Only a program that writes persistent state (facts, schemas or rules) can carry `expect_revision`. On a query, a session rule, a meta command or `.subscribe`, the request is rejected with `invalid_request` and nothing runs. `expect_relations` and `expect_epoch` require `expect_revision`.
 
 ### Result Response
 
@@ -156,6 +218,12 @@ Writes of facts are idempotent: inserting a fact that is present, or deleting on
 }
 ```
 
+The reply to a program that changed persistent state of a knowledge graph also carries `revision`: the knowledge graph revision the program's changes are visible at, the same revision [standing-query pushes](#standing-queries) carry. A delta at that revision or later reflects them. The statements that carry it are committed fact, schema and rule writes, `.rel drop`, `.clear prefix`, `.index create`, `.index drop`, `.index rebuild`, `.kg create` (the new graph's first revision) and `.ontology install`, `remove` and `upgrade`; a program with several names the last one's. A write that changed nothing (inserting a fact that is present, for example) names the current revision, which already holds its effect. Queries without writes, programs whose writes were rolled back, `.kg use`, `.kg drop`, and session-scoped schemas, facts and rules carry no `revision`. Like push revisions, it is comparable only within one knowledge graph and one `stream_epoch`.
+
+```json
+{"type": "result", "columns": ["message"], "rows": [["Inserted 1 fact(s) into 'eta'."]], "revision": 1731, "errors": []}
+```
+
 ### Error Response
 
 ```json
@@ -166,7 +234,7 @@ Writes of facts are idempotent: inserting a fact that is present, or deleting on
 }
 ```
 
-A program of one statement that fails gets an `error`. `code` says why: `validation`, `not_found`, `conflict`, `unsupported` or `internal`; `invalid_request` and `rate_limited` reject a request before it runs; `deadline_exceeded`, `cancelled` and `outcome_unknown` are described in [Deadlines and Cancellation](#deadlines-and-cancellation); `store_read_only` refuses a write while the store is read-only after an unknown outcome. It is absent for auth and other engine failures. For write outcomes and restart recovery, see [Persistence](persistence#wal-record-format).
+A program of one statement that fails gets an `error`. `code` says why: `validation`, `not_found`, `conflict`, `unsupported` or `internal`; `invalid_request` and `rate_limited` reject a request before it runs; `deadline_exceeded`, `cancelled` and `outcome_unknown` are described in [Deadlines and Cancellation](#deadlines-and-cancellation); `store_read_only` refuses a write while the store is read-only after an unknown outcome; `validation` also refuses a query whose plan would form a cross product past `storage.performance.max_query_cost` (before it runs), or whose recursion did not reach a fixpoint within `storage.performance.max_recursion_iterations` when it is set; `resource_exhausted` refuses a query that went over `storage.performance.max_query_memory_bytes`, or that grew while the server's queries held all of `storage.performance.max_total_query_memory_bytes`, or a write that would grow its knowledge graph past `storage.performance.max_graph_memory_bytes`, and nothing was applied. `precondition_failed` refuses a program whose `expect_revision` did not hold (see [Revision Preconditions](#revision-preconditions)). It is absent for auth and other engine failures. For write outcomes and restart recovery, see [Persistence](persistence#wal-record-format).
 
 ### Statement Failures
 

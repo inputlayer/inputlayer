@@ -6,7 +6,10 @@
 //! Dataflow propagates only changes between iterations, so evaluation is
 //! semi-naive across the whole SCC.
 
-use super::{format_panic_payload, is_query_cancelled, CodeGenerator, Iter, QUERY_CANCELLED};
+use super::{
+    abandon_if_stopped, dataflow_error, is_query_cancelled, query_stopped_error, stop_point,
+    CodeGenerator, Iter, Pacer,
+};
 use crate::boolean_specialization::SemiringType;
 use crate::ir::IRNode;
 use crate::semiring_types::{BooleanDiff, DiffType};
@@ -120,6 +123,7 @@ impl CodeGenerator {
             Arc::new(plans.iter().map(|_| Mutex::new(HashMap::new())).collect());
         let results_clone = Arc::clone(&results);
         let input_data = self.input_tuples.clone();
+        let max_iterations = self.max_iterations;
 
         catch_unwind(AssertUnwindSafe(|| {
             timely::execute_directly(move |worker| {
@@ -170,6 +174,7 @@ impl CodeGenerator {
                                 let combined = base.enter(inner).concat(recursive);
                                 let next =
                                     Self::fixpoint_dedup(combined, plan.agg_in_loop.as_ref());
+                                let next = stop_point(next, max_iterations);
                                 variable.set(next.clone());
                                 next.leave()
                             })
@@ -178,9 +183,11 @@ impl CodeGenerator {
 
                     for (idx, output) in outputs.into_iter().enumerate() {
                         let results_ref = Arc::clone(&results_clone);
+                        let mut pacer = Pacer::default();
                         output
                             .inner
                             .inspect(move |(data, _time, diff)| {
+                                pacer.tick();
                                 let mut guard = results_ref[idx].lock();
                                 *guard.entry(data.clone()).or_insert(0) += diff.to_count();
                             })
@@ -195,14 +202,10 @@ impl CodeGenerator {
                     worker.step();
                     std::thread::yield_now();
                 }
+                abandon_if_stopped(worker);
             });
         }))
-        .map_err(|e| {
-            format!(
-                "Internal error in query execution: {}",
-                format_panic_payload(e)
-            )
-        })?;
+        .map_err(dataflow_error)?;
 
         let mut out: HashMap<String, Vec<Tuple>> = HashMap::new();
         for ((name, _), counts) in members.iter().zip(results.iter()) {
@@ -216,7 +219,7 @@ impl CodeGenerator {
         }
 
         if is_query_cancelled() {
-            return Err(QUERY_CANCELLED.to_string());
+            return Err(query_stopped_error());
         }
 
         Ok(out)

@@ -34,7 +34,7 @@ impl Fixture {
         let Attach::Waiting(Some(first)) =
             fixture
                 .registry
-                .attach(key(), Arc::clone(&bell), || Scripted::boxed(steps))
+                .attach(key(), Arc::clone(&bell), None, || Scripted::boxed(steps))
         else {
             panic!("a new view evaluates");
         };
@@ -49,9 +49,9 @@ impl Fixture {
     fn join(&mut self, id: SubscriberId) -> Subscriber {
         let (bell, mailbox) = doorbell(id);
         self.mailboxes.push(mailbox);
-        let Attach::Attached(attachment) = self
-            .registry
-            .attach(key(), Arc::clone(&bell), || Scripted::boxed([]))
+        let Attach::Attached(attachment) =
+            self.registry
+                .attach(key(), Arc::clone(&bell), None, || Scripted::boxed([]))
         else {
             panic!("joins the live view");
         };
@@ -99,7 +99,9 @@ fn error(push: Option<SubscriptionPush>) -> String {
 async fn snapshot_lists_the_result_for_creator_and_joiner() {
     let (mut fixture, _) = Fixture::new(vec![ok(&[3, 1, 2])]).await;
     let (bell, _mailbox) = doorbell(9);
-    let Attach::Attached(attachment) = fixture.registry.attach(key(), bell, || Scripted::boxed([]))
+    let Attach::Attached(attachment) = fixture
+        .registry
+        .attach(key(), bell, None, || Scripted::boxed([]))
     else {
         panic!("joins");
     };
@@ -237,4 +239,54 @@ async fn rows_keep_their_exact_values() {
     fixture.commit().await;
     let (_, _, inserted, _) = delta(subscriber.deliver(|_| true));
     assert_eq!(inserted, vec![vec![json!(2)]]);
+}
+
+#[tokio::test]
+async fn resuming_takes_up_a_wake_up_rung_before_registration() {
+    let (mut fixture, mut subscriber) = Fixture::new(vec![
+        ok(&[1]),
+        ok(&[1, 2]),
+        ok(&[1, 2, 3]),
+        ok(&[1, 2, 3, 4]),
+    ])
+    .await;
+    // The connection takes the wake-up before it registers the subscriber,
+    // and drops it unanswered: later rings queue nothing.
+    fixture.commit().await;
+    assert_eq!(fixture.mailboxes[0].try_recv().unwrap(), 1);
+    fixture.commit().await;
+    assert!(
+        fixture.mailboxes[0].try_recv().is_err(),
+        "still marked queued"
+    );
+
+    subscriber.resume();
+    assert_eq!(
+        fixture.mailboxes[0].try_recv().unwrap(),
+        1,
+        "rings for the news"
+    );
+    assert_eq!(
+        delta(subscriber.deliver(|_| true)),
+        (1, 3, rows(&[2, 3]), vec![])
+    );
+    fixture.commit().await;
+    assert_eq!(
+        fixture.mailboxes[0].try_recv().unwrap(),
+        1,
+        "answered: rings again"
+    );
+    assert_eq!(
+        delta(subscriber.deliver(|_| true)),
+        (2, 4, rows(&[4]), vec![])
+    );
+}
+
+#[tokio::test]
+async fn resuming_with_nothing_new_queues_no_wake_up() {
+    let (mut fixture, subscriber) = Fixture::new(vec![ok(&[1]), ok(&[1, 2])]).await;
+    subscriber.resume();
+    assert!(fixture.mailboxes[0].try_recv().is_err(), "no news");
+    fixture.commit().await;
+    assert_eq!(fixture.mailboxes[0].try_recv().unwrap(), 1);
 }

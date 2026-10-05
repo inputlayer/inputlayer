@@ -7,10 +7,39 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::harness::{rows, start_server, start_server_with, Client, Server, TIMEOUT};
+use inputlayer::protocol::Handler;
+
+use crate::harness::{
+    rows, start_server, start_server_adjusted, start_server_with, Client, Server, TIMEOUT,
+};
 
 fn shared(server: &Server) -> u64 {
     server.handler.subscription_metrics().shared_evaluations()
+}
+
+/// A server whose families share whatever their rounds cost: whether a
+/// round is fast enough is timing, which a test on a busy host cannot
+/// count on (the unit tests judge costs they set).
+async fn start_sharing_server(max_subscriptions: usize) -> Server {
+    start_server_adjusted(
+        max_subscriptions,
+        |_| {},
+        Handler::with_sharing_regardless_of_cost,
+    )
+    .await
+}
+
+/// Wait until at least `count` shared evaluations have been judged.
+async fn judged(server: &Server, count: u64) {
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    while shared(server) < count {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "shared evaluations stuck at {}, expected {count}",
+            shared(server)
+        );
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
 }
 
 async fn expect_quiet(client: &mut Client, within: Duration) {
@@ -94,7 +123,7 @@ const RULES: &str = "+view(S, X, Kind) <- item(S, X), kind(X, Kind)";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn bound_subscriptions_share_one_evaluation_and_get_only_their_rows() {
-    let server = start_server(256).await;
+    let server = start_sharing_server(256).await;
     server.write(RULES).await;
     server
         .write("+item[(\"s1\", 1), (\"s2\", 2)]\n+kind[(1, \"a\"), (2, \"a\")]")
@@ -115,15 +144,12 @@ async fn bound_subscriptions_share_one_evaluation_and_get_only_their_rows() {
         let expected = member.oracle().await;
         member.converge(&expected).await;
     }
-    // That cost starts a probe no view waits for; let it be judged.
-    let deadline = tokio::time::Instant::now() + TIMEOUT;
-    while shared(&server) == 0 {
-        assert!(tokio::time::Instant::now() < deadline, "no probe");
-        tokio::time::sleep(Duration::from_millis(1)).await;
-    }
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
+    // That cost starts a probe no view waits for. Once judged, the family
+    // shares, and views still refreshing at its revision read the probe's
+    // round rather than evaluating another.
+    judged(&server, 1).await;
     let before = shared(&server);
+    assert_eq!(before, 1, "one evaluation for the probe's revision");
     server.write("+item(\"s1\", 3)\n+kind(3, \"a\")").await;
     let expected = one.oracle().await;
     one.converge(&expected).await;
@@ -188,12 +214,14 @@ async fn every_subscriber_follows_its_own_query_through_mixed_writes() {
             member.converge(&expected).await;
         }
     }
-    assert!(shared(&server) > 0, "the members shared evaluations");
+    // Whether the family keeps sharing depends on the host's timing, but
+    // the first own evaluations that reuse a plan always start a probe.
+    judged(&server, 1).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_family_of_one_binding_evaluates_on_its_own() {
-    let server = start_server(64).await;
+    let server = start_sharing_server(64).await;
     server.write(RULES).await;
     server.write("+item(\"s1\", 1)\n+kind(1, \"a\")").await;
     let mut one = Member::subscribe(&server, r#"?view("s1", X, "a")"#).await;
@@ -210,9 +238,12 @@ async fn a_family_of_one_binding_evaluates_on_its_own() {
             let expected = member.oracle().await;
             member.converge(&expected).await;
         }
+        // A probe (as early as the subscriptions: `same` reuses the plan of
+        // `one`), judged before the next write, so that the family shares.
+        judged(&server, 1).await;
     }
     let after_shared = shared(&server);
-    assert!(after_shared > 0);
+    assert!(after_shared >= 2, "a probe, then a round");
 
     // With s2 and the idle views gone, one binding is left: nothing to share.
     let reply = two.client.execute(".unsubscribe s").await;

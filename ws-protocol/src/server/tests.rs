@@ -21,6 +21,7 @@ fn result(id: Option<RequestId>) -> ServerFrame {
         timing_breakdown: None,
         errors: Vec::new(),
         statements: Vec::new(),
+        revision: None,
         subscribed: None,
     })
 }
@@ -59,6 +60,7 @@ fn every_reply_echoes_its_id() {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
             subscribed: None,
         }),
         ServerFrame::ResultChunk {
@@ -278,6 +280,8 @@ fn stop_codes_serialize_in_snake_case() {
         (ErrorCode::DeadlineExceeded, "deadline_exceeded"),
         (ErrorCode::Cancelled, "cancelled"),
         (ErrorCode::OutcomeUnknown, "outcome_unknown"),
+        (ErrorCode::ResourceExhausted, "resource_exhausted"),
+        (ErrorCode::PreconditionFailed, "precondition_failed"),
     ] {
         assert_eq!(serde_json::to_value(code).unwrap(), name);
     }
@@ -304,4 +308,19 @@ fn statement_counts_are_listed_only_when_a_fact_statement_committed() {
         serde_json::json!([{"index": 1, "kind": "update", "inserted": 1, "deleted": 0}])
     );
     assert_eq!(round_trip(&reply), reply);
+}
+
+#[test]
+fn a_result_names_its_commit_revision_only_when_it_has_one() {
+    let json = serde_json::to_value(result(None)).unwrap();
+    assert!(json.get("revision").is_none(), "{json}");
+
+    let ServerFrame::Result(mut frame) = result(None) else {
+        unreachable!()
+    };
+    frame.revision = Some(42);
+    let frame = ServerFrame::Result(frame);
+    let json = serde_json::to_value(&frame).unwrap();
+    assert_eq!(json["revision"], 42, "{json}");
+    assert_eq!(round_trip(&frame), frame);
 }

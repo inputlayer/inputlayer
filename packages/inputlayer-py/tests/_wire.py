@@ -7,6 +7,7 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
+from inputlayer._protocol import PROTOCOL_VERSION
 from inputlayer.connection import Connection
 
 # Frames that finish the reply to one request.
@@ -63,5 +64,6 @@ def attach(conn: Connection, wire: ScriptedWire, kg: str = "default") -> Connect
     conn._ws = wire  # type: ignore[assignment]
     conn._state = "open"
     conn._current_kg = kg
+    conn._protocol_version = PROTOCOL_VERSION
     conn._reader = asyncio.ensure_future(conn._read_loop(wire))  # type: ignore[arg-type]
     return conn

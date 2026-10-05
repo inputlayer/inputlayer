@@ -121,7 +121,12 @@ fn program_commits_one_record_across_relations() {
     assert_eq!(records.len(), before + 1, "one WAL record per program");
     let record = records.last().unwrap();
     assert!(record.contains("default:r") && record.contains("default:s"));
-    assert_ne!(storage.get_snapshot_for(KG).unwrap().revision, revision);
+    let published = storage.get_snapshot_for(KG).unwrap().revision;
+    assert!(published > revision);
+    assert_eq!(
+        commit.revision, published,
+        "reports the revision it published"
+    );
     assert_eq!(rows(&storage, "r"), [t(2), t(3)]);
     assert_eq!(rows(&storage, "s"), [t(9)]);
 
@@ -252,6 +257,7 @@ fn duplicates_and_changes_that_cancel_out_write_nothing() {
     assert!(commit.relations.is_empty());
     assert_eq!(wal_records(&temp), before);
     assert_eq!(storage.get_snapshot_for(KG).unwrap().revision, revision);
+    assert_eq!(commit.revision, revision, "reports the current revision");
     assert_eq!(rows(&storage, "r"), [t(1)]);
 }
 
@@ -259,7 +265,8 @@ fn duplicates_and_changes_that_cancel_out_write_nothing() {
 /// over `r` would), staged on `snapshot`.
 fn reads_r(snapshot: &Arc<KnowledgeGraphSnapshot>) -> WriteProgram {
     let mut staged = program(vec![vec![delete("r", vec![t(1)])]]);
-    staged.read(snapshot, &snapshot.rules, "q(X, Y) <- r(X, Y)");
+    let query = crate::parser::parse_program("q(X, Y) <- r(X, Y)").unwrap();
+    staged.read(snapshot, &snapshot.rules, &query);
     staged
 }
 
@@ -569,4 +576,87 @@ fn durability_wal_retirement_failure_keeps_deletion_committed() {
             );
         }
     }
+}
+
+fn open_with_budget(temp: &TempDir, budget: u64) -> StorageEngine {
+    let mut config = Config::default();
+    config.storage.data_dir = temp.path().to_path_buf();
+    config.storage.performance.max_graph_memory_bytes = budget;
+    StorageEngine::new(config).unwrap()
+}
+
+/// Bytes of `n` tuples like `t(_)` against the budget.
+fn budget_for(n: usize) -> u64 {
+    (n * relation_store::stored_bytes(&t(0))) as u64
+}
+
+#[test]
+fn a_write_past_the_graph_budget_is_refused_whole() {
+    let temp = TempDir::new().unwrap();
+    let storage = open_with_budget(&temp, budget_for(3));
+    storage
+        .commit_program(KG, program(vec![vec![insert("r", vec![t(1), t(2)])]]), None)
+        .unwrap();
+    let before = wal_records(&temp).len();
+
+    // Over by one tuple: refused, blamed on the last inserting statement,
+    // and nothing of the program is written or published.
+    let err = storage
+        .commit_program(
+            KG,
+            program(vec![
+                vec![insert("s", vec![t(9)])],
+                vec![insert("r", vec![t(3)])],
+                vec![delete("r", vec![t(7)])],
+            ]),
+            None,
+        )
+        .unwrap_err();
+    let CommitError::Rejected { statement, error } = err else {
+        panic!("expected a rejection, got {err:?}");
+    };
+    assert_eq!(statement, 1);
+    assert!(
+        matches!(error, StorageError::MemoryBudgetExceeded { ref kg, .. } if kg == KG),
+        "{error}"
+    );
+    assert_eq!(wal_records(&temp).len(), before);
+    assert_eq!(rows(&storage, "r"), [t(1), t(2)]);
+    assert!(rows(&storage, "s").is_empty());
+
+    // A program whose net change fits passes: it frees what it adds.
+    storage
+        .commit_program(
+            KG,
+            program(vec![
+                vec![delete("r", vec![t(1)])],
+                vec![insert("r", vec![t(3), t(4)])],
+            ]),
+            None,
+        )
+        .unwrap();
+    assert_eq!(rows(&storage, "r"), [t(2), t(3), t(4)]);
+}
+
+#[test]
+fn a_graph_over_budget_still_loads_and_takes_deletes() {
+    let temp = TempDir::new().unwrap();
+    {
+        let storage = open(&temp);
+        storage
+            .insert_tuples_into(KG, "r", (1..=5).map(t).collect())
+            .unwrap();
+    }
+    let storage = open_with_budget(&temp, budget_for(2));
+    assert_eq!(rows(&storage, "r").len(), 5, "recovery is never refused");
+
+    let err = storage.insert_tuples_into(KG, "r", vec![t(6)]).unwrap_err();
+    assert!(
+        matches!(err, StorageError::MemoryBudgetExceeded { .. }),
+        "{err}"
+    );
+    // Re-inserting what is stored grows nothing, and deleting always passes.
+    storage.insert_tuples_into(KG, "r", vec![t(1)]).unwrap();
+    storage.delete_tuples_from(KG, "r", vec![t(1)]).unwrap();
+    assert_eq!(rows(&storage, "r").len(), 4);
 }

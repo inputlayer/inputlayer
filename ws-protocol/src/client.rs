@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::RequestId;
+use crate::{Params, RequestId};
 
 /// A request from the client. Each may carry an `id`, echoed on its replies.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,11 +26,37 @@ pub enum ClientFrame {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<RequestId>,
         program: String,
+        /// Values of the program's `$name` parameters, bound by the engine
+        /// without passing through the parser (see [`Params`]). Every
+        /// parameter the program names must be given, and every one given
+        /// must be named.
+        #[serde(default, skip_serializing_if = "Params::is_empty")]
+        params: Params,
         /// Milliseconds the request may take, from its arrival: queueing,
         /// admission and computation together. Capped by the engine's own
         /// query timeout.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_ms: Option<u64>,
+        /// Commit the program's writes only if the knowledge graph state in
+        /// scope is as it was at this revision: no relation in scope and no
+        /// persistent rule changed after it. Otherwise nothing is applied and
+        /// the program fails with [`ErrorCode::PreconditionFailed`]. Only a
+        /// program that writes persistent state may set it.
+        ///
+        /// [`ErrorCode::PreconditionFailed`]: crate::ErrorCode::PreconditionFailed
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expect_revision: Option<u64>,
+        /// The scope of `expect_revision`: these relations and every relation
+        /// they are derived from through persistent rules. Absent: the whole
+        /// knowledge graph. Requires `expect_revision`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expect_relations: Option<Vec<String>>,
+        /// The stream epoch (`authenticated.stream_epoch`) `expect_revision`
+        /// belongs to: revisions restart with the engine, so a revision from
+        /// another engine run fails the precondition. Requires
+        /// `expect_revision`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expect_epoch: Option<String>,
     },
     /// Cancel the unanswered request `target`; answered by `cancel_ack`.
     Cancel {
@@ -96,6 +122,61 @@ mod tests {
             }
         ));
         assert!(serde_json::from_str::<ClientFrame>(r#"{"type":"cancel"}"#).is_err());
+    }
+
+    #[test]
+    fn execute_carries_params_beside_the_program() {
+        let frame: ClientFrame = serde_json::from_str(
+            r#"{"type":"execute","program":"+eta($s, $d)","params":{"s":"S-77","d":{"int":"20261010"}}}"#,
+        )
+        .unwrap();
+        let ClientFrame::Execute { params, .. } = &frame else {
+            panic!("not an execute: {frame:?}");
+        };
+        assert_eq!(
+            params.get("s"),
+            Some(&crate::ParamValue::String("S-77".into()))
+        );
+        assert_eq!(params.get("d"), Some(&crate::ParamValue::Int(20_261_010)));
+        let json = serde_json::to_string(&frame).unwrap();
+        assert_eq!(serde_json::from_str::<ClientFrame>(&json).unwrap(), frame);
+        // No params: the field is omitted, and an empty object is the same.
+        let bare: ClientFrame =
+            serde_json::from_str(r#"{"type":"execute","program":"?a(X)","params":{}}"#).unwrap();
+        assert_eq!(
+            serde_json::to_string(&bare).unwrap(),
+            r#"{"type":"execute","program":"?a(X)"}"#
+        );
+        // A bad value fails the frame, naming the parameter.
+        let error = serde_json::from_str::<ClientFrame>(
+            r#"{"type":"execute","program":"+a($x)","params":{"x":null}}"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("parameter \"x\""), "{error}");
+    }
+
+    #[test]
+    fn expect_revision_round_trips_and_is_omitted_when_unset() {
+        let json = r#"{"type":"execute","program":"+a(1)","expect_revision":17,"expect_relations":["a","b"],"expect_epoch":"00ff"}"#;
+        let frame: ClientFrame = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            frame,
+            ClientFrame::Execute {
+                id: None,
+                program: "+a(1)".to_string(),
+                params: crate::Params::new(),
+                timeout_ms: None,
+                expect_revision: Some(17),
+                expect_relations: Some(vec!["a".to_string(), "b".to_string()]),
+                expect_epoch: Some("00ff".to_string()),
+            }
+        );
+        assert_eq!(serde_json::to_string(&frame).unwrap(), json);
+        assert!(serde_json::from_str::<ClientFrame>(
+            r#"{"type":"execute","program":"+a(1)","expect_revision":-1}"#
+        )
+        .is_err());
     }
 
     #[test]

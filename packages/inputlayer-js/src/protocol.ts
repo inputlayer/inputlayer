@@ -9,7 +9,10 @@
  */
 
 /** The `/ws` protocol version this SDK speaks (`authenticated.protocol_version`). */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
+
+/** The first protocol version whose `execute` takes `params`. */
+export const PARAMS_PROTOCOL_VERSION = 4;
 
 // ── Client -> Server messages ───────────────────────────────────────
 
@@ -26,10 +29,33 @@ export interface AuthenticateMessage {
   api_key: string;
 }
 
+/**
+ * One parameter's value. A bare value is typed by its JSON form: a string, a
+ * boolean, an integer (int64), a number with a fraction or exponent (float)
+ * or an array of numbers (vector). The one-key forms name the type: JSON
+ * writes `2.0` as `2`, so send an integral float as `{ float: 2 }`, and an
+ * integer past 2^53 as `{ int: "9007199254740993" }`.
+ */
+export type ParamValue =
+  | string
+  | boolean
+  | number
+  | number[]
+  | { int: number | string }
+  | { float: number }
+  | { string: string }
+  | { bool: boolean }
+  | { vector: number[] };
+
+/** Values of a program's `$name` references, by name (protocol version 4). */
+export type Params = Record<string, ParamValue>;
+
 export interface ExecuteMessage {
   type: 'execute';
   id?: string;
   program: string;
+  /** Values bound to the program's `$name` references, never parsed as IQL. */
+  params?: Params;
   /** Milliseconds the request may take from its arrival (queueing, admission, computation); capped by the engine's query timeout. */
   timeout_ms?: number;
 }
@@ -96,6 +122,9 @@ export interface TimingBreakdown {
  * `deadline_exceeded` and `cancelled` stop it before it began committing, so
  * nothing was applied; `outcome_unknown` means its commit failed in a way that
  * leaves the changes possibly applied: read the state back before retrying.
+ * `resource_exhausted` refuses a query over the engine's per-query memory
+ * limit or its server-wide query memory budget, or a write past its knowledge
+ * graph's memory budget; nothing was applied.
  */
 export type ErrorCode =
   | 'store_read_only'
@@ -108,7 +137,8 @@ export type ErrorCode =
   | 'rate_limited'
   | 'deadline_exceeded'
   | 'cancelled'
-  | 'outcome_unknown';
+  | 'outcome_unknown'
+  | 'resource_exhausted';
 
 /** A failed statement of a multi-statement program (0-based `index`). */
 export interface StatementError {

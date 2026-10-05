@@ -2,20 +2,23 @@
 //!
 //! One [`RequestControl`] spans the whole request: waiting for a compute
 //! permit, waiting on the blocking pool, and computing. A request stopped
-//! while it waits never starts; one stopped while it computes is abandoned at
-//! once and its computation exits at its next cooperative check, releasing
-//! the permit. A request that began committing is not interrupted: the wait
-//! continues until it finishes, and its result is what it committed.
+//! while it waits never starts; one stopped while it computes is answered at
+//! once and its computation exits at its next cooperative check, which the
+//! evaluator makes every few thousand rows it forms, even inside one
+//! dataflow step. Only then does it release its permit, so the permits
+//! always count the computations actually running. A request that began
+//! committing is not interrupted: the wait continues until it finishes, and
+//! its result is what it committed.
 
-use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 use super::ProgramError;
-use crate::execution::{RequestControl, Stop};
+use crate::execution::{memory, RequestControl, Stop};
 use crate::protocol::wire::ErrorCode;
 use crate::statement::Statement;
 
@@ -23,11 +26,16 @@ use crate::statement::Statement;
 /// it the server is overloaded and says so rather than queueing further.
 const MAX_ADMISSION_WAIT: Duration = Duration::from_secs(30);
 
+/// How long a stopped computation may take to notice the stop before that
+/// is reported as a fault.
+const SLOW_EXIT: Duration = Duration::from_secs(1);
+
 /// The wire code of a request stopped for `stop`.
 pub(crate) fn stop_code(stop: Stop) -> ErrorCode {
     match stop {
         Stop::Deadline => ErrorCode::DeadlineExceeded,
         Stop::Cancelled => ErrorCode::Cancelled,
+        Stop::MemoryExhausted | Stop::ServerMemoryExhausted => ErrorCode::ResourceExhausted,
     }
 }
 
@@ -36,6 +44,19 @@ pub(crate) fn stop_error(stop: Stop) -> ProgramError {
     ProgramError {
         message: stop.message().to_string(),
         code: Some(stop_code(stop)),
+    }
+}
+
+/// The code of a computation that failed with `code`, unless the request's
+/// computation went over a memory limit: then it failed for that, with
+/// `resource_exhausted`, even after the request began committing.
+pub(crate) fn computation_failure_code(code: ErrorCode) -> ErrorCode {
+    let over_memory = crate::code_generator::current_request_control()
+        .is_some_and(|c| c.memory_exceeded().is_some());
+    if over_memory {
+        ErrorCode::ResourceExhausted
+    } else {
+        code
     }
 }
 
@@ -60,8 +81,14 @@ where
             drop(permit);
             return Err(stop_error(stop));
         }
-        let _scope = ControlScope::enter(job_control);
+        let scope = ControlScope::enter(Arc::clone(&job_control));
         let result = job();
+        drop(scope);
+        // A computation that held a lot hands what it freed back to the
+        // system before its permit admits the next one.
+        if job_control.memory_peak() > memory::RELEASE_AFTER_PEAK_BYTES {
+            memory::release_freed_memory();
+        }
         drop(permit);
         result
     });
@@ -136,16 +163,16 @@ async fn admit(
 }
 
 /// Await `task` under `control`; see the module docs.
-async fn supervise<T>(
+async fn supervise<T: Send + 'static>(
     control: &RequestControl,
-    task: impl Future<Output = Result<Result<T, ProgramError>, tokio::task::JoinError>>,
+    mut task: JoinHandle<Result<T, ProgramError>>,
 ) -> Result<T, ProgramError> {
-    tokio::pin!(task);
     let joined = tokio::select! {
         joined = &mut task => joined,
         stop = control.interrupted() => match stop {
             Some(stop) => {
                 warn!(?stop, "query_stopped_running");
+                tokio::spawn(report_exit(task, stop));
                 return Err(stop_error(stop));
             }
             // Committing or finished: not interruptible, wait it out.
@@ -173,6 +200,26 @@ async fn supervise<T>(
             Err("Internal query execution error".to_string().into())
         }
     }
+}
+
+/// Await the computation of a request answered as stopped, and log when it
+/// exited, or that it is still running past [`SLOW_EXIT`]: until it exits it
+/// holds its thread, its compute permit and its memory.
+async fn report_exit<T>(mut task: JoinHandle<T>, stop: Stop) {
+    let stopped = Instant::now();
+    if tokio::time::timeout(SLOW_EXIT, &mut task).await.is_err() {
+        warn!(
+            ?stop,
+            waited_ms = stopped.elapsed().as_millis() as u64,
+            "query_stopped_still_running"
+        );
+        let _ = task.await;
+    }
+    info!(
+        ?stop,
+        exit_ms = stopped.elapsed().as_millis() as u64,
+        "query_stopped_exited"
+    );
 }
 
 #[cfg(test)]
@@ -235,6 +282,28 @@ mod tests {
             .unwrap();
         assert!(permit.is_ok());
         assert!(exited.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn a_stopped_computation_holds_its_permit_until_it_exits() {
+        let permits = permits(1);
+        let control = RequestControl::with_timeout(Some(Duration::from_millis(20)));
+        let (release, gate) = std::sync::mpsc::channel::<()>();
+        let result = run_blocking(&permits, &control, move || {
+            // A computation between two of its checks.
+            gate.recv().ok();
+            Ok(())
+        })
+        .await;
+        assert_eq!(result.unwrap_err().code, Some(ErrorCode::DeadlineExceeded));
+        // Answered, but still computing: the permit is not free yet.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(permits.available_permits(), 0);
+        release.send(()).unwrap();
+        let permit = tokio::time::timeout(Duration::from_secs(5), permits.acquire())
+            .await
+            .unwrap();
+        assert!(permit.is_ok());
     }
 
     #[tokio::test]

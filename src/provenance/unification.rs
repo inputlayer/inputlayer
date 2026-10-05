@@ -6,7 +6,7 @@
 use crate::ast::{Atom, ComparisonOp, Term};
 use crate::provenance::proof_relations::ProofRelations;
 use crate::value::{Tuple, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// Maps variable names to their bound concrete values.
@@ -25,34 +25,100 @@ pub enum BoundTerm {
 ///
 /// Returns `Some(bindings)` if the tuple matches the head pattern,
 /// `None` if there is a mismatch (constant conflict, arity mismatch, etc).
+/// Computed head columns (arithmetic, function calls) are not matched here:
+/// check them with [`check_computed_head`] once the body has bound their
+/// variables.
 pub fn unify_head(tuple: &Tuple, head: &Atom) -> Option<Bindings> {
+    unify_head_explained(tuple, head).ok()
+}
+
+/// [`unify_head`], saying why the tuple does not match the head.
+pub fn unify_head_explained(tuple: &Tuple, head: &Atom) -> Result<Bindings, String> {
     if tuple.arity() != head.args.len() {
-        return None;
+        return Err(format!(
+            "target has {} values, rule head has {}",
+            tuple.arity(),
+            head.args.len()
+        ));
     }
     let mut bindings = Bindings::new();
-    for (i, term) in head.args.iter().enumerate() {
-        let value = tuple.get(i)?;
+    let mut columns: HashMap<&str, usize> = HashMap::new();
+    for (i, (term, value)) in head.args.iter().zip(tuple.values()).enumerate() {
         match term {
-            Term::Variable(name) => {
-                if let Some(existing) = bindings.get(name) {
-                    if existing != value {
-                        return None; // Repeated variable with conflicting values
-                    }
-                } else {
-                    bindings.insert(name.clone(), value.clone());
+            Term::Variable(name) => match bindings.get(name) {
+                Some(existing) if !values_equal(existing, value) => {
+                    let first = columns.get(name.as_str()).copied().unwrap_or(i);
+                    return Err(format!(
+                        "columns {first} and {i} share variable {name}, target has {existing} and {value}"
+                    ));
                 }
-            }
+                Some(_) => {}
+                None => {
+                    bindings.insert(name.clone(), value.clone());
+                    columns.insert(name, i);
+                }
+            },
             Term::Placeholder => {} // Wildcard, matches anything
+            _ if is_computed(term) => {}
             _ => {
                 // Constant term - must match the tuple value
-                let expected = term_to_value(term)?;
-                if !values_equal(&expected, value) {
-                    return None;
+                match term_to_value(term) {
+                    Some(expected) if values_equal(&expected, value) => {}
+                    _ => {
+                        return Err(format!(
+                            "column {i}: rule head has {term}, target has {value}"
+                        ))
+                    }
                 }
             }
         }
     }
-    Some(bindings)
+    Ok(bindings)
+}
+
+/// Whether a head term is computed from the body's bindings rather than
+/// matched against the tuple.
+fn is_computed(term: &Term) -> bool {
+    matches!(
+        term,
+        Term::Arithmetic(_)
+            | Term::FunctionCall(_, _)
+            | Term::FieldAccess(_, _)
+            | Term::Aggregate(_, _)
+    )
+}
+
+/// How a rule head's computed columns compare with a tuple, under the
+/// bindings of a body solution.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ComputedHead {
+    /// Every computed column equals the tuple's value.
+    Matches,
+    /// A computed column evaluates to a different value.
+    Differs(String),
+    /// A computed column cannot be evaluated here.
+    Unevaluable(String),
+}
+
+/// Check the computed columns of `head` (see [`unify_head`]) against `tuple`.
+pub fn check_computed_head(tuple: &Tuple, head: &Atom, bindings: &Bindings) -> ComputedHead {
+    for (i, (term, value)) in head.args.iter().zip(tuple.values()).enumerate() {
+        if !is_computed(term) {
+            continue;
+        }
+        match resolve_value(term, bindings) {
+            Some(computed) if values_equal(&computed, value) => {}
+            Some(computed) => {
+                return ComputedHead::Differs(format!(
+                    "column {i}: {term} is {computed}, target has {value}"
+                ))
+            }
+            None => {
+                return ComputedHead::Unevaluable(format!("column {i}: cannot evaluate {term}"))
+            }
+        }
+    }
+    ComputedHead::Matches
 }
 
 /// Substitute known bindings into an Atom's arguments.
@@ -126,7 +192,9 @@ fn match_tuple(tuple: &Tuple, bound_terms: &[BoundTerm]) -> Option<Bindings> {
     Some(new_bindings)
 }
 
-/// Evaluate a comparison predicate with the given bindings.
+/// Evaluate a comparison predicate with the given bindings, as the engine's
+/// filters do: arithmetic with [`crate::value::arith::compare`], plain
+/// values with [`Value::query_cmp`] and [`Value::query_eq`].
 ///
 /// Both sides must be fully bound (no unresolved variables).
 pub fn evaluate_comparison(
@@ -137,6 +205,9 @@ pub fn evaluate_comparison(
 ) -> Result<bool, String> {
     let left = resolve_to_value(lhs, bindings)?;
     let right = resolve_to_value(rhs, bindings)?;
+    if lhs.is_arithmetic() || rhs.is_arithmetic() {
+        return Ok(crate::value::arith::compare(&left, op, &right));
+    }
 
     let ordering = left.query_cmp(&right);
     let result = match op {
@@ -152,13 +223,36 @@ pub fn evaluate_comparison(
 
 /// Resolve a term to a concrete Value using bindings.
 fn resolve_to_value(term: &Term, bindings: &Bindings) -> Result<Value, String> {
-    match resolve_term(term, bindings) {
-        BoundTerm::Concrete(v) => Ok(v),
-        BoundTerm::Unbound(var) => Err(format!(
-            "Variable {var} is unbound - cannot evaluate comparison"
-        )),
+    resolve_value(term, bindings).ok_or_else(|| match term {
+        Term::Variable(var) => format!("Variable {var} is unbound - cannot evaluate comparison"),
+        other => format!("Cannot evaluate {other} - unbound or unsupported term"),
+    })
+}
+
+/// The value of a term under `bindings`: a bound variable, a constant, or
+/// arithmetic over bound variables. `None` for anything else.
+pub fn resolve_value(term: &Term, bindings: &Bindings) -> Option<Value> {
+    match term {
+        Term::Variable(name) => bindings.get(name).cloned(),
+        Term::Arithmetic(expr) => {
+            crate::value::arith::eval_expr(expr, &|name| bindings.get(name).cloned())
+        }
+        _ => term_to_value(term),
     }
 }
+
+/// Whether [`resolve_value`] can evaluate `term` once `bound` variables are
+/// bound.
+pub fn resolvable(term: &Term, bound: &HashSet<String>) -> bool {
+    match term {
+        Term::Variable(name) => bound.contains(name),
+        Term::Arithmetic(expr) => expr.variables().iter().all(|v| bound.contains(v)),
+        _ => term_to_value(term).is_some(),
+    }
+}
+
+/// Prefix of the variable names placeholders (`_`) are resolved to.
+pub const PLACEHOLDER_PREFIX: &str = "_placeholder_";
 
 /// Counter for generating unique placeholder names
 static PLACEHOLDER_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -172,7 +266,7 @@ fn resolve_term(term: &Term, bindings: &Bindings) -> BoundTerm {
         },
         Term::Placeholder => {
             let id = PLACEHOLDER_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            BoundTerm::Unbound(format!("_placeholder_{id}"))
+            BoundTerm::Unbound(format!("{PLACEHOLDER_PREFIX}{id}"))
         }
         _ => match term_to_value(term) {
             Some(v) => BoundTerm::Concrete(v),
@@ -222,7 +316,7 @@ fn term_to_value(term: &Term) -> Option<Value> {
 
 /// Compare two Values for equality, handling cross-type numeric comparisons.
 #[allow(clippy::float_cmp)]
-fn values_equal(a: &Value, b: &Value) -> bool {
+pub fn values_equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Int32(x), Value::Int32(y)) => x == y,
         (Value::Int64(x), Value::Int64(y)) => x == y,
@@ -243,6 +337,7 @@ pub fn format_bound_terms(terms: &[BoundTerm]) -> String {
         .iter()
         .map(|bt| match bt {
             BoundTerm::Concrete(v) => format!("{v}"),
+            BoundTerm::Unbound(var) if var.starts_with(PLACEHOLDER_PREFIX) => "_".to_string(),
             BoundTerm::Unbound(var) => var.clone(),
         })
         .collect::<Vec<_>>()

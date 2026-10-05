@@ -52,7 +52,8 @@ info:
 
     ## Protocol version and request IDs
 
-    This is protocol version 3, reported as `protocol_version` in `authenticated`.
+    This is protocol version 4, reported as `protocol_version` in `authenticated`.
+    Version 4 added `execute.params`; an engine reporting less ignores them.
     The frame types are defined once in the `inputlayer-ws-protocol` crate
     (`ws-protocol/`); the Python and JS SDKs mirror them.
 
@@ -149,6 +150,35 @@ info:
     are idempotent (inserting a present fact or deleting an absent one changes
     nothing), so after `cancelled`, `deadline_exceeded`, `outcome_unknown` or a
     lost connection a client can resend the same write without duplicating it.
+
+    ## Revision preconditions
+
+    An `execute` that writes may carry `expect_revision`: a knowledge graph
+    revision the client observed (a subscription's `revision`, or a push's).
+    The program's writes then commit only if no relation in scope and no
+    persistent rule changed after that revision; the check and the commit
+    happen under the knowledge graph's write lock, so they see the same state.
+    The scope is `expect_relations` and every relation they are derived from
+    through persistent rules, or the whole knowledge graph when
+    `expect_relations` is absent. A scope relation that is not a relation,
+    rule or schema of the knowledge graph fails with `validation`.
+
+    A refused program applies nothing and fails with `precondition_failed`; the
+    message names what changed and at which revision. Retrying the same request
+    cannot succeed: read the state again first. Of several writers expecting
+    the same revision of the same scope, at most one commits, but only when
+    each writer's program writes a relation in that scope. Writes outside the
+    scope do not refuse each other, so racing deciders that write a claim
+    relation should include it in `expect_relations` or rely on the claim
+    guard.
+
+    Revisions restart with the engine. `expect_epoch` names the stream epoch
+    (`authenticated.stream_epoch`) the revision belongs to and fails the
+    precondition when it is not this run's. Without it, a revision older than
+    the knowledge graph's first state in this run, or not yet issued, still
+    fails. A program that does not write persistent state (queries, session
+    rules, meta commands, `.subscribe`) cannot carry `expect_revision`: it is
+    rejected with `invalid_request`.
 
     ## Raw Text Protocol
 
@@ -693,7 +723,7 @@ components:
 
     ErrorCode:
       type: string
-      enum: [validation, not_found, conflict, unsupported, internal, invalid_request, rate_limited, deadline_exceeded, cancelled, outcome_unknown, store_read_only]
+      enum: [validation, not_found, conflict, unsupported, internal, invalid_request, rate_limited, deadline_exceeded, cancelled, outcome_unknown, store_read_only, resource_exhausted, precondition_failed]
       description: |
         Why a statement or request failed. `invalid_request` (malformed frame or `id`)
         and `rate_limited` reject a whole request before anything runs.
@@ -701,7 +731,11 @@ components:
         nothing was applied. `outcome_unknown`: the commit failed in a way that may
         have left the changes applied; read the state back before retrying.
         `store_read_only`: the write was refused because the store is read-only
-        until restart recovery.
+        until restart recovery. `resource_exhausted`: a query went over the
+        per-query memory limit or grew while the server's queries held their
+        whole memory budget, or a write would grow its knowledge graph past
+        its memory budget; nothing was applied. `precondition_failed`: the
+        program's `expect_revision` did not hold; nothing was applied.
 
     StatementError:
       type: object
@@ -1012,12 +1046,39 @@ components:
           description: |
             Any valid IQL statement or meta command as raw text.
             Examples: "+edge[(1,2)]", "?edge(X,Y)", ".kg list", ".rule list"
+        params:
+          $ref: '#/components/schemas/Params'
         timeout_ms:
           type: integer
           minimum: 0
           description: |
             Milliseconds the request may take from arrival (queueing, admission and
             computation together). Capped by `storage.performance.query_timeout_ms`.
+        expect_revision:
+          type: integer
+          minimum: 0
+          description: |
+            Commit the program's writes only if no relation in scope and no
+            persistent rule changed after this revision; otherwise nothing is
+            applied and the program fails with `precondition_failed`. Only a
+            program that writes persistent state may set it. See "Revision
+            preconditions".
+        expect_relations:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+          description: |
+            The scope of `expect_revision`: these relations and every relation
+            they are derived from through persistent rules. Absent: the whole
+            knowledge graph. Requires `expect_revision`.
+        expect_epoch:
+          type: string
+          description: |
+            The stream epoch (`authenticated.stream_epoch`) `expect_revision`
+            belongs to; another run's epoch fails the precondition. Requires
+            `expect_revision`.
       examples:
         - type: execute
           id: "1"
@@ -1028,6 +1089,81 @@ components:
           program: ".kg list"
         - type: execute
           program: "+path(X, Y) <- edge(X, Y)"
+        - type: execute
+          id: "decide-1"
+          program: "+claim(\"s1\", \"call_carrier\")"
+          expect_revision: 1731
+          expect_relations: ["eta"]
+        - type: execute
+          id: "2"
+          program: "+eta($shipment, $date)"
+          params:
+            shipment: "S-77"
+            date: "2026-10-10"
+
+    Params:
+      type: object
+      description: |
+        Values of the program's `$name` parameters, sent beside its text. The engine
+        binds each value to the program's parsed statements: a value is never lexed or
+        parsed, so no value can change what a program does, whatever characters it holds.
+        A parameter stands where a literal may stand (an atom argument, a comparison or
+        arithmetic operand, a function argument, an `hnsw_nearest` query vector) and
+        binds exactly the value its literal would. Meta commands take none.
+
+        Every parameter the program references must be given, and every one given must be
+        referenced; otherwise the request fails with code `validation` and nothing runs.
+        Values that cannot be bound exactly fail the frame with `invalid_request`: `null`
+        (what JSON.stringify writes for NaN and the infinities), integers outside int64,
+        a bare integral number of magnitude 2^63 or more, a bare negative zero (`-0` and
+        `-0.0` read alike: send `0` for an int or `{"float": -0.0}` for a float),
+        `{"float": n}` for an integer within int64 or uint64 range that no float equals,
+        `{"int": ...}` with a fraction, unknown type tags, a name given twice, or a name
+        that is not an identifier. `{"float": n}` for a larger integer binds the float
+        nearest `n`, as the same float literal in IQL would. Parameter values count toward
+        `storage.performance.max_query_size_bytes`. The request log records the program
+        text and the number of parameters, not their values.
+      propertyNames:
+        pattern: '^[A-Za-z_][A-Za-z0-9_]{0,63}$'
+      additionalProperties:
+        $ref: '#/components/schemas/ParamValue'
+
+    ParamValue:
+      description: |
+        A bare JSON value is typed by its form: a string, a boolean, an integer (int64;
+        no fraction or exponent), a float (with a fraction or exponent) or an array of
+        numbers (a vector). The one-key form names the type explicitly: `{"float": 1}` is
+        a float, and `{"int": "9007199254740993"}` an int beyond JavaScript's safe range.
+      oneOf:
+        - type: string
+        - type: boolean
+        - type: integer
+          minimum: -9223372036854775808
+          maximum: 9223372036854775807
+        - type: number
+        - type: array
+          items:
+            type: number
+        - type: object
+          minProperties: 1
+          maxProperties: 1
+          properties:
+            int:
+              oneOf:
+                - type: integer
+                - type: string
+                  pattern: '^-?[0-9]+$'
+            float:
+              type: number
+            string:
+              type: string
+            bool:
+              type: boolean
+            vector:
+              type: array
+              items:
+                type: number
+          additionalProperties: false
 
     PingRequest:
       type: object
@@ -1241,6 +1377,15 @@ components:
             Fact statements the program committed, with their counts, in
             program order. Absent when the program committed no fact statement
             (a read, a failed program, or only schema and rule changes).
+        revision:
+          type: integer
+          format: int64
+          description: |
+            Knowledge graph revision the program's committed writes are visible at,
+            the revision pushes carry: a delta at this revision or later reflects them.
+            Present only when the program changed persistent state of a knowledge graph;
+            see the WebSocket API guide for which statements carry it. Comparable only
+            within one knowledge graph and stream epoch.
         subscribed:
           $ref: '#/components/schemas/Subscribed'
           description: Set on the reply to `.subscribe`, whose `rows` are the snapshot
@@ -1345,6 +1490,9 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/StatementCounts'
+        revision:
+          type: integer
+          format: int64
         subscribed:
           $ref: '#/components/schemas/Subscribed'
       examples:

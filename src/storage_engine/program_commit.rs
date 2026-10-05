@@ -2,6 +2,7 @@
 //! delta of facts and catalogs, one WAL transaction, one snapshot publish.
 
 use super::catalog_change::{CatalogDelta, CatalogOutcome, StagedCatalog};
+use super::relation_store::stored_bytes;
 use super::write_program::{
     CommitError, FactChange, FactCount, ProgramCommit, RelationChange, StagedChanges,
     StatementEffect, StatementOutcome, WriteProgram,
@@ -20,14 +21,17 @@ use tracing::{error, info, warn};
 impl StorageEngine {
     /// Commit `program` to `kg` as one transaction.
     ///
-    /// Under the KG's write lock: check that what the program read is
-    /// unchanged, finish any pending drop of a written name, apply the
-    /// catalog changes to copies of the KG's catalogs and validate every fact
-    /// change against those copies and the current data, in statement order,
-    /// and compute the effective delta. A non-empty delta is written as one WAL
-    /// record at one logical time, applied, and published as one snapshot, so
-    /// readers see the program's rules and data together. An empty delta
-    /// writes and publishes nothing.
+    /// Under the KG's write lock: check the request's precondition, if
+    /// `control` carries one (see [`RequestControl::precondition`]), and that
+    /// what the program read is unchanged, finish any pending drop of a
+    /// written name, apply the catalog changes to copies of the KG's catalogs
+    /// and validate every fact change against those copies and the current
+    /// data, in statement order, and compute the effective delta. A non-empty
+    /// delta is written as one WAL record at one logical time, applied, and
+    /// published as one snapshot, so readers see the program's rules and data
+    /// together. An empty delta writes and publishes nothing.
+    /// The commit reports the revision its effect is visible at
+    /// ([`ProgramCommit::revision`]).
     ///
     /// `control`, the request's deadline and cancellation, enters its commit
     /// under the lock just before the WAL write: a request stopped before then
@@ -48,6 +52,13 @@ impl StorageEngine {
         self.persist.check_writable().map_err(CommitError::from)?;
         let mut db = self.lock_kg(kg).map_err(CommitError::from)?;
         let base = db.snapshot.load_full();
+        if let Some(precondition) = control.and_then(RequestControl::precondition) {
+            base.changes()
+                .check(precondition, &base, |name| {
+                    db.schema_catalog.get(name).is_some()
+                })
+                .map_err(CommitError::Precondition)?;
+        }
         if !program.read_holds_in(&base) {
             return Err(CommitError::Stale);
         }
@@ -71,6 +82,10 @@ impl StorageEngine {
             catalog,
             statements,
         } = db.resolve(kg, program)?;
+        let budget = self.config.storage.performance.max_graph_memory_bytes;
+        if budget > 0 {
+            db.check_memory_budget(kg, budget, &facts, &statements)?;
+        }
         if facts.is_empty() && !catalog.is_durable() {
             if !catalog.is_empty() {
                 // Session schemas only: nothing to persist or publish.
@@ -80,6 +95,7 @@ impl StorageEngine {
                 statements,
                 relations: Vec::new(),
                 base,
+                revision: db.snapshot.load().revision,
             });
         }
         if let Some(control) = control {
@@ -108,10 +124,14 @@ impl StorageEngine {
                 warn!(kg = %kg, time, error = %e, "catalog_wal_prune_failed");
             }
         }
+        let relations = relations.map_err(CommitError::Unknown)?;
+        // Still under the write lock, so this is the snapshot just published.
+        let revision = db.snapshot.load().revision;
         Ok(ProgramCommit {
             statements,
-            relations: relations.map_err(CommitError::Unknown)?,
+            relations,
             base,
+            revision,
         })
     }
 }
@@ -175,6 +195,43 @@ impl KnowledgeGraph {
             facts: delta.into_changed(),
             catalog: catalog.into_delta(),
             statements,
+        })
+    }
+
+    /// Refuse a fact delta that grows the KG's estimated fact bytes past
+    /// `budget`. A delta that does not grow them passes even when the KG is
+    /// already over, so deletes always work. The refusal is blamed on the
+    /// last statement that inserted facts.
+    fn check_memory_budget(
+        &self,
+        kg: &str,
+        budget: u64,
+        facts: &[(String, RelationDelta)],
+        statements: &[StatementOutcome],
+    ) -> Result<(), CommitError> {
+        let (mut added, mut removed) = (0usize, 0usize);
+        for (_, changes) in facts {
+            added += changes.added().map(stored_bytes).sum::<usize>();
+            removed += changes.removed.iter().map(stored_bytes).sum::<usize>();
+        }
+        let current = self.store.bytes();
+        let projected = (current + added).saturating_sub(removed);
+        if projected <= current || projected as u64 <= budget {
+            return Ok(());
+        }
+        let statement = statements
+            .iter()
+            .rev()
+            .find(|s| matches!(&s.effect, StatementEffect::Facts(count) if count.inserted > 0))
+            .map_or(0, |s| s.index);
+        warn!(kg = %kg, projected, budget, "graph_memory_budget_exceeded");
+        Err(CommitError::Rejected {
+            statement,
+            error: StorageError::MemoryBudgetExceeded {
+                kg: kg.to_string(),
+                projected,
+                budget,
+            },
         })
     }
 

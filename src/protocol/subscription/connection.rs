@@ -28,6 +28,7 @@ use inputlayer_ws_protocol::SubscriptionPush;
 
 use crate::auth::Principal;
 use crate::protocol::Handler;
+use crate::storage_engine::KnowledgeGraphSnapshot;
 
 use super::publication::{Doorbell, SubscriberId};
 use super::views::{Attachment, ViewKey};
@@ -86,23 +87,33 @@ impl ConnectionSubscriptions {
         let view = ReevaluatingQuery::new(Arc::clone(&self.handler), knowledge_graph, query)?;
         self.handler
             .authorize_query(self.auth.as_ref(), knowledge_graph, view.goal())?;
+        // A view not refreshed since may still be exact now, but must say so:
+        // a client may expect the revision its snapshot reports.
+        let graph = view.current_snapshot().ok();
         let key = ViewKey {
             knowledge_graph: knowledge_graph.to_string(),
             query: query.trim().to_string(),
         };
         let share = self.handler.config().subscriptions.share_parameterized;
         let view = self.hub().standing_query(view, share);
-        Ok(self.opening(key, id, view))
+        Ok(self.opening(key, id, graph, view))
     }
 
     /// An [`Opening`] attaching `id` to the view of `key`, created from `view`
-    /// if there is none.
-    fn opening(&self, key: ViewKey, id: &str, view: Box<dyn StandingQuery>) -> Opening {
+    /// if there is none, with a snapshot exact at `graph`'s revision or later.
+    fn opening(
+        &self,
+        key: ViewKey,
+        id: &str,
+        graph: Option<Arc<KnowledgeGraphSnapshot>>,
+        view: Box<dyn StandingQuery>,
+    ) -> Opening {
         let hub = self.hub().clone();
         let doorbell = Doorbell::new(hub.next_subscriber_id(), self.mailbox.clone());
         Opening {
             id: id.to_string(),
             key,
+            graph,
             view,
             attached: Attached {
                 hub,
@@ -140,11 +151,12 @@ impl ConnectionSubscriptions {
         let snapshot = Snapshot::of(&attachment);
         let doorbell = attached.keep();
         let subscriber = doorbell.id();
+        let registered =
+            Subscriber::new(&id, generation, &key.knowledge_graph, doorbell, &attachment);
+        // Registered now: a wake-up rung before this was dropped as stale.
+        registered.resume();
         self.names.insert(id.clone(), subscriber);
-        self.subscribers.insert(
-            subscriber,
-            Subscriber::new(&id, generation, &key.knowledge_graph, doorbell, &attachment),
-        );
+        self.subscribers.insert(subscriber, registered);
         self.handler.subscription_metrics().add_active(1);
         debug!(
             subscription = id,
@@ -247,7 +259,8 @@ impl ConnectionSubscriptions {
         subscriber: SubscriberId,
         readable: impl FnOnce(&str) -> bool,
     ) -> Option<SubscriptionPush> {
-        // A wake-up for a subscriber already removed is stale.
+        // A wake-up for a subscriber already removed is stale. So is one for
+        // a subscriber not registered yet: registering resumes its doorbell.
         self.subscribers.get_mut(&subscriber)?.deliver(readable)
     }
 
@@ -267,6 +280,7 @@ impl Drop for ConnectionSubscriptions {
 pub struct Opening {
     id: String,
     key: ViewKey,
+    graph: Option<Arc<KnowledgeGraphSnapshot>>,
     view: Box<dyn StandingQuery>,
     attached: Attached,
 }
@@ -285,12 +299,13 @@ impl Opening {
         let Opening {
             id,
             key,
+            graph,
             view,
             attached,
         } = self;
         let attachment = attached
             .hub
-            .attach(key.clone(), Arc::clone(&attached.doorbell), view)
+            .attach(key.clone(), Arc::clone(&attached.doorbell), graph, view)
             .await;
         Opened {
             id,

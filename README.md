@@ -223,7 +223,7 @@ docker exec inputlayer cat /var/lib/inputlayer/data/credentials.toml
 export INPUTLAYER_API_KEY=$(docker exec inputlayer sed -n 's/^api_key = "\(.*\)"/\1/p' /var/lib/inputlayer/data/credentials.toml)
 ```
 
-Open [http://localhost:8080](http://localhost:8080) for the interactive GUI and sign in as `admin` with the `admin_password` from `credentials.toml`, or connect via WebSocket at `ws://localhost:8080/ws`. To choose the secrets yourself, start the container with `-e INPUTLAYER_ADMIN_PASSWORD=...` and `-e INPUTLAYER_BOOTSTRAP_API_KEY=...`; supplied values are never written to disk.
+Open [http://localhost:8080](http://localhost:8080) for the interactive GUI and sign in as `admin` with the `admin_password` from `credentials.toml`, or connect via WebSocket at `ws://localhost:8080/ws`. To choose the secrets yourself, start the container with `-e INPUTLAYER_ADMIN_PASSWORD=...` and `-e INPUTLAYER_BOOTSTRAP_API_KEY=...`, at least 12 characters each (the first boot refuses shorter ones); supplied values are never written to disk.
 
 Or build from source (Rust 1.88+); the server writes the same file to `./data/credentials.toml`:
 

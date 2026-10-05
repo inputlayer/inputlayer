@@ -59,8 +59,17 @@ struct Cli {
     data_dir: Option<PathBuf>,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Startup replay and requests are parsed and evaluated on runtime
+    // threads, so they get the stack the parser's limits are sized for.
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(inputlayer::ENGINE_THREAD_STACK_BYTES)
+        .build()?
+        .block_on(async { tokio::spawn(serve()).await? })
+}
+
+async fn serve() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cli = Cli::parse();
 
     println!("InputLayer Server");
@@ -150,7 +159,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     })?);
 
     // Bootstrap auth: create _internal KG and admin user if needed
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().map_err(|e| {
+        eprintln!("ERROR: {e}");
+        Box::<dyn std::error::Error + Send + Sync>::from(e)
+    })?;
 
     println!("Storage engine initialized");
     println!();

@@ -92,6 +92,8 @@
 
 <h3 id="deadlines">Deadlines and cancellation</h3>
 <p>Every <code>execute</code> runs under one deadline, counted from when the server reads it: queueing, admission and computation together. It is <code>storage.performance.query_timeout_ms</code>, or the request's <code>timeout_ms</code> when sooner. A <code>cancel</code> names an unanswered request by its <code>id</code> and acts on arrival; its <code>cancel_ack</code> says <code>cancelled</code> (nothing applied; the target fails with code <code>cancelled</code>), <code>too_late</code> (it finished or began committing, which is never interrupted) or <code>not_found</code>. An expired request fails with <code>deadline_exceeded</code>; <code>outcome_unknown</code> means a commit failed in a way that may have applied it.</p>
+<h3 id="preconditions">Revision preconditions</h3>
+<p>An <code>execute</code> that writes may carry <code>expect_revision</code>, a revision the client observed (a subscription's or a push's <code>revision</code>). Its writes then commit only if no relation in scope and no persistent rule changed after that revision, checked under the knowledge graph's write lock. The scope is <code>expect_relations</code> plus every relation they are derived from through persistent rules, or the whole knowledge graph when absent. A refused program applies nothing and fails with <code>precondition_failed</code>; of several writers expecting one revision of one scope, at most one commits, but only when each writer's program writes a relation in that scope. Writes outside the scope do not refuse each other, so racing deciders that write a claim relation should include it in <code>expect_relations</code> or rely on the claim guard. <code>expect_epoch</code> (<code>authenticated.stream_epoch</code>) refuses a revision from another engine run. A program that does not write persistent state cannot carry <code>expect_revision</code> (<code>invalid_request</code>).</p>
 
 <h2 id="client-messages">Client &rarr; Server Messages</h2>
 
@@ -107,6 +109,9 @@
       <tr><td>id</td><td>string?</td><td>Request id, echoed on every reply</td></tr>
       <tr><td>program</td><td>string</td><td>The Datalog statement or meta command</td></tr>
       <tr><td>timeout_ms</td><td>integer?</td><td>Deadline from arrival, capped by the server's query timeout</td></tr>
+      <tr><td>expect_revision</td><td>integer?</td><td>Commit only if state in scope is unchanged since this revision (see <a href="#preconditions">Revision preconditions</a>)</td></tr>
+      <tr><td>expect_relations</td><td>string[]?</td><td>Scope of <code>expect_revision</code>: these relations and what derives them; absent: the whole knowledge graph</td></tr>
+      <tr><td>expect_epoch</td><td>string?</td><td>Stream epoch <code>expect_revision</code> belongs to</td></tr>
     </table>
     <pre><code>{"type": "execute", "id": "7", "program": "?edge(X, Y)"}</code></pre>
   </div>
@@ -195,7 +200,7 @@
       <tr><td>type</td><td>string</td><td>Always <code>"error"</code></td></tr>
       <tr><td>id</td><td>string?</td><td>The request's id, when it could be read</td></tr>
       <tr><td>message</td><td>string</td><td>Human-readable error message</td></tr>
-      <tr><td>code</td><td>string?</td><td><code>validation</code>, <code>not_found</code>, <code>conflict</code>, <code>unsupported</code>, <code>internal</code>, <code>invalid_request</code>, <code>rate_limited</code>, <code>deadline_exceeded</code>, <code>cancelled</code> or <code>outcome_unknown</code></td></tr>
+      <tr><td>code</td><td>string?</td><td><code>validation</code>, <code>not_found</code>, <code>conflict</code>, <code>unsupported</code>, <code>internal</code>, <code>invalid_request</code>, <code>rate_limited</code>, <code>deadline_exceeded</code>, <code>cancelled</code>, <code>outcome_unknown</code>, <code>store_read_only</code>, <code>resource_exhausted</code> or <code>precondition_failed</code></td></tr>
     </table>
     <pre><code>{"type": "error", "id": "7", "message": "Knowledge graph 'missing' not found", "code": "not_found"}</code></pre>
   </div>

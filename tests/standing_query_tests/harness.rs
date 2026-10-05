@@ -38,6 +38,15 @@ pub async fn start_server_with(
     max_subscriptions: usize,
     configure: impl FnOnce(&mut Config),
 ) -> Server {
+    start_server_adjusted(max_subscriptions, configure, |handler| handler).await
+}
+
+/// A server of `configure`d config whose handler `adjust` builds on.
+pub async fn start_server_adjusted(
+    max_subscriptions: usize,
+    configure: impl FnOnce(&mut Config),
+    adjust: impl FnOnce(Handler) -> Handler,
+) -> Server {
     let tmp = TempDir::new().unwrap();
     let mut config = Config::default();
     config.storage.data_dir = tmp.path().join("data");
@@ -49,8 +58,8 @@ pub async fn start_server_with(
     configure(&mut config);
     let handler = Handler::from_config(config).unwrap();
     let permits = handler.compute_permits().max(4);
-    let handler = Arc::new(handler.with_compute_permits(permits));
-    handler.bootstrap_auth();
+    let handler = Arc::new(adjust(handler.with_compute_permits(permits)));
+    handler.bootstrap_auth().unwrap();
     handler.get_storage().create_knowledge_graph(KG).unwrap();
     let app = create_router(Arc::clone(&handler), &handler.config().http);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

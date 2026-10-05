@@ -30,6 +30,7 @@
 //! KG's write lock while the KG was unloaded finds its handle retired and
 //! retries on the reloaded KG, so no commit lands on an unloaded copy.
 
+use super::precondition::ChangeLog;
 use super::{KnowledgeGraph, StorageEngine};
 use crate::storage::persist::{
     consolidate_to_current, into_tuples, set_semantics_corrections, CatalogRecord, PersistBackend,
@@ -83,9 +84,11 @@ struct SlotState {
 pub(super) struct Dormant {
     /// Its persist shards, each with its relation name.
     pub(super) shards: Vec<(String, String)>,
-    /// Revision of the snapshot it last published, if it was loaded before:
-    /// its reload publishes the same state, so under the same revision.
-    pub(super) revision: Option<u64>,
+    /// The revision and change log of the snapshot it last published, if it
+    /// was loaded before: its reload publishes the same state, so under the
+    /// same revision, with the same record of when each part last changed
+    /// (for `expect_revision` preconditions).
+    pub(super) last_published: Option<(u64, ChangeLog)>,
     /// Rule and schema changes the WAL held at startup, which its catalog
     /// files may lack (a crash before they were saved). Loading applies them
     /// and saves the files; the WAL keeps them until then.
@@ -272,9 +275,10 @@ impl KnowledgeGraph {
             .map(|relation| (format!("{}:{relation}", self.name), relation.clone()))
             .collect();
         shards.sort();
+        let snapshot = self.snapshot.load();
         let dormant = Dormant {
             shards,
-            revision: Some(self.snapshot.load().revision),
+            last_published: Some((snapshot.revision, snapshot.changes().clone())),
             catalog: Vec::new(),
         };
         let listing = Listing {
@@ -479,8 +483,14 @@ impl StorageEngine {
                 relations.push((shard.relation, shard.tuples));
             }
         }
-        let mut graph =
-            KnowledgeGraph::from_disk(self, kg, data_dir, metadata, relations, dormant.revision)?;
+        let mut graph = KnowledgeGraph::from_disk(
+            self,
+            kg,
+            data_dir,
+            metadata,
+            relations,
+            dormant.last_published.as_ref(),
+        )?;
         if !dormant.catalog.is_empty() {
             match graph.replay_catalog(dormant.catalog.iter()) {
                 Ok(Some(revision)) => {

@@ -3,12 +3,17 @@
 //! The mapping is an allowlist: only extraction sections the manifest
 //! declares produce statements, and only through its templates - one of the
 //! enforcement layers keeping text-to-facts bound to the ontology.
+//!
+//! A template's slots become parameters (see [`crate::iql`]): the statement
+//! text is the template, the extracted values travel beside it, and no value
+//! is ever IQL syntax.
 
+use crate::iql::Stmt;
 use crate::ontology::{Manifest, MapRule};
 use serde_json::Value;
 
 pub struct MapOutcome {
-    pub statements: Vec<String>,
+    pub statements: Vec<Stmt>,
     /// Per statement: the `id` of the extracted object it came from (the
     /// owner a retraction targets). Same length as `statements`.
     pub owners: Vec<Option<String>>,
@@ -25,11 +30,12 @@ pub struct MapOutcome {
 enum FillError {
     /// Field absent or structurally the wrong JSON type: schema drift.
     Drift,
-    /// Value present but not storable (unsafe characters, not an integer).
+    /// Value present but not storable (control characters, not an integer).
     Unsafe,
 }
 
-/// Escape a string for interpolation into an IQL string literal.
+/// Escape a string for interpolation into an IQL string literal. Only for
+/// what takes no parameters (a `.why` goal) and for display.
 pub fn esc(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for ch in value.chars() {
@@ -93,59 +99,56 @@ fn leading_int(value: &str) -> Option<i64> {
     None
 }
 
-/// Whether a string can sit inside a statement literal. The engine's bulk
-/// tuple split is not string-aware (a paren in a value can end the tuple
-/// early), quote and backslash escapes are stored verbatim, `:=` and `<-`
-/// reclassify the whole statement, and statements are newline-joined.
+/// Whether a string value is stored: no control characters. Values travel
+/// as parameters, so no character can reach IQL syntax; a line break or
+/// control character would still reshape the line-per-row renderings of
+/// stored rows (the extraction prompt's digest), so such a row is dropped.
 pub fn storable(value: &str) -> bool {
-    !value
-        .chars()
-        .any(|c| c.is_control() || matches!(c, '(' | ')' | '[' | ']' | '"' | '\\'))
-        && !value.contains(":=")
-        && !value.contains("<-")
+    !value.chars().any(char::is_control)
 }
 
-/// Substitute {field} placeholders from the object. Slots are TYPED by the
-/// template: a placeholder wrapped in double quotes is a string slot (value
-/// must be `storable`), a bare placeholder is a numeric slot and accepts
-/// only integers - a model-controlled string in a bare slot would sit
-/// unquoted inside the statement, where no escaping can contain it.
-fn fill(template: &str, object: &Value, num: Option<i64>) -> Result<String, FillError> {
-    let mut out = String::new();
+/// Fill the template's {field} slots from the object, each value a
+/// parameter. Slots are TYPED by the template: a placeholder wrapped in
+/// double quotes is a string slot (its quotes become the parameter), a bare
+/// placeholder is a numeric slot and accepts only integers.
+fn fill(template: &str, object: &Value, num: Option<i64>) -> Result<Stmt, FillError> {
+    let mut out = Stmt::new();
     let mut rest = template;
     while let Some(start) = rest.find('{') {
-        out.push_str(&rest[..start]);
         let end = rest[start..].find('}').ok_or(FillError::Drift)? + start;
         let key = &rest[start + 1..end];
         let quoted = rest[..start].ends_with('"') && rest[end + 1..].starts_with('"');
-        if key == "num" {
-            out.push_str(&num.ok_or(FillError::Drift)?.to_string());
-        } else if quoted {
-            match object.get(key).ok_or(FillError::Drift)? {
-                Value::String(s) if storable(s) => out.push_str(s),
-                Value::String(_) => return Err(FillError::Unsafe),
-                Value::Number(n) => out.push_str(&n.to_string()),
-                Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-                _ => return Err(FillError::Drift),
-            }
+        if quoted {
+            // The quotes are the string slot's; the parameter replaces them.
+            out = out.text(&rest[..start - 1]);
         } else {
-            match object.get(key).ok_or(FillError::Drift)? {
-                Value::Number(n) if n.is_i64() || n.is_u64() => out.push_str(&n.to_string()),
+            out = out.text(&rest[..start]);
+        }
+        if key == "num" {
+            out = out.value(num.ok_or(FillError::Drift)?);
+        } else if quoted {
+            let text = match object.get(key).ok_or(FillError::Drift)? {
+                Value::String(s) if storable(s) => s.clone(),
+                Value::String(_) => return Err(FillError::Unsafe),
+                Value::Number(n) => n.to_string(),
+                Value::Bool(b) => b.to_string(),
+                _ => return Err(FillError::Drift),
+            };
+            out = out.value(text);
+        } else {
+            let n = match object.get(key).ok_or(FillError::Drift)? {
+                Value::Number(n) => n.as_i64().ok_or(FillError::Unsafe)?,
                 // The pack schema carries numerics as strings, with an
                 // optional unit ("2000", "2000 EUR"); the leading-integer
-                // parse is the only accepted coercion - its output is a
-                // parsed i64, so nothing hostile can reach the bare slot.
-                Value::String(s) => {
-                    out.push_str(&leading_int(s.trim()).ok_or(FillError::Unsafe)?.to_string());
-                }
-                Value::Number(_) => return Err(FillError::Unsafe),
+                // parse is the only accepted coercion.
+                Value::String(s) => leading_int(s.trim()).ok_or(FillError::Unsafe)?,
                 _ => return Err(FillError::Drift),
-            }
+            };
+            out = out.value(n);
         }
-        rest = &rest[end + 1..];
+        rest = &rest[end + 1 + usize::from(quoted)..];
     }
-    out.push_str(rest);
-    Ok(out)
+    Ok(out.text(rest))
 }
 
 /// Evaluate a manifest `when` clause. Supported forms:
@@ -226,7 +229,7 @@ pub fn map_extraction(manifest: &Manifest, extraction: &mut Value) -> MapOutcome
 
 /// Render every statement for one object (first matching rule, plus its
 /// matching extras), all or nothing.
-fn map_object(rules: &[MapRule], object: &Value) -> Result<Vec<String>, (FillError, &'static str)> {
+fn map_object(rules: &[MapRule], object: &Value) -> Result<Vec<Stmt>, (FillError, &'static str)> {
     for rule in rules {
         let num = match &rule.when {
             Some(clause) => match when_matches(clause, object) {
@@ -301,6 +304,11 @@ mod tests {
         toml::from_str(toml_text).expect("manifest")
     }
 
+    /// The statements with their values written as literals.
+    fn shown(out: &MapOutcome) -> Vec<String> {
+        out.statements.iter().map(Stmt::display).collect()
+    }
+
     const MAP_TOML: &str = r#"
 [ontology]
 name = "t"
@@ -330,13 +338,17 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
         });
         let out = map_extraction(&m, &mut extraction);
         assert_eq!(
-            out.statements,
+            shown(&out),
             vec![
                 "+claim[(\"c1\", \"trip\", \"departure_date\", \"2026-08-14\")]",
                 "+claim_source[(\"c1\", 1, \"on August 14th\")]",
                 "+claim_num[(\"c1\", \"trip\", \"departure_date\", 20260814)]",
             ]
         );
+        // The text is the template; the values are parameters.
+        for stmt in &out.statements {
+            assert!(!stmt.iql().contains('"'), "{}", stmt.iql());
+        }
         assert!(out.dropped.is_empty() && out.drift.is_empty());
         assert_eq!(out.owners, vec![Some("c1".to_string()); 3]);
     }
@@ -376,7 +388,7 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
         });
         let out = map_extraction(&m, &mut extraction);
         assert_eq!(
-            out.statements,
+            shown(&out),
             vec![
                 "+constraint_num[(\"k1\", \"max_value\", \"total_price\", 2000)]",
                 "+constraint[(\"k2\", \"forbid\", \"pricing\", \"\")]",
@@ -390,7 +402,7 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
     }
 
     #[test]
-    fn unstorable_values_drop_only_their_row() {
+    fn iql_syntax_in_a_value_is_stored_verbatim() {
         let m = manifest(MAP_TOML);
         for hostile in [
             "x\"), +evil[(\"y",
@@ -399,23 +411,21 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
             "a := b",
             "a <- b",
             "trail\\",
+            "$h00 % // /*",
         ] {
             let mut extraction = serde_json::json!({
                 "claims": [
                     {"id": "c1", "entity": "e", "attribute": "a", "value": "v", "msg": 0,
                      "surface": hostile},
-                    {"id": "c2", "entity": "e", "attribute": "a", "value": "Paris, France",
-                     "msg": 0, "surface": "s"}
                 ]
             });
             let out = map_extraction(&m, &mut extraction);
-            assert_eq!(out.dropped.len(), 1, "{hostile:?}: {:?}", out.dropped);
+            assert!(out.dropped.is_empty(), "{hostile:?}: {:?}", out.dropped);
             assert!(out.drift.is_empty(), "{:?}", out.drift);
-            assert_eq!(out.statements.len(), 2, "{:?}", out.statements);
-            assert_eq!(out.owners, vec![Some("c2".to_string()); 2]);
-            // Never ledgered: the object leaves the extraction.
-            assert_eq!(extraction["claims"].as_array().map(Vec::len), Some(1));
-            assert_eq!(extraction["claims"][0]["id"], "c2");
+            assert_eq!(out.statements.len(), 2, "{hostile:?}");
+            let source = &out.statements[1];
+            assert_eq!(source.iql().matches('$').count(), 3, "{}", source.iql());
+            assert!(source.strings().any(|s| s == hostile), "{hostile:?}");
         }
     }
 
@@ -439,7 +449,7 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
         });
         let out = map_extraction(&m, &mut extraction);
         assert_eq!(
-            out.statements,
+            shown(&out),
             vec!["+constraint_num[(\"k1\", \"max_value\", \"total_price\", 2000)]"]
         );
         assert!(out.dropped.is_empty() && out.drift.is_empty());
@@ -479,8 +489,7 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
     #[test]
     fn control_characters_reject_the_row() {
         let m = manifest(MAP_TOML);
-        // Statements are newline-joined into one program; an embedded
-        // newline would split the batch even inside a quoted literal.
+        // A line break would reshape the line-per-row digest of stored rows.
         let mut extraction = serde_json::json!({
             "claims": [{"id": "c1", "entity": "e", "attribute": "a",
                         "value": "x\n+evil[(\"y\")]", "msg": 0, "surface": "s"}]

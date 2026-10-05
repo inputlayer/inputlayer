@@ -26,7 +26,7 @@
 use super::catalog_change::{CatalogChange, CatalogOutcome};
 use super::KnowledgeGraphSnapshot;
 use crate::ast::dependencies::DependencyClosure;
-use crate::ast::Rule;
+use crate::ast::{Program, Rule};
 use crate::execution::Stop;
 use crate::rule_catalog::RuleCatalog;
 use crate::storage::StorageError;
@@ -100,11 +100,8 @@ enum ReadSet {
 }
 
 impl ReadSet {
-    /// Relations `query` reads, directly or through `rules`.
-    fn of(query: &str, rules: &[Rule]) -> Self {
-        let Ok(program) = crate::parser::parse_program(query) else {
-            return Self::Everything;
-        };
+    /// Relations `program` reads, directly or through `rules`.
+    fn of(program: &Program, rules: &[Rule]) -> Self {
         let mut closure = DependencyClosure::default();
         for rule in &program.rules {
             closure.add_rule(rule);
@@ -175,7 +172,12 @@ impl WriteProgram {
     /// # Panics
     /// In debug builds, if the program already read a different snapshot;
     /// every statement of a program must stage against the same one.
-    pub fn read(&mut self, snapshot: &Arc<KnowledgeGraphSnapshot>, rules: &[Rule], query: &str) {
+    pub fn read(
+        &mut self,
+        snapshot: &Arc<KnowledgeGraphSnapshot>,
+        rules: &[Rule],
+        query: &Program,
+    ) {
         let relations = ReadSet::of(query, rules);
         match &mut self.read {
             Some(read) => {
@@ -264,6 +266,7 @@ impl WriteProgram {
             );
             view.max_result_rows = snapshot.max_result_rows;
             view.max_query_cost = snapshot.max_query_cost;
+            view.max_recursion_iterations = snapshot.max_recursion_iterations;
             view.optimization = snapshot.optimization.clone();
             view.hnsw_search_fn.clone_from(&snapshot.hnsw_search_fn);
             view
@@ -346,6 +349,10 @@ pub struct ProgramCommit {
     /// The snapshot the program committed against: the KG as published just
     /// before its changes, on which its reads were validated to still hold.
     pub base: Arc<KnowledgeGraphSnapshot>,
+    /// Revision of the snapshot the commit published, the one standing
+    /// queries refresh at; when the program changed nothing, the revision of
+    /// the KG's current snapshot, which already holds its effect.
+    pub revision: u64,
 }
 
 /// Why a write program was not committed. In every case but
@@ -356,6 +363,9 @@ pub enum CommitError {
     /// The KG published a new snapshot after the program read it. Stage the
     /// program again against the current snapshot.
     Stale,
+    /// The request's [`Precondition`](super::Precondition) does not hold on
+    /// the KG's current state. Staging again cannot change that.
+    Precondition(super::PreconditionError),
     /// The request was stopped (deadline or cancel) before the commit began.
     Cancelled(Stop),
     /// Statement `statement` cannot apply to the KG's current state.
@@ -403,6 +413,7 @@ impl CommitError {
                     .to_string(),
             ),
             Self::Cancelled(stop) => StorageError::Other(stop.message().to_string()),
+            Self::Precondition(error) => StorageError::Other(error.to_string()),
         }
     }
 }
@@ -517,7 +528,8 @@ mod tests {
         let base = Arc::new(KnowledgeGraphSnapshot::new(inputs, rules));
         let mut program = WriteProgram::new();
         assert!(program.read_holds_in(&base));
-        program.read(&base, &base.rules, "q(X) <- p(X)");
+        let query = crate::parser::parse_program("q(X) <- p(X)").unwrap();
+        program.read(&base, &base.rules, &query);
 
         let republished = |edit: &dyn Fn(&mut RelationMap)| {
             let mut next = (*base).clone();

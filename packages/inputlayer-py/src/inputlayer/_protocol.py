@@ -1,6 +1,6 @@
 """WebSocket wire protocol: message serialization and deserialization.
 
-Matches the AsyncAPI spec at ``docs/spec/asyncapi.yaml`` (protocol version 3,
+Matches the AsyncAPI spec at ``docs/spec/asyncapi.yaml`` (protocol version 4,
 defined by the ``inputlayer-ws-protocol`` crate).
 
 Any request may carry an ``id``; every reply to it (``authenticated``,
@@ -15,14 +15,18 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal
 
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 """The ``/ws`` protocol version this SDK speaks (``authenticated.protocol_version``)."""
+
+PARAMS_PROTOCOL_VERSION = 4
+"""The first protocol version whose ``execute`` takes ``params``."""
 
 
 def _with_id(frame: dict[str, Any], request_id: str | None) -> str:
     if request_id is not None:
         frame["id"] = request_id
-    return json.dumps(frame)
+    # A parameter is never NaN or infinite; refuse to write one, never `NaN`.
+    return json.dumps(frame, allow_nan=False)
 
 # ── Client → Server messages ──────────────────────────────────────────
 
@@ -59,9 +63,14 @@ class ExecuteMessage:
     timeout_ms: int | None = None
     """The request's deadline, counted from when the server reads it (capped
     by the engine's own query timeout)."""
+    params: dict[str, Any] | None = None
+    """Values of the program's ``$name`` references, bound by the engine
+    without being parsed (protocol version 4)."""
 
     def to_json(self) -> str:
         frame: dict[str, Any] = {"type": "execute", "program": self.program}
+        if self.params:
+            frame["params"] = self.params
         if self.timeout_ms is not None:
             frame["timeout_ms"] = self.timeout_ms
         return _with_id(frame, self.id)
@@ -119,13 +128,17 @@ ErrorCode = Literal[
     "deadline_exceeded",
     "cancelled",
     "outcome_unknown",
+    "resource_exhausted",
 ]
 """Why the engine rejected a statement or request (``code`` on ``error`` and ``errors[]``).
 
 ``invalid_request`` and ``rate_limited`` reject a whole request before it runs.
 ``deadline_exceeded`` and ``cancelled`` stop it before it began committing, so
 nothing was applied; ``outcome_unknown`` means its commit failed in a way that
-leaves the changes possibly applied: read the state back before retrying."""
+leaves the changes possibly applied: read the state back before retrying.
+``resource_exhausted`` refuses a query over the engine's per-query memory limit
+or its server-wide query memory budget, or a write past its knowledge graph's
+memory budget; nothing was applied."""
 
 
 @dataclass(frozen=True)

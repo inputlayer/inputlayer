@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from inputlayer import _meta
+from inputlayer._literal import collect_params, params_of
 from inputlayer.compiler import compile_insert, compile_rule_clause
 from inputlayer.relation import Relation
 
@@ -32,7 +33,9 @@ class Session:
         """
         batch = facts if isinstance(facts, list) else [facts]
         for fact in batch:
-            await self._conn.execute(compile_insert(fact, persistent=False))
+            with collect_params() as params:
+                iql = compile_insert(fact, persistent=False)
+            await self._conn.execute(iql, params=params)
 
     async def define_rules(self, *targets: type[Derived]) -> None:
         """Define session-scoped rules (no + prefix), one program per clause.
@@ -44,17 +47,18 @@ class Session:
             head_name = Relation._resolve_name(target)
             head_columns = Relation._get_columns(target)
             for clause in target.rules:
-                compiled = compile_rule_clause(
-                    head_name,
-                    head_columns,
-                    clause.select_map,
-                    clause.relations,
-                    clause.condition,
-                    persistent=False,
-                )
+                with collect_params() as params:
+                    compiled = compile_rule_clause(
+                        head_name,
+                        head_columns,
+                        clause.select_map,
+                        clause.relations,
+                        clause.condition,
+                        persistent=False,
+                    )
                 # Constants a negated atom binds through are session facts too.
                 for statement in (*compiled.constants, compiled.clause):
-                    await self._conn.execute(statement)
+                    await self._conn.execute(statement, params=params_of(statement, params))
 
     async def list_rules(self) -> list[str]:
         """List session rules, one clause per entry, in definition order."""

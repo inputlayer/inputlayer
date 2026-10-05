@@ -3,7 +3,7 @@
 //! ones these statements always had when they ran on their own.
 
 use super::fact_staging::StageError;
-use super::{format_rule_text, storage_error_code};
+use super::storage_error_code;
 use crate::protocol::wire::ErrorCode;
 use crate::schema::{ColumnSchema, RelationSchema};
 use crate::statement::{self, SchemaDecl};
@@ -45,16 +45,8 @@ impl CatalogStatement {
                     CatalogChange::DefineSessionSchema(schema)
                 }
             }
-            Self::Rule(rule) => {
-                let rule_def =
-                    statement::parse_rule_definition(&format_rule_text(rule)).map_err(|e| {
-                        StageError {
-                            code: ErrorCode::Validation,
-                            message: format!("Failed to parse rule: {e}"),
-                        }
-                    })?;
-                CatalogChange::RegisterRule(rule_def)
-            }
+            // The parsed (and bound) rule itself: never re-parsed from text.
+            Self::Rule(rule) => CatalogChange::RegisterRule(statement::RuleDef::from_rule(rule)),
             Self::DropRule(name) | Self::RuleDrop(name) => CatalogChange::DropRule(name.clone()),
             Self::RuleDropPrefix(prefix) => CatalogChange::DropRulesByPrefix(prefix.clone()),
             Self::RuleRemove { name, index } => CatalogChange::RemoveRuleClause {
