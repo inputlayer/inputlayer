@@ -47,6 +47,7 @@ use crate::storage::persist::{
 };
 use crate::storage::{KnowledgeGraphMetadata, RelationTombstone, StorageError, StorageResult};
 use crate::value::Tuple;
+use crate::view_maintainer::ViewMaintainer;
 use arc_swap::ArcSwapOption;
 use parking_lot::lock_api::ArcRwLockWriteGuard;
 use parking_lot::{Mutex, RawRwLock, RwLock};
@@ -394,6 +395,32 @@ impl StorageEngine {
             .into_iter()
             .map(|(name, slot)| (name, slot.listing().summary))
             .collect()
+    }
+
+    /// The view maintainer of every loaded knowledge graph that runs one
+    /// (`engine.views = "maintained"`): its frontier, backlog and trace size.
+    pub fn view_stats(&self) -> Vec<(String, crate::view_maintainer::ViewStats)> {
+        self.slots()
+            .into_iter()
+            .filter_map(|(name, slot)| {
+                let stats = slot.graph()?.read().view_stats()?;
+                Some((name, stats))
+            })
+            .collect()
+    }
+
+    /// Wait until `kg`'s view maintainer holds everything through
+    /// `revision`. Returns whether it did within `timeout`: false when the
+    /// KG is not loaded, runs without a maintainer, or its maintainer failed.
+    ///
+    /// The maintainer is looked up under the KG's read lock and waited for
+    /// without it, so a waiter never holds up a writer.
+    pub fn wait_for_views(&self, kg: &str, revision: u64, timeout: Duration) -> bool {
+        let Some(graph) = self.slot(kg).ok().and_then(|slot| slot.graph()) else {
+            return false;
+        };
+        let waiter = graph.read().views.as_ref().map(ViewMaintainer::waiter);
+        waiter.is_some_and(|waiter| waiter.wait_for(revision, timeout))
     }
 
     /// Load dormant `kg` into `slot`, or return what another activation

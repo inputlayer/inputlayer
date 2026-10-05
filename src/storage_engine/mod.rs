@@ -79,6 +79,7 @@ use crate::storage::{
     KnowledgeGraphsMetadata, RelationTombstone, StorageError, StorageResult,
 };
 use crate::value::{Relation, Tuple};
+use crate::view_maintainer::{BaseChange, BaseDelta, ViewMaintainer, ViewStats};
 use arc_swap::ArcSwap;
 use chrono::Utc;
 use dashmap::DashMap;
@@ -254,6 +255,10 @@ pub struct KnowledgeGraph {
     /// The catalogs hold changes their files lack (a save failed). The WAL
     /// keeps them for a restart; until a save succeeds the KG stays loaded
     catalog_unsaved: bool,
+    /// The view maintainer, fed every published snapshot; `None` unless
+    /// `engine.views = "maintained"`. Stopped when the KG is dropped or
+    /// unloaded, which drops this value.
+    views: Option<ViewMaintainer>,
 }
 
 impl StorageEngine {
@@ -456,6 +461,7 @@ impl StorageEngine {
                 kg.max_recursion_iterations =
                     self.config.storage.performance.recursion_iteration_limit();
                 kg.set_optimization(self.config.optimization.clone());
+                kg.start_views(self.config.engine.views);
                 let revision = kg.snapshot.load().revision;
 
                 vacant.insert(Arc::new(residency::KgSlot::loaded(kg, self.clock_now())));
@@ -2233,6 +2239,7 @@ impl KnowledgeGraph {
             optimization: crate::OptimizationConfig::default(),
             retired: None,
             catalog_unsaved: false,
+            views: None,
         }
     }
 
@@ -2290,12 +2297,39 @@ impl KnowledgeGraph {
             optimization: engine.config.optimization.clone(),
             retired: None,
             catalog_unsaved: false,
+            views: None,
         };
+        kg.start_views(engine.config.engine.views);
         kg.restore_indexes();
         if !kg.indexes.is_empty() {
             kg.publish_snapshot();
         }
         Ok(kg)
+    }
+
+    /// Start this KG's view maintainer from its published snapshot, if
+    /// `mode` asks for one.
+    fn start_views(&mut self, mode: crate::config::ViewsMode) {
+        if mode == crate::config::ViewsMode::Maintained {
+            let snapshot = self.snapshot.load();
+            self.views = Some(ViewMaintainer::start(
+                &self.name,
+                snapshot.revision,
+                self.store.relations().clone(),
+            ));
+        }
+    }
+
+    /// The view maintainer's progress, backlog and trace size; `None` when
+    /// the KG runs without one.
+    pub fn view_stats(&self) -> Option<ViewStats> {
+        self.views.as_ref().map(ViewMaintainer::stats)
+    }
+
+    /// Why this KG's maintained views cannot be used, if they cannot: its
+    /// maintainer stopped. Reads are answered from the base facts either way.
+    pub fn views_unavailable(&self) -> Option<String> {
+        self.views.as_ref().and_then(ViewMaintainer::unavailable)
     }
 
     /// The rule and schema catalogs saved in `data_dir`.
@@ -2334,6 +2368,13 @@ impl KnowledgeGraph {
     /// snapshot carries the persistent rules as definitions: every read
     /// evaluates the ones it needs from these base facts.
     fn publish_snapshot(&self) {
+        self.publish_change(BaseChange::default());
+    }
+
+    /// [`Self::publish_snapshot`] of a snapshot that changes the base
+    /// relations by `change`, which the view maintainer is fed under the new
+    /// snapshot's revision.
+    fn publish_change(&self, change: BaseChange) {
         let snapshot_start = Instant::now();
         let mut new_snapshot = KnowledgeGraphSnapshot::with_rules_after(
             self.store.relations().clone(),
@@ -2348,7 +2389,11 @@ impl KnowledgeGraph {
         new_snapshot.hnsw_search_fn = self.hnsw_search_fn();
         self.stamp_changes(&mut new_snapshot);
         let rules = new_snapshot.rules.len();
+        let revision = new_snapshot.revision;
         self.snapshot.store(Arc::new(new_snapshot));
+        if let Some(views) = &self.views {
+            views.feed(revision, change);
+        }
 
         info!(
             relations = self.store.relations().len(),
@@ -2434,7 +2479,10 @@ impl KnowledgeGraph {
         }
 
         self.drop_indexes_for(name);
-        self.publish_snapshot();
+        self.publish_change(BaseChange {
+            deltas: Vec::new(),
+            dropped: vec![name.to_string()],
+        });
         schema.and(rule)
     }
 
@@ -2489,8 +2537,20 @@ impl KnowledgeGraph {
         persist.commit(txn)?;
 
         let mut results = Vec::with_capacity(matching.len());
+        let mut change = BaseChange::default();
         for relation in matching {
             let count = self.store.get(&relation).map_or(0, Relation::len);
+            if self.views.is_some() {
+                change.deltas.push(BaseDelta {
+                    relation: relation.clone(),
+                    added: Vec::new(),
+                    removed: self
+                        .store
+                        .get(&relation)
+                        .map(|tuples| tuples.iter().cloned().collect())
+                        .unwrap_or_default(),
+                });
+            }
             self.store.clear(&relation);
             self.rebuild_indexes_for(&relation);
 
@@ -2507,7 +2567,7 @@ impl KnowledgeGraph {
         }
 
         if !results.is_empty() {
-            self.publish_snapshot();
+            self.publish_change(change);
         }
 
         Ok(results)

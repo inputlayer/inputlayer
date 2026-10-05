@@ -106,7 +106,7 @@ static ALLOCATOR: execution::memory::MeteredAllocator = execution::memory::Meter
 // AST and IR modules (consolidated from crates/)
 pub mod ast;
 pub mod hnsw_index; // HNSW vector index implementation
-pub mod incremental;
+pub mod view_maintainer;
 pub mod index_manager; // Index manager for vector similarity search
 pub mod ir;
 pub mod session; // Session manager for ephemeral triggers persistent

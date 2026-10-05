@@ -11,6 +11,7 @@ use crate::protocol::rest::dto::{ApiResponse, HealthDto, SessionStatsDto, StatsD
 use crate::protocol::rest::error::RestError;
 use crate::protocol::Handler;
 use crate::storage_engine::KgSummary;
+use crate::view_maintainer::ViewStats;
 
 /// Health check endpoint.
 ///
@@ -186,6 +187,7 @@ fn prometheus_text(handler: &Handler) -> String {
     let summaries = storage.knowledge_graph_summaries();
     let (kg_loads, kg_unloads) = storage.knowledge_graph_residency_counts();
     let persist = storage.persist_stats();
+    let view_stats = storage.view_stats();
     let replication = handler.replication_report(&storage);
     drop(storage);
     let totals = KgTotals::of(&summaries);
@@ -460,11 +462,61 @@ fn prometheus_text(handler: &Handler) -> String {
     handler.server_metrics().format_prometheus(&mut out);
 
     out.raw(&crate::execution::view_counters().format_prometheus());
+    view_maintainer_metrics(&mut out, &view_stats);
     out.raw(&handler.timing_histograms().format_prometheus());
     if let Some(replication) = &replication {
         out.raw(&replication.format_prometheus());
     }
     out.finish()
+}
+
+/// One sample per knowledge graph running a view maintainer
+/// (`engine.views = "maintained"`); the families are declared either way.
+fn view_maintainer_metrics(out: &mut Prometheus, stats: &[(String, ViewStats)]) {
+    fn per_kg<'a, V: 'a>(
+        stats: &'a [(String, ViewStats)],
+        value: impl Fn(&ViewStats) -> V + 'a,
+    ) -> impl Iterator<Item = (Vec<(&'static str, String)>, V)> + 'a {
+        stats
+            .iter()
+            .map(move |(kg, stats)| (vec![("kg", kg.clone())], value(stats)))
+    }
+    out.family(
+        "inputlayer_view_frontier_revision",
+        "gauge",
+        "Last snapshot revision the view maintainer holds completely.",
+        per_kg(stats, |s| s.frontier),
+    );
+    out.family(
+        "inputlayer_view_frontier_lag_seconds",
+        "gauge",
+        "How long the oldest published snapshot the view maintainer has not applied has waited (0: it is current).",
+        per_kg(stats, |s| s.frontier_lag.as_secs_f64()),
+    );
+    out.family(
+        "inputlayer_view_pending_commits",
+        "gauge",
+        "Published snapshots queued for the view maintainer and not yet applied.",
+        per_kg(stats, |s| s.pending_commits),
+    );
+    out.family(
+        "inputlayer_view_trace_rows",
+        "gauge",
+        "Updates held in the view maintainer's arrangements.",
+        per_kg(stats, |s| s.trace_rows),
+    );
+    out.family(
+        "inputlayer_view_trace_bytes",
+        "gauge",
+        "Estimated bytes of the updates held in the view maintainer's arrangements.",
+        per_kg(stats, |s| s.trace_bytes),
+    );
+    out.family(
+        "inputlayer_views_unavailable",
+        "gauge",
+        "1 once the view maintainer stopped after a failure (reads evaluate rules from the base facts), else 0.",
+        per_kg(stats, |s| u8::from(s.unavailable.is_some())),
+    );
 }
 
 /// Totals over every knowledge graph, from their summaries: stats must not
@@ -714,6 +766,57 @@ mod tests {
                 assert!(declared.contains(family), "undeclared: {line}");
             }
         }
+    }
+
+    /// With `engine.views = "maintained"` each loaded knowledge graph reports
+    /// its view maintainer: frontier, lag behind the commit path, backlog,
+    /// trace size and whether it failed.
+    #[tokio::test]
+    async fn test_prometheus_reports_view_maintainer_frontier_lag() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.storage.auto_create_knowledge_graphs = true;
+        config.storage.data_dir = tmp.path().to_path_buf();
+        config.engine.views = crate::config::ViewsMode::Maintained;
+        let handler = Arc::new(Handler::from_config(config).unwrap());
+        handler
+            .query_program(None, "+lagged[(1, 2), (3, 4)]".to_string())
+            .await
+            .unwrap();
+        let revision = {
+            let storage = handler.get_storage();
+            let revision = storage.get_snapshot_for("default").unwrap().revision;
+            assert!(storage.wait_for_views("default", revision, std::time::Duration::from_secs(30)));
+            revision
+        };
+        let (_, _, body) = prometheus_metrics(Extension(handler)).await.unwrap();
+        for line in [
+            format!("inputlayer_view_frontier_revision{{kg=\"default\"}} {revision}"),
+            "inputlayer_view_frontier_lag_seconds{kg=\"default\"} 0".to_string(),
+            "inputlayer_view_pending_commits{kg=\"default\"} 0".to_string(),
+            // Two tuples in each of the two arrangements.
+            "inputlayer_view_trace_rows{kg=\"default\"} 4".to_string(),
+            "inputlayer_views_unavailable{kg=\"default\"} 0".to_string(),
+        ] {
+            assert!(body.lines().any(|l| l == line), "missing {line}:\n{body}");
+        }
+        let bytes: u64 = body
+            .lines()
+            .find_map(|l| l.strip_prefix("inputlayer_view_trace_bytes{kg=\"default\"} "))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(bytes > 0);
+    }
+
+    /// Without a view maintainer (the default) the families are declared and
+    /// hold no samples.
+    #[tokio::test]
+    async fn test_prometheus_declares_view_maintainer_families_in_recompute_mode() {
+        let (handler, _tmp) = make_handler();
+        let (_, _, body) = prometheus_metrics(Extension(handler)).await.unwrap();
+        assert!(body.contains("# TYPE inputlayer_view_frontier_lag_seconds gauge"));
+        assert!(!body.contains("inputlayer_view_frontier_lag_seconds{"));
     }
 
     /// The blind spots of #300: subscriptions, WAL and flushes, the store's

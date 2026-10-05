@@ -13,6 +13,7 @@ use crate::schema::SchemaCatalog;
 use crate::storage::persist::{PersistBackend, Transaction};
 use crate::storage::{StorageError, StorageResult};
 use crate::value::{Relation, Tuple};
+use crate::view_maintainer::{BaseChange, BaseDelta};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::time::Instant;
@@ -359,6 +360,7 @@ impl KnowledgeGraph {
         delta: Vec<(String, RelationDelta)>,
     ) -> Vec<RelationChange> {
         let mut changed = Vec::with_capacity(delta.len());
+        let mut change = BaseChange::default();
         for (relation, changes) in delta {
             let (added, removed) = changes.into_parts();
             let removed = self.store.delete(&relation, &removed);
@@ -377,13 +379,21 @@ impl KnowledgeGraph {
             self.metadata
                 .add_relation(relation.clone(), schema, tuple_count);
 
+            let (inserted, deleted) = (added.len(), removed.len());
+            if self.views.is_some() {
+                change.deltas.push(BaseDelta {
+                    relation: relation.clone(),
+                    added,
+                    removed,
+                });
+            }
             changed.push(RelationChange {
                 relation,
-                inserted: added.len(),
-                deleted: removed.len(),
+                inserted,
+                deleted,
             });
         }
-        self.publish_snapshot();
+        self.publish_change(change);
         changed
     }
 }

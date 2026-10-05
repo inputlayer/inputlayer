@@ -47,6 +47,8 @@ pub struct Config {
     pub subscriptions: SubscriptionsConfig,
     #[serde(default)]
     pub replication: ReplicationConfig,
+    #[serde(default)]
+    pub engine: EngineConfig,
 }
 
 /// Storage engine configuration
@@ -449,6 +451,29 @@ impl Default for SubscriptionsConfig {
             share_parameterized: true,
         }
     }
+}
+
+/// Evaluation engine configuration
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EngineConfig {
+    /// How persistent rules are kept; see [`ViewsMode`].
+    #[serde(default)]
+    pub views: ViewsMode,
+}
+
+/// How a knowledge graph keeps its persistent rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewsMode {
+    /// Every read evaluates the rules it needs from the base facts (the
+    /// default).
+    #[default]
+    Recompute,
+    /// Each loaded knowledge graph also runs a view maintainer: a long-lived
+    /// dataflow fed by every commit. It holds the base relations only, and
+    /// reads still evaluate rules from the base facts.
+    Maintained,
 }
 
 /// What part a server plays in warm-standby replication.
@@ -1042,7 +1067,8 @@ impl Config {
             "logging": {},
             "http": { "gui": {}, "auth": {}, "rate_limit": {} },
             "subscriptions": {},
-            "replication": {}
+            "replication": {},
+            "engine": {}
         });
         serde_json::from_value(minimal).expect("minimal config seed must deserialize")
     }
@@ -1056,13 +1082,14 @@ impl Config {
     /// strict parsing turned any of them into a startup failure (#92). The
     /// TOML sources stay strict; only the env source is filtered.
     fn env_source() -> Env {
-        const SECTIONS: [&str; 6] = [
+        const SECTIONS: [&str; 7] = [
             "storage",
             "optimization",
             "logging",
             "http",
             "subscriptions",
             "replication",
+            "engine",
         ];
         Env::prefixed("INPUTLAYER_")
             .filter(|key| {
@@ -1306,6 +1333,7 @@ impl Config {
             http: HttpConfig::default(),
             subscriptions: SubscriptionsConfig::default(),
             replication: ReplicationConfig::default(),
+            engine: EngineConfig::default(),
         }
     }
 }
