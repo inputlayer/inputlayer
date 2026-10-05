@@ -204,13 +204,6 @@ pub struct Handler {
     /// Permits of standing-query sharing probes, apart from the compute
     /// permits so that a probe never takes one a query waits for.
     probe_semaphore: Arc<tokio::sync::Semaphore>,
-    /// Permits of standing-query evaluations, as many as compute permits but
-    /// apart from them: a refresh never queues behind requests, nor a request
-    /// behind refreshes. Requests queue behind each other: a burst of writes
-    /// to one knowledge graph holds compute permits while each waits for the
-    /// graph's commit, and refreshes queued among them would deliver every
-    /// delta late by the whole burst.
-    standing_semaphore: Arc<tokio::sync::Semaphore>,
     /// Whether standing-query families share whatever their rounds cost.
     share_regardless_of_cost: bool,
     /// Memory held by the computations of every request in flight.
@@ -1049,7 +1042,6 @@ impl Handler {
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
-            standing_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             share_regardless_of_cost: false,
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
@@ -1105,7 +1097,6 @@ impl Handler {
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
-            standing_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             share_regardless_of_cost: false,
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
@@ -1172,7 +1163,6 @@ impl Handler {
     }
 
     /// How many queries run at once; more wait for a compute permit.
-    /// Standing-query evaluations have as many permits of their own.
     pub fn compute_permits(&self) -> usize {
         self.compute_permits
     }
@@ -1189,7 +1179,6 @@ impl Handler {
     /// core not reserved for I/O).
     pub fn with_compute_permits(mut self, permits: usize) -> Self {
         self.query_semaphore = Arc::new(tokio::sync::Semaphore::new(permits));
-        self.standing_semaphore = Arc::new(tokio::sync::Semaphore::new(permits));
         self.compute_permits = permits;
         self
     }
@@ -4210,10 +4199,8 @@ impl Handler {
     /// query's exact answer at `snapshot.revision`. The query's compiled plan
     /// is kept and reused on later snapshots until the rules change; the
     /// [`CachedRun`](crate::storage_engine::CachedRun) tells whether this run
-    /// reused it and how long executing it took. It computes under a
-    /// standing-query permit, or a probe permit for a `probe` (of
-    /// standing-query sharing), never a compute permit: standing queries and
-    /// requests never wait for each other.
+    /// reused it and how long executing it took. A `probe` (of standing-query
+    /// sharing) computes under a probe permit instead of a compute permit.
     pub async fn query_snapshot(
         &self,
         knowledge_graph: &str,
@@ -4251,7 +4238,7 @@ impl Handler {
                 if probe {
                     &self.probe_semaphore
                 } else {
-                    &self.standing_semaphore
+                    &self.query_semaphore
                 },
             )
             .await?;

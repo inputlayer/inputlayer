@@ -883,26 +883,6 @@ mod rounds {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn views_refresh_while_requests_hold_every_compute_permit() {
-        let (handler, _tmp) = handler();
-        write(&handler, "+item[(\"s1\", 1), (\"s2\", 2)]").await;
-        let families = Families::default();
-        let metrics = Arc::new(SubscriptionMetrics::default());
-        let (mut views, _idle) = sharing_views(&families, &handler, &metrics, &["s1", "s2"]).await;
-        write(&handler, "+item[(\"s1\", 3), (\"s2\", 4)]").await;
-
-        // Requests queued for compute permits, such as a burst of writes
-        // waiting for their graph's commit, hold up no standing query.
-        let held = handler.hold_compute_permits();
-        let shared = views[0].refresh().await.unwrap();
-        assert_eq!(inserted(&shared), [json!(["s1", 3])]);
-        views[1].family.sharing.store(false, Ordering::Relaxed);
-        let own = views[1].refresh().await.unwrap();
-        assert_eq!(inserted(&own), [json!(["s2", 4])]);
-        drop(held);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
     async fn a_family_whose_views_fit_on_the_compute_permits_never_shares() {
         // 3 sessions on 4 compute permits: their own evaluations run at once.
         let (handler, _tmp) = handler_with(4);

@@ -8,18 +8,11 @@
 //! engine cannot restrict the rules it reads to the constants. Instead, their
 //! constants are *lifted* to parameters, `?speech(_L0, G, T),
 //! speech_owner(_L0, _L1, 1)`, and views of the same lifted query form a
-//! [`Family`]. The family evaluates the lifted query (a round), partitions
-//! its rows by parameter values, and hands each view the rows of its own
-//! constants, projected to its own columns. Each view diffs that against its
-//! previous result as before, so subscribers, deltas, revisions,
-//! authorization and the shared-view state machine are unchanged.
-//!
-//! Rounds run one at a time. A view reads the latest round when it evaluates
-//! the view's snapshot or a newer one; otherwise it waits for the next round,
-//! which starts once the one evaluating has finished and takes the snapshot
-//! current then. Under a steady stream of commits every view refreshes at a
-//! different revision, yet the family evaluates one round and queues at most
-//! one more, and a view's refresh waits for at most two rounds.
+//! [`Family`]. The family evaluates the lifted query once per revision (a
+//! round), partitions its rows by parameter values, and hands each view the
+//! rows of its own constants, projected to its own columns. Each view diffs
+//! that against its previous result as before, so subscribers, deltas,
+//! revisions, authorization and the shared-view state machine are unchanged.
 //!
 //! The partition is exact, not a re-implementation of the query: a parameter
 //! is matched the way the engine matches the constant it replaces.
@@ -40,25 +33,25 @@
 //! round fails, is truncated, or holds more rows for it than
 //! `max_result_rows` allows. A lifted query computes every binding's rows,
 //! subscribed or not, and every view waits for it. A family therefore never
-//! shares while its views' own evaluations fit on the standing-query permits
-//! (as many as compute permits) at once, and otherwise shares only while a
-//! round is, on average, no slower than those evaluations run in parallel on
-//! the permits. Costs leave out waiting for a permit and compiling a plan,
-//! and a view's own cost counts only evaluations that reused a compiled plan.
-//! Costs hold under the rules they were measured with: a rule change stops
-//! sharing and starts them over. A family never evaluates its lifted query
-//! while a parameter binds an atom that reads, under the current rules, a
-//! recursive relation: the constant lets Magic Sets restrict the work, and
-//! the lifted query may compute the whole closure. Otherwise, once it has a
-//! view's own cost to compare with, a family probes: it evaluates the round
-//! of that revision, which no view waits for, under the server's probe
-//! permit rather than a standing-query permit, and starts sharing only when
-//! that round is fast enough. Views that then share at the probe's revision
-//! read the probe's round, so the lifted query is evaluated at most once per
-//! revision. With too few permits for that, a family shares without a probe.
-//! It stops when rounds are slower on average, and probes (or decides) again
-//! after some commits, waiting longer after each failure. While sharing, a
-//! view evaluates its own query now and then to keep that cost current.
+//! shares while its views' own evaluations fit on the compute permits at
+//! once, and otherwise shares only while a round is, on average, no slower
+//! than those evaluations run in parallel on the permits. Costs leave out
+//! waiting for a permit and compiling a plan, and a view's own cost counts
+//! only evaluations that reused a compiled plan. Costs hold under the rules
+//! they were measured with: a rule change stops sharing and starts them
+//! over. A family never evaluates its lifted query while a parameter binds
+//! an atom that reads, under the current rules, a recursive relation: the
+//! constant lets Magic Sets restrict the work, and the lifted query may
+//! compute the whole closure. Otherwise, once it has a view's own cost to
+//! compare with, a family probes: it evaluates the round of that revision,
+//! which no view waits for, under the server's probe permit rather than a
+//! compute permit, and starts sharing only when that round is fast enough.
+//! Views that then share at the probe's revision read the probe's round, so
+//! the lifted query is evaluated at most once per revision. With too few
+//! compute permits for that, a family shares without a probe. It stops when
+//! rounds are slower on average, and probes (or decides) again after some
+//! commits, waiting longer after each failure. While sharing, a view
+//! evaluates its own query now and then to keep that cost current.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
