@@ -91,9 +91,17 @@ pub struct KnowledgeGraph {
 - **input_tuples** holds the base relations (Arc-shared with the store, O(1) clone per relation)
 - **rules** holds the persistent rules; **persistent** holds their formatted program prefix and a plan cache, shared with the previous snapshot while the rules are unchanged
 
-### 2.4 IncrementalEngine (unused worker skeleton)
+### 2.4 ViewMaintainer (base relations only, off by default)
 
-`src/incremental.rs` keeps only the `IncrementalEngine` worker skeleton: a long-lived timely worker with one DD `InputSession` and arrangement per **base** relation, driven through a command channel. It is not wired to any `KnowledgeGraph` or to the commit path, and no rule is compiled into a DD dataflow that outlives a query. It is the seed of the Section 16 view maintainer.
+`src/view_maintainer.rs` holds the `ViewMaintainer`: a long-lived timely worker thread per knowledge graph with one DD `InputSession` per **base** relation and two arrangements of it, by tuple and by key (the first column). It runs only with `engine.views = "maintained"`; the default is `recompute`, where no maintainer exists.
+
+- **Lifecycle**: started when a knowledge graph is created or loaded from disk (from the store, at the published revision), stopped when the graph is dropped or unloaded.
+- **Feed**: every published snapshot is fed under the graph's write lock, so in commit order, as the base-relation changes at that snapshot's revision (`apply_delta`, clear by prefix, relation drop; other publishes feed an empty change). The feed is an unbounded queue and never waits for the worker.
+- **Frontier**: the last revision the arrangements hold completely. The worker applies every queued snapshot as one change at the last of their revisions, advances the inputs and steps until the probes pass it. A slow worker shows as frontier lag (`inputlayer_view_frontier_lag_seconds`), never as a slow commit.
+- **Metering**: trace rows and estimated bytes, from `map_batches`, walking only batches that appeared since the last metering.
+- **Failure**: a worker panic is caught and marks the graph's views unavailable; the store stays authoritative, commits go on and are no longer fed, and a reload of the graph starts a fresh maintainer.
+
+No rule is compiled into the maintainer yet and no read uses it: every read still evaluates persistent rules from the base facts (Section 7). It is the first step of the Section 16 live views.
 
 `DerivedRelationsManager`, auto-materialization and shadow writes were removed ([#307](https://github.com/inputlayer/inputlayer/issues/307)).
 
@@ -329,7 +337,7 @@ pub struct ExecutionConfig {
 
 ### 7.2 No Incremental Execution Path
 
-Every query, ad-hoc or standing, runs through the batch path of 7.1. There is no long-lived dataflow on the server path; the `IncrementalEngine` of 2.4 is unused.
+Every query, ad-hoc or standing, runs through the batch path of 7.1. No read uses a long-lived dataflow: the `ViewMaintainer` of 2.4, when enabled, holds base relations only and serves no query.
 
 ---
 
@@ -566,7 +574,7 @@ This node filters `input` to keep only tuples whose key columns exist in `filter
 | `src/value/mod.rs` | Value, Tuple, Abomonation |
 | `src/storage_engine/mod.rs` | StorageEngine, KnowledgeGraph |
 | `src/storage_engine/snapshot.rs` | KnowledgeGraphSnapshot |
-| `src/incremental.rs` | IncrementalEngine (unused worker skeleton, see 2.4) |
+| `src/view_maintainer.rs` | ViewMaintainer (per-KG dataflow over base relations, see 2.4) |
 | `src/rule_catalog.rs` | RuleCatalog, validation |
 | `src/schema/catalog.rs` | SchemaCatalog (per-KG) |
 | `src/code_generator/mod.rs` | CodeGenerator, execution |
@@ -638,7 +646,7 @@ isolated.entry(relation).or_default().push(session_fact);
 
 The live-views milestone makes every deployed (persistent) rule an incrementally maintained view; everything else is a query.
 
-- **One view maintainer per knowledge graph**: a long-lived Differential Dataflow worker fed from the commit path (`apply_delta`) at each commit's revision. It replaces the `IncrementalEngine` skeleton.
+- **One view maintainer per knowledge graph**: a long-lived Differential Dataflow worker fed from the commit path (`apply_delta`) at each commit's revision. Its base-relation part exists behind `engine.views = "maintained"` (Section 2.4, [#309](https://github.com/inputlayer/inputlayer/issues/309)); the rest of this list is not built.
 - **Persistent rules as arrangements**: each rule compiles into the maintainer's dataflow (joins, recursion with `iterate`, negation with `antijoin`, aggregates with `reduce`); its rows live only in its arrangements.
 - **Queries never re-derive deployed rules**: ad-hoc queries, session rules and proofs import the view arrangements at a stated revision and run only their own operators.
 - **Writes confirmed once views include them**: a write is acknowledged after the maintainer has applied it, so the acknowledged revision is the revision views and queries show.

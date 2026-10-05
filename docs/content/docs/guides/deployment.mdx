@@ -199,6 +199,9 @@ knowledge graph names.
 | `inputlayer_compute_permits_in_use` | gauge | Queries computing now. |
 | `inputlayer_query_{parse,optimize,execute,total}_seconds` | histogram | Query latency by phase (see [Query Profiling](query-profiling)). |
 | `inputlayer_rule_evaluations_total`, `inputlayer_view_reads_total`, `inputlayer_view_maintenance_us_total` | counter | How reads of persistent rules were answered: by evaluating the rules, or from a view, and the microseconds spent keeping views current (see [Query Profiling](query-profiling#prometheus-metrics)). |
+| `inputlayer_view_frontier_revision{kg}`, `inputlayer_view_frontier_lag_seconds{kg}`, `inputlayer_view_pending_commits{kg}` | gauge | With `engine.views = "maintained"`, per loaded knowledge graph: the last snapshot revision its view maintainer holds, how long the oldest published snapshot it has not applied has waited, and how many are queued. Commits never wait for the maintainer, so a maintainer slower than the writers shows here. |
+| `inputlayer_view_trace_rows{kg}`, `inputlayer_view_trace_bytes{kg}` | gauge | Updates held in the view maintainer's arrangements, and their estimated bytes. |
+| `inputlayer_views_unavailable{kg}` | gauge | 1 once the knowledge graph's view maintainer stopped after a failure. Writes and reads are unaffected (reads evaluate rules from the base facts); it starts again when the knowledge graph is next loaded. |
 
 **Durability**
 

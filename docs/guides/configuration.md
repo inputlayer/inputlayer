@@ -233,6 +233,18 @@ notification_buffer_size = 4096
 # still gets exactly its own rows. Turns itself off per query shape when sharing
 # does not pay off (see the WebSocket API guide).
 share_parameterized = true
+
+# =============================================================================
+# ENGINE
+# =============================================================================
+[engine]
+# How persistent rules are kept. "recompute" (default): every read evaluates
+# the rules it needs from the base facts. "maintained": each loaded knowledge
+# graph also runs a view maintainer, a long-lived dataflow fed by every
+# commit. It holds the base relations only for now (twice: by tuple and by
+# first column, so it adds memory), and reads still evaluate rules from the
+# base facts. Commits never wait for it; watch inputlayer_view_frontier_lag_seconds.
+views = "recompute"
 ```
 
 ## Environment Variables

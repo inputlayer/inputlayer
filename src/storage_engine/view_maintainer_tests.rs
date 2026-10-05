@@ -370,10 +370,19 @@ fn a_maintainer_starts_at_create_and_stops_at_drop() {
 #[test]
 fn a_maintainer_stops_at_unload_and_starts_at_load() {
     let temp = TempDir::new().unwrap();
+    {
+        let storage = open(temp.path());
+        for kg in ["a", "b"] {
+            storage.create_knowledge_graph(kg).unwrap();
+            storage
+                .insert_tuples_into(kg, "edge", vec![pair(1, 2), pair(3, 4)])
+                .unwrap();
+        }
+    }
+    // At most one loaded KG: loading one unloads the other.
     let storage = StorageEngine::new(config(temp.path(), ViewsMode::Maintained, 1)).unwrap();
-    storage.create_knowledge_graph("a").unwrap();
     storage
-        .insert_tuples_into("a", "edge", vec![pair(1, 2), pair(3, 4)])
+        .insert_tuples_into("a", "edge", vec![pair(5, 6)])
         .unwrap();
     let unloaded_at = assert_views_equal_store(&storage, "a", &["edge"]);
     let waiter = storage
@@ -385,27 +394,22 @@ fn a_maintainer_stops_at_unload_and_starts_at_load() {
         .unwrap()
         .waiter();
 
-    // Over the limit of one loaded KG: `a` is unloaded.
-    storage.create_knowledge_graph("b").unwrap();
-    storage
-        .insert_tuples_into("b", "edge", vec![pair(5, 6)])
-        .unwrap();
-    let deadline = Instant::now() + WAIT;
-    while storage.is_knowledge_graph_loaded("a").unwrap() {
-        assert!(Instant::now() < deadline, "a is unloaded");
-        storage.insert_tuples_into("b", "edge", vec![]).unwrap();
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert!(!maintained(&storage).contains(&"a".to_string()));
+    assert_views_equal_store(&storage, "b", &["edge"]);
+    assert!(!storage.is_knowledge_graph_loaded("a").unwrap());
+    assert_eq!(maintained(&storage), ["b"]);
+    // Released by the stop, long before the timeout.
     assert!(!waiter.wait_for(u64::MAX, WAIT), "the maintainer stopped");
     assert!(!storage.wait_for_views("a", unloaded_at, Duration::from_millis(10)));
 
-    // First use loads it: a fresh maintainer holds the same state.
+    // First use loads it again: a fresh maintainer holds the same state
+    // under the same revision.
     assert_eq!(
         assert_views_equal_store(&storage, "a", &["edge"]),
         unloaded_at
     );
-    assert_eq!(stats(&storage, "a").trace_rows, 4);
+    assert_eq!(maintained(&storage), ["a"]);
+    // Three tuples in each of the two arrangements.
+    assert_eq!(stats(&storage, "a").trace_rows, 6);
     storage
         .delete_tuples_from("a", "edge", vec![pair(1, 2)])
         .unwrap();

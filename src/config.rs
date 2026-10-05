@@ -1658,6 +1658,23 @@ mod tests {
         });
     }
 
+    /// `engine.views` defaults to `recompute`, is switched by file or
+    /// environment, and refuses any other value.
+    #[test]
+    fn test_engine_views_defaults_to_recompute_and_is_switched() {
+        figment::Jail::expect_with(|jail| {
+            assert_eq!(Config::default().engine.views, ViewsMode::Recompute);
+            assert_eq!(Config::load().unwrap().engine.views, ViewsMode::Recompute);
+            jail.create_file("config.toml", "[engine]\nviews = \"maintained\"\n")?;
+            assert_eq!(Config::load().unwrap().engine.views, ViewsMode::Maintained);
+            jail.set_env("INPUTLAYER_ENGINE__VIEWS", "recompute");
+            assert_eq!(Config::load().unwrap().engine.views, ViewsMode::Recompute);
+            jail.set_env("INPUTLAYER_ENGINE__VIEWS", "sometimes");
+            assert!(Config::load().is_err());
+            Ok(())
+        });
+    }
+
     #[test]
     fn test_env_overrides_apply_without_config_file() {
         // #92: the no-config-file path used Config::default() directly and
