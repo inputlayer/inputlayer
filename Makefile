@@ -811,10 +811,16 @@ docker-stop:
 k8s-check:
 	./scripts/check-k8s-manifests.sh
 
-# Supply chain checks (licenses, advisories, banned crates)
+# Supply chain checks (licenses, sources, banned crates, advisories), the
+# same commands as the CI supply-chain job
 deny:
-	@command -v cargo-deny >/dev/null 2>&1 || { echo "Install: cargo install cargo-deny"; exit 1; }
+	@command -v cargo-deny >/dev/null 2>&1 || { echo "Install: cargo install --locked cargo-deny"; exit 1; }
+	@command -v cargo-audit >/dev/null 2>&1 || { echo "Install: cargo install --locked cargo-audit"; exit 1; }
 	cargo deny check advisories sources licenses bans
+	cargo deny --manifest-path perf-gate/Cargo.toml check advisories sources licenses bans
+	cargo audit --deny warnings
+	cargo generate-lockfile --manifest-path perf-gate/Cargo.toml
+	cargo audit --deny warnings --file perf-gate/Cargo.lock
 
 # Flush development data - removes data folder to reset to empty state
 flush-dev:

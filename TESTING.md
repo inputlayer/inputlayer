@@ -242,6 +242,7 @@ Source-to-category mapping:
 | `make check` | Formatting + clippy + doc-check + cargo check |
 | `make fmt` | Auto-format code |
 | `make lint` | Run clippy lints |
+| `make deny` | Supply chain: cargo deny (licenses, sources, bans, advisories) + cargo audit, as in CI (`deny.toml`, `.cargo/audit.toml`) |
 | `make secret-check` | gitleaks over every commit reachable from HEAD (`.gitleaks.toml`) |
 | `make install-hooks` | Optional hooks: fmt + staged secret scan on commit, clippy on push |
 | `make hooks-test` | Prove the hooks reject misformatted Rust and staged credentials |
