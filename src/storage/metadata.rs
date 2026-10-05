@@ -86,11 +86,13 @@ pub(crate) fn save_json_atomic<T: Serialize>(value: &T, path: &Path) -> StorageR
     file.sync_all()?;
     fs::rename(&tmp_path, path)?;
 
-    if let Some(parent) = path.parent() {
-        if let Ok(dir) = File::open(parent) {
-            let _ = dir.sync_all();
-        }
-    }
+    // Until the directory is synced the rename can be lost on power loss, so
+    // a failure here is a failed save.
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    super::persist::sync_directory(parent)?;
     Ok(())
 }
 
@@ -486,6 +488,14 @@ mod tests {
     }
 
     /// Regression: Metadata save creates parent directories if they don't exist.
+    #[test]
+    fn test_save_fails_when_the_directory_sync_fails() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("knowledge_graphs.json");
+        crate::storage::persist::inject_sync_fault(temp.path().to_path_buf());
+        assert!(KnowledgeGraphsMetadata::new().save(&path).is_err());
+    }
+
     #[test]
     fn test_metadata_save_creates_parent_dirs() {
         let temp = TempDir::new().unwrap();
