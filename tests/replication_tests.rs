@@ -439,6 +439,98 @@ async fn a_follower_behind_the_retained_log_resyncs() {
     assert_eq!(status_of(&follower).await["follower"]["resyncs"], 1);
 }
 
+/// A primary holding `facts` facts of `big`, and a fresh follower brought
+/// up while a writer commits `+steady(i)` every `every`. Returns both, the
+/// follower's status once it streams, how long its resync took, and the
+/// commits made meanwhile.
+async fn resync_under_commits(
+    facts: u64,
+    every: Duration,
+    within: Duration,
+) -> (Engine, Engine, Value, Duration, u64) {
+    const CHUNK: u64 = 10_000;
+    let primary = primary(None).await;
+    let mut client = WsClient::connect(&primary, KG).await.expect("connect");
+    for start in (0..facts).step_by(CHUNK as usize) {
+        let tuples: Vec<String> = (start..facts.min(start + CHUNK))
+            .map(|i| format!("({i}, {})", i + 1))
+            .collect();
+        client
+            .commit(&format!("+big[{}]", tuples.join(", ")))
+            .await
+            .expect("load");
+    }
+    client.close().await;
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer = {
+        let stop = Arc::clone(&stop);
+        let mut client = WsClient::connect(&primary, KG).await.expect("connect");
+        tokio::spawn(async move {
+            let mut commits = 0u64;
+            while !stop.load(Ordering::SeqCst) {
+                client
+                    .commit(&format!("+steady({commits})"))
+                    .await
+                    .expect("steady commit");
+                commits += 1;
+                tokio::time::sleep(every).await;
+            }
+            client.close().await;
+            commits
+        })
+    };
+
+    let started = std::time::Instant::now();
+    let follower = follower(primary.http_url(), TOKEN, primary.api_key()).await;
+    let status = loop {
+        if let Some(status) = status(&follower).await {
+            if status["follower"]["state"] == "streaming" {
+                break status;
+            }
+        }
+        assert!(
+            started.elapsed() < within,
+            "the resync did not finish within {within:?}; log {}",
+            std::fs::read_to_string(follower.log_path()).unwrap_or_default()
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let took = started.elapsed();
+    stop.store(true, Ordering::SeqCst);
+    let commits = writer.await.expect("writer");
+    (primary, follower, status, took, commits)
+}
+
+/// The resync in `status` is the follower's first and only attempt.
+fn assert_first_attempt(status: &Value) {
+    let follower = &status["follower"];
+    assert_eq!(follower["resyncs"], 1, "{status}");
+    assert_eq!(follower["resync_failures"], 0, "{status}");
+    assert_eq!(follower["reconnects"], 0, "{status}");
+    assert!(follower["last_error"].is_null(), "{status}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resync_under_steady_commits_completes_on_the_first_attempt() {
+    let facts = 60_000;
+    let (primary, follower, status, _, commits) =
+        resync_under_commits(facts, Duration::from_millis(5), CONVERGE).await;
+    assert_first_attempt(&status);
+    assert!(commits > 0);
+
+    caught_up(&follower).await;
+    assert_eq!(
+        converge(&primary, &follower, "?big(X, Y)").await.len() as u64,
+        facts
+    );
+    assert_eq!(
+        converge(&primary, &follower, "?steady(I)").await.len() as u64,
+        commits
+    );
+    assert_first_attempt(&status_of(&follower).await);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_follower_with_the_wrong_token_is_refused() {
     let primary = primary(None).await;
@@ -924,4 +1016,48 @@ async fn sync_shipping_cost() {
             println!("| {arm} | {trial} | {} | {lost} | {lag} |", acked.len());
         }
     }
+}
+
+// The acceptance run of #356: a follower resyncs a graph ten times the
+// 1,000,000-fact case while the primary keeps committing.
+//
+//   cargo test --release --test replication_tests large_resync -- --ignored --nocapture
+//
+// LAB_FACTS (10,000,000), LAB_COMMIT_EVERY_MS (5) and LAB_RESYNC_SECS (1800,
+// the longest the resync may take) tune it.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "measurement lab: run on the perf gate host"]
+async fn large_resync_under_steady_commits() {
+    let facts = env_or("LAB_FACTS", 10_000_000);
+    let every = Duration::from_millis(env_or("LAB_COMMIT_EVERY_MS", 5));
+    let within = Duration::from_secs(env_or("LAB_RESYNC_SECS", 1800));
+    let (primary, follower, status, took, commits) =
+        resync_under_commits(facts, every, within).await;
+    println!(
+        "resync of {facts} facts under a commit every {every:?}: {:.1} s, {commits} commits meanwhile",
+        took.as_secs_f64()
+    );
+    println!("follower status: {}", status["follower"]);
+    assert_first_attempt(&status);
+
+    let deadline = std::time::Instant::now() + within;
+    while status_of(&follower).await["follower"]["lag_events"] != 0 {
+        assert!(std::time::Instant::now() < deadline, "never caught up");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    for i in [0, facts / 2, facts - 1] {
+        let query = format!("?big({i}, Y)");
+        assert_eq!(converge(&primary, &follower, &query).await.len(), 1);
+    }
+    assert_eq!(
+        converge(&primary, &follower, "?steady(I)").await.len() as u64,
+        commits
+    );
+    let end = status_of(&follower).await;
+    println!("follower status at the end: {}", end["follower"]);
+    println!(
+        "primary status at the end: {}",
+        status_of(&primary).await["primary"]
+    );
+    assert_first_attempt(&end);
 }

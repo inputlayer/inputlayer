@@ -121,6 +121,8 @@ tempfile = "3.0"
 proptest = "1.4"
 criterion = "0.5"
 inputlayer-testkit = { path = "testkit" }
+# Paused time, for tests of timeouts.
+tokio = { version = "1.0", features = ["test-util"] }
 figment = { version = "0.10", features = ["test"] }
 # Every test target sees the test-only seams; `cargo build` does not.
 inputlayer = { path = ".", features = ["test-support"] }

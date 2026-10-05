@@ -512,7 +512,8 @@ pub struct ReplicationConfig {
     #[serde(default = "default_replication_retain_bytes")]
     pub retain_bytes: usize,
 
-    /// Primary: how often an idle stream carries a heartbeat.
+    /// Primary: how often an idle stream carries a heartbeat. Follower: how
+    /// often it pings the primary when it has nothing to acknowledge.
     #[serde(default = "default_replication_heartbeat_ms")]
     pub heartbeat_ms: u64,
 

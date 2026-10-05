@@ -187,12 +187,16 @@ during the copy, the primary abandons that resync, logs
 with the primary's head. If the counters keep rising, raise `retain_bytes`
 to cover the writes made during one resync.
 
-**Known limit.** The follower stops reading the stream while it applies one graph from a
-checkpoint. If a single graph takes longer to apply than the primary waits
-for a stalled follower (`timeout_ms`, at least 10 s), the primary drops the
-connection and the resync starts over. Graphs of a few million facts are
-affected. This is tracked in
-[#356](https://github.com/inputlayer/inputlayer/issues/356).
+**Large graphs.** The follower keeps reading the stream while it applies a
+graph from a checkpoint, however long that takes. What arrives meanwhile
+waits in a buffer of at most 64 MiB on the follower. When the buffer is full
+the follower stops reading until it has applied some of it, and the primary
+sends no faster than the follower applies: nothing is dropped. The follower
+sends a ping every `heartbeat_ms` while it is busy, so the primary can tell a
+busy follower from a dead one. The primary drops a follower only when it has
+neither read the stream nor been heard from for `timeout_ms` (at least 10 s).
+A primary from before this change does not listen for the pings, so upgrade
+the primary first, or both together.
 
 ## Monitoring
 
@@ -254,7 +258,7 @@ or follower. `GET /metrics/prometheus` exports it as
 | `role` | both | `standalone` | `standalone`, `primary` or `follower` |
 | `token` | both | none | shared secret, at least 16 characters |
 | `retain_bytes` | primary | 64 MiB | recent changes kept in memory for followers to catch up from |
-| `heartbeat_ms` | primary | 500 | heartbeat interval on an idle stream |
+| `heartbeat_ms` | both | 500 | primary: heartbeat interval on an idle stream; follower: how often it pings the primary when it has nothing to acknowledge |
 | `primary_url` | follower | none | the primary's base URL (`http://` only) |
 | `timeout_ms` | follower | 3000 | silence after which the follower reconnects; must exceed `heartbeat_ms` |
 | `mode` | primary | `async` | `async`, or `sync` to acknowledge a write only once a follower applied it |

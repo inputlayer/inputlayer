@@ -18,15 +18,18 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
+use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
+use tokio::time::Instant;
 use tracing::{info, warn};
 
 /// How long a follower has to say hello after the upgrade.
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Shortest time a send may block before the follower counts as stalled.
+/// Shortest time a send may block, with nothing heard from the follower,
+/// before the follower counts as stalled.
 const MIN_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// `GET /v1/replication/status`: this server's replication state.
@@ -74,7 +77,13 @@ pub async fn stream(
         .into_response()
 }
 
-type Sink = SplitSink<WebSocket, Message>;
+type Sink = Outbound<SplitSink<WebSocket, Message>>;
+
+/// A follower's stream, and when the follower was last heard from.
+pub(super) struct Outbound<S> {
+    pub(super) sink: S,
+    pub(super) heard: Arc<Mutex<Instant>>,
+}
 
 /// Why a stream ended.
 #[derive(Debug)]
@@ -89,7 +98,12 @@ enum End {
 }
 
 async fn serve(handler: Arc<Handler>, log: Arc<ReplicationLog>, socket: WebSocket, addr: String) {
-    let (mut sink, mut incoming) = socket.split();
+    let (sink, mut incoming) = socket.split();
+    let heard = Arc::new(Mutex::new(Instant::now()));
+    let mut sink = Outbound {
+        sink,
+        heard: Arc::clone(&heard),
+    };
     let hello = match tokio::time::timeout(HELLO_TIMEOUT, incoming.next()).await {
         Ok(Some(Ok(Message::Text(text)))) => serde_json::from_str::<FollowerMessage>(&text),
         _ => {
@@ -120,6 +134,8 @@ async fn serve(handler: Arc<Handler>, log: Arc<ReplicationLog>, socket: WebSocke
     let reader_status = Arc::clone(&handler);
     let reader = tokio::spawn(async move {
         while let Some(Ok(message)) = incoming.next().await {
+            // Acks, and the pings of a follower busy applying.
+            *heard.lock() = Instant::now();
             match message {
                 Message::Text(text) => {
                     if let Ok(FollowerMessage::Ack { lsn }) = serde_json::from_str(&text) {
@@ -172,7 +188,7 @@ async fn serve(handler: Arc<Handler>, log: Arc<ReplicationLog>, socket: WebSocke
         }
         End::Gone(reason) => info!(follower = %name, reason, "replication_follower_disconnected"),
     }
-    let _ = sink.close().await;
+    let _ = sink.sink.close().await;
     reader.abort();
     status.follower_gone(id);
 }
@@ -205,7 +221,7 @@ async fn stream_to(
     // caught up with them.
     let mut pin = resync.then(|| log.pin_head());
     let mut cursor = if resync {
-        match send_checkpoint(handler, sink, send_timeout).await {
+        match send_checkpoint(handler, log, sink, send_timeout).await {
             Ok(head) => head,
             Err(e) => return End::Gone(e),
         }
@@ -260,11 +276,12 @@ async fn stream_to(
 /// holds the events up to.
 async fn send_checkpoint(
     handler: &Arc<Handler>,
+    log: &ReplicationLog,
     sink: &mut Sink,
     send_timeout: Duration,
 ) -> Result<u64, String> {
     let (frames_tx, mut frames) = mpsc::channel::<Vec<u8>>(4);
-    let (head_tx, head_rx) = tokio::sync::oneshot::channel();
+    let (head_tx, mut head_rx) = tokio::sync::oneshot::channel();
     let producer_handler = Arc::clone(handler);
     let producer = tokio::task::spawn_blocking(move || -> Result<(), String> {
         let (checkpoint, head) = producer_handler
@@ -297,7 +314,19 @@ async fn send_checkpoint(
             Err(Closed::Storage(e)) => Err(e.to_string()),
         }
     });
-    let Ok((head, revision)) = head_rx.await else {
+    // Capturing a large state takes a while: keep the follower hearing from
+    // the primary meanwhile.
+    let heartbeat = Duration::from_millis(handler.config().replication.heartbeat_ms);
+    let captured = loop {
+        tokio::select! {
+            captured = &mut head_rx => break captured,
+            () = tokio::time::sleep(heartbeat) => {
+                let beat = PrimaryMessage::Heartbeat { head: log.head() };
+                send_json(sink, &beat, send_timeout).await?;
+            }
+        }
+    };
+    let Ok((head, revision)) = captured else {
         // The capture failed before it had a head: report why.
         producer
             .await
@@ -335,13 +364,35 @@ async fn send_json(
     send(sink, Message::Text(text), timeout).await
 }
 
-async fn send(sink: &mut Sink, message: Message, timeout: Duration) -> Result<(), String> {
-    match tokio::time::timeout(timeout, sink.send(message)).await {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => Err(e.to_string()),
-        Err(_) => Err(format!(
-            "follower stopped reading for {} ms",
-            timeout.as_millis()
-        )),
+/// Send `message`. A send blocks while the follower is not reading, which a
+/// follower applying a large graph does once its receive buffer is full; it
+/// keeps pinging meanwhile. The send fails once it has been blocked, and the
+/// follower silent, for `timeout`.
+pub(super) async fn send<S, M>(
+    sink: &mut Outbound<S>,
+    message: M,
+    timeout: Duration,
+) -> Result<(), String>
+where
+    S: futures_util::Sink<M> + Unpin,
+    S::Error: std::fmt::Display,
+{
+    let mut sending = sink.sink.send(message);
+    let mut deadline = Instant::now() + timeout;
+    loop {
+        match tokio::time::timeout_at(deadline, &mut sending).await {
+            Ok(Ok(())) => return Ok(()),
+            Ok(Err(e)) => return Err(e.to_string()),
+            Err(_) => {
+                let alive_until = *sink.heard.lock() + timeout;
+                if alive_until <= Instant::now() {
+                    return Err(format!(
+                        "follower stopped reading and was silent for {} ms",
+                        timeout.as_millis()
+                    ));
+                }
+                deadline = alive_until;
+            }
+        }
     }
 }

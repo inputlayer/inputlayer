@@ -12,7 +12,11 @@
 //!   checkpoint;
 //! - `heartbeat` text frames carry the primary's head LSN while idle;
 //! - the follower answers each applied frame with `ack`, sent once the
-//!   frame is durable in its WAL.
+//!   frame is durable in its WAL;
+//! - the follower sends a WebSocket ping whenever it has sent nothing for
+//!   `replication.heartbeat_ms`. A follower applying a large graph may stop
+//!   reading for a while (its receive buffer is full); the primary keeps a
+//!   blocked send waiting as long as it hears from the follower.
 //!
 //! In `sync` mode the primary replies to a request that changed state only
 //! once a follower acked its events (see [`sync`]).
@@ -21,6 +25,7 @@
 //! connection and reconnects, which is how it notices a dead primary or a
 //! partition. See [`primary`] and [`follower`].
 
+mod buffer;
 pub mod follower;
 pub mod primary;
 mod status;
