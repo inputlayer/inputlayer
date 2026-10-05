@@ -1088,7 +1088,8 @@ impl Handler {
             (client, server) => client.or(server),
         };
         RequestControl::limited(
-            ms.map(|ms| Instant::now() + std::time::Duration::from_millis(ms)),
+            // A deadline past what `Instant` can represent is no deadline.
+            ms.and_then(|ms| Instant::now().checked_add(std::time::Duration::from_millis(ms))),
             self.config.storage.performance.max_query_memory_bytes,
             Some(Arc::clone(&self.query_memory)),
         )

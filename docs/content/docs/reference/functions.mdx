@@ -244,7 +244,7 @@ lsh_index(Id, Table, Bucket) <-
 |-----------|------|-------------|
 | v | Vector (f32) | Input vector |
 | table_idx | Int64 | Hash table index (for multiple tables) |
-| num_hyperplanes | Int64 | Number of hyperplanes (controls granularity) |
+| num_hyperplanes | Int64 | Number of hyperplanes (controls granularity; at most 62 are used) |
 | **Returns** | Int64 | Bucket ID |
 
 **Note**: More hyperplanes = more buckets = higher precision but lower recall.
@@ -272,6 +272,8 @@ probe_buckets(OrigBucket, Probes) <-
 | num_probes | Int64 | Number of probe buckets to generate |
 | **Returns** | Vector | Probe bucket IDs |
 
+**Note**: Probes are the bucket itself and every bucket up to 3 bit flips away, so at most 1 + n + n(n-1)/2 + n(n-1)(n-2)/6 for n hyperplanes (39,774 for 62). A larger `num_probes` returns them all; a literal over 39,774 is a validation error.
+
 ---
 
 ### lsh_multi_probe(v, table_idx, num_hp, num_probes)
@@ -288,7 +290,7 @@ Buckets = lsh_multi_probe(V, TableIdx, NumHyperplanes, NumProbes)
 | v | Vector (f32) | Query vector |
 | table_idx | Int64 | Hash table index |
 | num_hp | Int64 | Number of hyperplanes |
-| num_probes | Int64 | Number of probes |
+| num_probes | Int64 | Number of probes (a literal is at most 39,774, as for `lsh_probes`) |
 | **Returns** | Vector | Bucket IDs to probe |
 
 ---
@@ -968,6 +970,8 @@ cleaned(R) <-
 | replacement | String | Replacement string |
 | **Returns** | String | String with all occurrences replaced |
 
+**Note**: Returns null when the result would be over 16 MiB.
+
 ---
 
 ### concat(s1, s2, s3)
@@ -988,7 +992,7 @@ full_name(First, Last, Full) <-
 | s1, s2, s3 | String/Int64/Float64 | Values to concatenate |
 | **Returns** | String | Concatenated string |
 
-**Note**: Non-string values are automatically converted to their string representation.
+**Note**: Non-string values are automatically converted to their string representation. Returns null when the result would be over 16 MiB.
 
 ---
 
