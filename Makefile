@@ -212,9 +212,7 @@ ci-test-all:
 	echo ""; \
 	echo "=== Unit Tests ==="; \
 	UNIT_TMPFILE=$$(mktemp); \
-	mkdir -p $(dir $(XFAIL_LOG)) && : > $(XFAIL_LOG); \
 	set -o pipefail; \
-	export INPUTLAYER_XFAIL_LOG=$(abspath $(XFAIL_LOG)); \
 	$(call test_without_scenarios,$$CI_JOBS) \
 		2>&1 | tee "$$UNIT_TMPFILE"; \
 	UNIT_EXIT=$${PIPESTATUS[0]}; \

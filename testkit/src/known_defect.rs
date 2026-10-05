@@ -93,6 +93,9 @@ impl KnownDefect {
 /// Print an expected-failure line and append it to the [`XFAIL_LOG_ENV`] file.
 fn record(line: &str) {
     println!("{line}");
+    if cfg!(test) {
+        return;
+    }
     let Some(path) = std::env::var_os(XFAIL_LOG_ENV) else {
         return;
     };

@@ -114,9 +114,10 @@ async fn s4_subscription_and_query_agree_at_a_revision() -> Checked<()> {
         view_part,
         &snapshot.rows,
     ));
-    for outcome in aligned {
-        KnownDefect::judge_first(&[NO_REVISION, AT_IGNORED], outcome);
-    }
+    KnownDefect::judge_first(
+        &[NO_REVISION, AT_IGNORED],
+        aligned.into_iter().collect::<Checked<Vec<()>>>().map(drop),
+    );
 
     let compacted = agent.client_mut().try_execute_at(JOINED, 1).await?;
     NO_COMPACTION.judge(refused(compacted, "revision_compacted", "compacted").map(drop));
