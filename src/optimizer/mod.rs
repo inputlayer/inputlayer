@@ -1471,6 +1471,10 @@ impl Default for Optimizer {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+mod optimizer_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

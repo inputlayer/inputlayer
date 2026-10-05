@@ -10,7 +10,7 @@
 //! - Arity boundaries
 //! - Collection size boundaries
 
-use inputlayer::{Tuple, Value};
+use crate::value::{Tuple, Value};
 use std::sync::Arc;
 
 // Integer Boundary Tests

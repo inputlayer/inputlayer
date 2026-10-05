@@ -1134,6 +1134,14 @@ impl TupleSchema {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+mod boundary_value_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod serialization_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
