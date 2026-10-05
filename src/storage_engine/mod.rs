@@ -345,7 +345,9 @@ impl StorageEngine {
 
     /// Fail unless this engine takes client writes: a replication follower
     /// refuses them (only its applier writes), and so does a store that is
-    /// read-only until restart recovery.
+    /// read-only until restart recovery. When it does, notes that the request
+    /// running here stages a durable write (see
+    /// [`writes`](crate::replication::writes)).
     ///
     /// # Errors
     /// [`StorageError::ReadOnlyReplica`] or [`StorageError::StoreReadOnly`].
@@ -353,7 +355,9 @@ impl StorageEngine {
         if self.replica.load(Ordering::SeqCst) {
             return Err(StorageError::ReadOnlyReplica);
         }
-        self.persist.check_writable()
+        self.persist.check_writable()?;
+        crate::replication::writes::staged();
+        Ok(())
     }
 
     /// Write-ahead log and flush state, for monitoring.

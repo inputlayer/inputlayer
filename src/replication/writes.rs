@@ -6,11 +6,14 @@
 //! request's future and returns that LSN. Events are appended on the thread
 //! that commits them, under the lock that orders them, so the log notes each
 //! LSN on that thread: in the request's task, or on a blocking-pool thread
-//! the request handed its [`Writes`] to with [`Writes::enter`].
+//! the request handed its [`Writes`] to with [`Writes::enter`]. A durable
+//! write that changes nothing appends no event, yet its reply reports state
+//! that may rest on events no follower has applied: [`staged`] marks the
+//! request so it waits for the log's head instead.
 
 use std::cell::RefCell;
 use std::future::Future;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 tokio::task_local! {
@@ -21,18 +24,31 @@ thread_local! {
     static THREAD: RefCell<Option<Writes>> = const { RefCell::new(None) };
 }
 
-/// The newest LSN a request appended (0 for none yet).
+/// The newest LSN a request appended (0 for none yet), and whether it
+/// staged a durable write.
 #[derive(Debug, Clone, Default)]
-pub struct Writes(Arc<AtomicU64>);
+pub struct Writes(Arc<Noted>);
+
+#[derive(Debug, Default)]
+struct Noted {
+    lsn: AtomicU64,
+    staged: AtomicBool,
+}
 
 impl Writes {
     /// The newest LSN noted, 0 when nothing was.
     pub fn lsn(&self) -> u64 {
-        self.0.load(Ordering::Acquire)
+        self.0.lsn.load(Ordering::Acquire)
+    }
+
+    /// Whether the request staged a durable write, whether or not it
+    /// appended an event.
+    pub fn staged(&self) -> bool {
+        self.0.staged.load(Ordering::Acquire)
     }
 
     fn note(&self, lsn: u64) {
-        self.0.fetch_max(lsn, Ordering::AcqRel);
+        self.0.lsn.fetch_max(lsn, Ordering::AcqRel);
     }
 
     /// Note events appended on this thread for the request until the guard
@@ -71,17 +87,24 @@ pub(crate) fn note(lsn: u64) {
     }
 }
 
-/// Run `request`, noting the events it appends; returns its output and the
-/// newest LSN it appended (0 for none). Inside a request already tracked,
-/// the outer request notes them instead and this returns `None`: only the
-/// outermost request waits for followers.
-pub async fn track<F: Future>(request: F) -> (F::Output, Option<u64>) {
+/// Record that the request running here staged a durable write.
+pub(crate) fn staged() {
+    if let Some(writes) = current() {
+        writes.0.staged.store(true, Ordering::Release);
+    }
+}
+
+/// Run `request`, noting the events it appends and the durable writes it
+/// stages; returns its output and what it noted. Inside a request already
+/// tracked, the outer request notes them instead and this returns `None`:
+/// only the outermost request waits for followers.
+pub async fn track<F: Future>(request: F) -> (F::Output, Option<Writes>) {
     if current().is_some() {
         return (request.await, None);
     }
     let writes = Writes::default();
     let output = REQUEST.scope(writes.clone(), request).await;
-    (output, Some(writes.lsn()))
+    (output, Some(writes))
 }
 
 #[cfg(test)]
@@ -98,10 +121,17 @@ mod tests {
             "done"
         })
         .await;
-        assert_eq!((output, lsn), ("done", Some(7)));
+        assert_eq!((output, lsn.map(|w| w.lsn())), ("done", Some(7)));
 
-        let ((), lsn) = track(async {}).await;
-        assert_eq!(lsn, Some(0), "a request that wrote nothing");
+        let ((), writes) = track(async {}).await;
+        let writes = writes.unwrap();
+        assert_eq!(writes.lsn(), 0, "a request that wrote nothing");
+        assert!(!writes.staged());
+
+        let ((), writes) = track(async { staged() }).await;
+        let writes = writes.unwrap();
+        assert!(writes.staged(), "a write that appended nothing");
+        assert_eq!(writes.lsn(), 0);
 
         // Outside any request nothing is noted, and nothing breaks.
         note(9);
@@ -120,14 +150,14 @@ mod tests {
             .unwrap();
         })
         .await;
-        assert_eq!(lsn, Some(11));
+        assert_eq!(lsn.map(|w| w.lsn()), Some(11));
 
         // The pooled thread forgets the request once the guard drops.
         let ((), lsn) = track(async {
             tokio::task::spawn_blocking(|| note(12)).await.unwrap();
         })
         .await;
-        assert_eq!(lsn, Some(0));
+        assert_eq!(lsn.map(|w| w.lsn()), Some(0));
     }
 
     #[tokio::test]
@@ -137,7 +167,7 @@ mod tests {
             inner
         })
         .await;
-        assert_eq!(inner, None);
-        assert_eq!(outer, Some(4));
+        assert!(inner.is_none());
+        assert_eq!(outer.map(|w| w.lsn()), Some(4));
     }
 }

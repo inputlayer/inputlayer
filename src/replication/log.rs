@@ -369,11 +369,15 @@ mod tests {
             log.append(line("b"))
         })
         .await;
-        assert_eq!(lsn, Some(head));
+        assert_eq!(lsn.map(|w| w.lsn()), Some(head));
 
         let plain = ReplicationLog::new(64);
         let (_, lsn) = super::super::writes::track(async { plain.append(line("a")) }).await;
-        assert_eq!(lsn, Some(0), "an untracking log notes nothing");
+        assert_eq!(
+            lsn.map(|w| w.lsn()),
+            Some(0),
+            "an untracking log notes nothing"
+        );
     }
 
     #[test]

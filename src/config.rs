@@ -1608,8 +1608,11 @@ mod tests {
             assert!(config.validate().is_ok(), "{mode:?}");
         }
         config.storage.persist.durability_mode = DurabilityMode::Async;
-        let err = config.validate().unwrap_err();
-        assert!(err.contains("follower must be durable"), "{err}");
+        for mode in [ReplicationMode::Async, ReplicationMode::Sync] {
+            config.replication.mode = mode;
+            let err = config.validate().unwrap_err();
+            assert!(err.contains("follower must be durable"), "{mode:?}: {err}");
+        }
         // A primary may still trade durability for latency.
         config.replication.role = ReplicationRole::Primary;
         assert!(config.validate().is_ok());

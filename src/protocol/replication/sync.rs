@@ -142,6 +142,11 @@ impl SyncShipping {
         self.enabled
     }
 
+    /// LSN of the newest event in the log (0 on any other server).
+    pub fn head(&self) -> u64 {
+        self.log.as_ref().map_or(0, |log| log.head())
+    }
+
     /// The newest LSN a follower has confirmed.
     pub fn confirmed(&self) -> u64 {
         self.progress.borrow().confirmed

@@ -101,8 +101,12 @@ In `sync` mode the primary answers a request that changed state (facts,
 rules, schemas, graphs, indexes, users, API keys, access grants) only once a
 follower has applied its changes and synced them to its WAL. If the primary
 is then lost, the follower holds every write a client was told succeeded.
-Reads never wait. Nothing changes on the follower: it acknowledges every
-applied batch after its WAL fsync in both modes.
+A write that changes nothing, such as a retry of an insert that already
+committed, waits too: its reply reports state that may rest on writes no
+follower has applied yet. Reads never wait. Nothing changes on the follower:
+it acknowledges every applied batch after its WAL fsync in both modes. That
+is what makes its acknowledgement durable, so a follower must use `immediate`
+or `batched` durability and refuses to start with `async`.
 
 **What it costs.** Each write's reply waits one round trip to the follower
 plus the follower's fsync. Measured with primary and follower on one 32-core

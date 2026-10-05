@@ -84,6 +84,37 @@ async fn block_fails_every_unconfirmed_write_as_replica_unconfirmed_and_keeps_it
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_write_that_changes_nothing_still_waits_for_the_events_before_it() {
+    let (handler, _tmp) = primary(FollowerLoss::Block);
+    let error = run(&handler, "+edge(1, 2)").await.unwrap_err();
+    assert_eq!(error.code, Some(ErrorCode::ReplicaUnconfirmed));
+    let before = head(&handler);
+    // A retry of the unconfirmed insert, and a delete of an absent fact,
+    // report state that rests on that unconfirmed event.
+    for program in ["+edge(1, 2)", "-edge(5, 6)", "-nosuch(1)"] {
+        let started = Instant::now();
+        let error = run(&handler, program)
+            .await
+            .expect_err(&format!("{program}: acknowledged with no follower"));
+        assert_eq!(
+            error.code,
+            Some(ErrorCode::ReplicaUnconfirmed),
+            "{program}: {}",
+            error.message
+        );
+        assert!(
+            started.elapsed() >= Duration::from_millis(SYNC_TIMEOUT_MS),
+            "{program} did not wait"
+        );
+        assert_eq!(head(&handler), before, "{program} appended an event");
+    }
+
+    // Once a follower confirms, the same no-op is acknowledged.
+    handler.replication_status().sync().acked(before, true);
+    run(&handler, "+edge(1, 2)").await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn reads_and_failed_writes_never_wait() {
     let (handler, _tmp) = primary(FollowerLoss::Block);
     for program in [
@@ -92,7 +123,6 @@ async fn reads_and_failed_writes_never_wait() {
         ".rel",
         "?edge(X, Y)\n?edge(Y, X)",
         // Refused before committing anything.
-        "-nosuch(1)",
         "+edge(1, \"too\", \"wide\")\n+edge(1, 2)\n+edge(1, 2, 3)",
     ] {
         let started = Instant::now();
