@@ -690,6 +690,36 @@ fn a_restart_leaves_unloaded_and_dropped_knowledge_graphs_dormant() {
 }
 
 #[test]
+fn a_warm_load_racing_request_loads_unloads_no_other_graph() {
+    let temp = TempDir::new().unwrap();
+    seed(temp.path());
+
+    let storage = open_limited(temp.path(), 2);
+    let slot = storage.slot("a").unwrap();
+    // The warm-up sees room for "a", then waits for its slot while requests
+    // load "b" and "default" up to the limit.
+    let held = slot.state.lock();
+    let warming = Barrier::new(2);
+    std::thread::scope(|scope| {
+        let warm = scope.spawn(|| {
+            warming.wait();
+            storage.warm_knowledge_graph("a").unwrap()
+        });
+        warming.wait();
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(rows(&storage, "b", "e").len(), 3);
+        assert_eq!(rows(&storage, "default", "e").len(), 0);
+        drop(held);
+        assert!(warm.join().unwrap());
+    });
+    assert!(loaded(&storage, "a"));
+    assert!(loaded(&storage, "b"), "warming never unloads a used graph");
+    assert!(loaded(&storage, "default"));
+    assert_eq!(storage.knowledge_graph_residency_counts().1, 0);
+    assert_eq!(storage.resident_knowledge_graphs(), ["a", "b", "default"]);
+}
+
+#[test]
 fn warming_stops_at_the_loaded_limit_and_survives_a_bad_record() {
     let temp = TempDir::new().unwrap();
     seed(temp.path());

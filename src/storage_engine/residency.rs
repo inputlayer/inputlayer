@@ -333,7 +333,7 @@ impl StorageEngine {
         slot.touch(self.clock_now());
         match slot.graph() {
             Some(graph) => Ok(graph),
-            None => self.activate(kg, &slot),
+            None => self.activate(kg, &slot, true),
         }
     }
 
@@ -396,8 +396,14 @@ impl StorageEngine {
 
     /// Load dormant `kg` into `slot`, or return what another activation
     /// loaded. Holds the slot's mutex while loading, so a KG loads once
-    /// however many requests wait for it.
-    fn activate(&self, kg: &str, slot: &KgSlot) -> StorageResult<Arc<RwLock<KnowledgeGraph>>> {
+    /// however many requests wait for it. A load with `trim` then unloads
+    /// other KGs over `storage.max_loaded_knowledge_graphs`.
+    fn activate(
+        &self,
+        kg: &str,
+        slot: &KgSlot,
+        trim: bool,
+    ) -> StorageResult<Arc<RwLock<KnowledgeGraph>>> {
         let mut state = slot.state.lock();
         if let Some(graph) = slot.graph() {
             return Ok(graph);
@@ -431,7 +437,9 @@ impl StorageEngine {
             elapsed_ms = start.elapsed().as_millis() as u64,
             "kg_activated"
         );
-        self.unload_over_limit(kg);
+        if trim {
+            self.unload_over_limit(kg);
+        }
         Ok(graph)
     }
 
@@ -563,9 +571,11 @@ impl StorageEngine {
     /// Load dormant `kg` ahead of its first request, as the restart warm-up
     /// does for each of [`Self::resident_knowledge_graphs`]. Returns whether
     /// it loaded: not when `kg` is loaded already, was dropped, or
-    /// `storage.max_loaded_knowledge_graphs` are loaded (the warm-up never
-    /// unloads a KG a request loaded). A KG left dormant by that limit is
-    /// no longer recorded as in memory, until a request loads it.
+    /// `storage.max_loaded_knowledge_graphs` are loaded. A KG left dormant by
+    /// that limit is no longer recorded as in memory, until a request loads
+    /// it. The warm-up never unloads another KG: a request loading one at the
+    /// same time can leave more than the limit loaded, until the next request
+    /// that loads a KG unloads the excess.
     ///
     /// # Errors
     /// The load failed; the KG's first request retries it.
@@ -584,7 +594,7 @@ impl StorageEngine {
             }
             return Ok(false);
         }
-        match self.activate(kg, &slot) {
+        match self.activate(kg, &slot, false) {
             Ok(_) => Ok(true),
             Err(StorageError::KnowledgeGraphNotFound(_)) => Ok(false),
             Err(e) => Err(e),
