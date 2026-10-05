@@ -102,6 +102,8 @@ cat "$RUN_DIR/settings.txt"
 
 PIN=()
 if [ -n "$CLIENT_CPUS" ]; then PIN=(taskset -c "$CLIENT_CPUS"); fi
+# Every consumer is a socket on both sides; the engine inherits this limit.
+ulimit -n "$(ulimit -Hn)" 2> /dev/null || true
 echo "=== Soak ($LABEL) ==="
 STATUS=0
 env "${ENVS[@]}" INPUTLAYER_SOAK_REPORT_DIR="$RUN_DIR" \
