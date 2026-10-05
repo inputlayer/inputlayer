@@ -194,6 +194,9 @@ impl WsClient {
             id: Some(RequestId::from(self.last_id)),
             program: program.to_string(),
             timeout_ms: None,
+            expect_revision: None,
+            expect_relations: None,
+            expect_epoch: None,
         };
         let text = serde_json::to_string(&req).map_err(|e| format!("Serialize error: {e}"))?;
         self.sender

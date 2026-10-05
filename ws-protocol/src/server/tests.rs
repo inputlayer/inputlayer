@@ -281,6 +281,7 @@ fn stop_codes_serialize_in_snake_case() {
         (ErrorCode::Cancelled, "cancelled"),
         (ErrorCode::OutcomeUnknown, "outcome_unknown"),
         (ErrorCode::ResourceExhausted, "resource_exhausted"),
+        (ErrorCode::PreconditionFailed, "precondition_failed"),
     ] {
         assert_eq!(serde_json::to_value(code).unwrap(), name);
     }

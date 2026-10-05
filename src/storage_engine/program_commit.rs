@@ -21,14 +21,15 @@ use tracing::{error, info, warn};
 impl StorageEngine {
     /// Commit `program` to `kg` as one transaction.
     ///
-    /// Under the KG's write lock: check that what the program read is
-    /// unchanged, finish any pending drop of a written name, apply the
-    /// catalog changes to copies of the KG's catalogs and validate every fact
-    /// change against those copies and the current data, in statement order,
-    /// and compute the effective delta. A non-empty delta is written as one WAL
-    /// record at one logical time, applied, and published as one snapshot, so
-    /// readers see the program's rules and data together. An empty delta
-    /// writes and publishes nothing.
+    /// Under the KG's write lock: check the request's precondition, if
+    /// `control` carries one (see [`RequestControl::precondition`]), and that
+    /// what the program read is unchanged, finish any pending drop of a
+    /// written name, apply the catalog changes to copies of the KG's catalogs
+    /// and validate every fact change against those copies and the current
+    /// data, in statement order, and compute the effective delta. A non-empty
+    /// delta is written as one WAL record at one logical time, applied, and
+    /// published as one snapshot, so readers see the program's rules and data
+    /// together. An empty delta writes and publishes nothing.
     /// The commit reports the revision its effect is visible at
     /// ([`ProgramCommit::revision`]).
     ///
@@ -52,6 +53,13 @@ impl StorageEngine {
         let handle = self.kg_handle(kg).map_err(CommitError::from)?;
         let mut db = Self::lock_live(&handle, kg).map_err(CommitError::from)?;
         let base = db.snapshot.load_full();
+        if let Some(precondition) = control.and_then(RequestControl::precondition) {
+            base.changes()
+                .check(precondition, &base, |name| {
+                    db.schema_catalog.get(name).is_some()
+                })
+                .map_err(CommitError::Precondition)?;
+        }
         if !program.read_holds_in(&base) {
             return Err(CommitError::Stale);
         }
