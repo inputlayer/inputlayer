@@ -26,8 +26,8 @@
 # time (a lock, and a refusal while any inputlayer-server is running), the
 # host's nproc, the commit and the command recorded with every result in
 # bench.txt, and no server left running afterwards. On a host with 16 or
-# more CPUs the gate's clients get CPUs 0-7 and the servers the rest, both
-# whole SMT core pairs; with 8 or more, 0-1 and the rest.
+# more CPUs the gate's (or soak's) clients get CPUs 0-7 and the servers the
+# rest, both whole SMT core pairs; with 8 or more, 0-1 and the rest.
 #
 # The run is detached on the host, so a dropped connection does not stop it;
 # rerun with --attach STAMP to collect it. Results land in
