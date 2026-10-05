@@ -123,7 +123,8 @@ pub struct SessionsArgs {
     #[arg(long)]
     summary: Option<PathBuf>,
     /// Fail when the loaded write-to-delta p99 of `--server` exceeds this
-    /// (milliseconds) at any size up to `--budget-sessions`.
+    /// (milliseconds), or any of its deltas is late, at any size up to
+    /// `--budget-sessions`.
     #[arg(long)]
     max_delta_p99_ms: Option<f64>,
     #[arg(long, default_value_t = usize::MAX)]
@@ -914,4 +915,110 @@ fn markdown(record: &Record) -> String {
         );
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Cli {
+        #[command(flatten)]
+        args: SessionsArgs,
+    }
+
+    fn args(extra: &[&str]) -> SessionsArgs {
+        let base = [
+            "sessions",
+            "--server",
+            "s",
+            "--data-root",
+            "d",
+            "--out",
+            "o",
+        ];
+        Cli::parse_from(base.iter().chain(extra)).args
+    }
+
+    fn ms(values: &[u64]) -> Summary {
+        let samples: Vec<Duration> = values.iter().copied().map(Duration::from_millis).collect();
+        Summary::of(&samples)
+    }
+
+    fn run(sessions: usize, on_time_ms: &[u64], late_ms: &[u64]) -> Run {
+        Run {
+            arm: "candidate".to_string(),
+            sessions,
+            receipts_per_sec: 0.0,
+            server_cpu_cores: 0.0,
+            idle_commit_ms: ms(&[1]),
+            idle_delta_ms: ms(&[1]),
+            load_commit_ms: ms(&[1]),
+            load_delta_ms: ms(on_time_ms),
+            receipt_commit_ms: ms(&[1]),
+            missing_deltas: 0,
+            late_deltas: late_ms.len(),
+            late_delta_ms: ms(late_ms),
+            stray_deltas: 0,
+            peak_rss_kb: None,
+            error: None,
+        }
+    }
+
+    fn record(runs: Vec<Run>) -> Record {
+        Record {
+            schema: "inputlayer-perf-gate/sessions/v2",
+            created_unix: 0,
+            environment: Environment::default(),
+            mode: Mode::PerSession,
+            rate: 1.0,
+            load_secs: 1,
+            idle_probes: 1,
+            arms: Vec::new(),
+            server_overrides: std::collections::BTreeMap::new(),
+            server_env: Vec::new(),
+            runs,
+        }
+    }
+
+    #[test]
+    fn late_deltas_fail_a_latency_budget_even_when_the_on_time_p99_holds() {
+        let budget = args(&["--max-delta-p99-ms", "500", "--budget-sessions", "1000"]);
+        let saturated = record(vec![run(1000, &[300], &[15_000; 5])]);
+        assert_eq!(saturated.runs[0].load_delta_ms.p99, 300.0);
+        assert!(!verdict(&saturated, &budget));
+        assert!(verdict(&record(vec![run(1000, &[300], &[])]), &budget));
+    }
+
+    #[test]
+    fn late_deltas_are_not_missing_without_a_budget_or_beyond_its_sizes() {
+        let late = || record(vec![run(2000, &[300], &[15_000])]);
+        assert!(verdict(&late(), &args(&[])));
+        let small_budget = args(&["--max-delta-p99-ms", "500", "--budget-sessions", "1000"]);
+        assert!(verdict(&late(), &small_budget));
+        let mut missing = late();
+        missing.runs[0].missing_deltas = 1;
+        assert!(!verdict(&missing, &args(&[])));
+    }
+
+    #[test]
+    fn a_late_delta_is_matched_by_session_and_eta_state_row() {
+        let push = |session, eta: &str, kind: &str| Push {
+            session,
+            at: Instant::now(),
+            inserted: vec![vec![
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::from(eta),
+                Value::from(kind),
+            ]],
+        };
+        assert!(carries(&push(3, "5 min", "state"), 3, "5 min"));
+        assert!(!carries(&push(4, "5 min", "state"), 3, "5 min"));
+        assert!(!carries(&push(3, "9 min", "state"), 3, "5 min"));
+        assert!(!carries(&push(3, "5 min", "speech"), 3, "5 min"));
+    }
 }

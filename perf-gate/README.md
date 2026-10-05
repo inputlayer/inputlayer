@@ -377,7 +377,8 @@ A run fails when a probe's delta never arrives (**missing**), when any delta
 arrives that no probe caused (**stray**), or on an error. A saturated server
 can be late, never missing or stray. `--max-delta-p99-ms`
 additionally fails the working tree's run at any size up to
-`--budget-sessions` whose loaded write-to-delta p99 is over budget.
+`--budget-sessions` whose loaded write-to-delta p99 is over budget or that
+has any late delta (a late delta is over any budget below the probe timeout).
 `target/bench-sessions/latest/` holds `result.json` (schema
 `inputlayer-perf-gate/sessions/v2`; v1 counted late deltas as missing and
 then stray) and `summary.md`.

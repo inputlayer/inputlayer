@@ -12,7 +12,8 @@
 #   --server-env K=V      extra server environment (repeatable)
 #   --server-cpus LIST    pin servers with taskset -c LIST
 #   --max-delta-p99-ms X  fail when the working tree's loaded write->delta
-#                         p99 exceeds X ms at any size up to --budget-sessions
+#                         p99 exceeds X ms, or any delta is late, at any size
+#                         up to --budget-sessions
 #   --budget-sessions N   largest size the budget applies to
 #
 # Exit status: 0 when every probe got its delta and none was stray (and the
