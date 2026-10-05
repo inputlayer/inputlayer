@@ -9,7 +9,7 @@ make test-all       # Full verification: build + unit + snapshot (~70s, all CPUs
 make test-fast      # Unit tests only (~30s)
 make test           # Unit + snapshot tests
 make e2e-test       # Snapshot tests only (parallel)
-make e2e-reactive   # Reactive agent path against real engine processes
+make e2e-reactive   # Scenario suite in release, writing delta-latency samples
 make test-affected  # Run only snapshots affected by uncommitted changes
 make pre-pr         # Before every push to a PR: formatting and affected component checks in parallel, then perf-gate
 make perf-gate      # Performance gate: this tree vs the approved baseline (same host)
@@ -124,9 +124,57 @@ box: `make perf-gate-remote` runs the gate there for a commit, and
 `make pre-pr PRE_PR_PERF=perf-gate-remote` makes the pre-PR gate do so. The
 Criterion benches in `benches/` are diagnostic only.
 
-## Reactive Agent Path (E2E)
+## Scenario Suite (E2E)
 
-`make e2e-reactive` drives the supported agent path end to end: each test
+`tests/scenarios` is one test binary of scenarios against real
+`inputlayer-server` processes, built on the test-only `testkit` crate. The
+production-readiness and incremental-view changes are related, so scenarios
+exercise them together: rows, deltas, revisions, structured errors and the
+engine's work counters in one run, not each feature in isolation. New
+end-to-end coverage goes here as a module, not as a new `tests/*.rs` binary.
+
+```bash
+cargo test --test scenarios                         # debug; also part of plain `cargo test`
+make e2e-reactive                                   # release build, writes latency samples
+INPUTLAYER_SCENARIO_VIEWS=maintained cargo test --test scenarios  # refused until V2 (#309)
+```
+
+Modules: `reactive`, `stream`, `delivery` and `wire` (the agent path below),
+and `harness` (the testkit pieces scenarios build on, checked against a real
+engine). The suite runs in about 25 s in debug on 4 cores.
+
+### Harness
+
+- `EngineBuilder` starts an engine with a private data directory, generated
+  config and free port. Settings a scenario may change: `views(Mode)`
+  (`engine.views`; `Mode::from_env("INPUTLAYER_SCENARIO_VIEWS")` lets CI run
+  the suite once per mode, and `maintained` panics with "mode not available"
+  until V2 defines the setting), `memory_limits(query_bytes, graph_bytes)`,
+  `max_query_cost`, `nesting_limit`, `max_result_rows`,
+  `ws_max_subscriptions`, `notification_buffer_size` and `replication`.
+- `Engine::metrics()` reads `/metrics/prometheus` into `Counters`
+  (`queries`, `rule_evaluations`, `view_reads`, `subscription_evaluations`,
+  `view_maintenance_us`); a counter the engine does not export is `None`, and
+  `Counters::require` turns it into `Violation::NotMeasurable`, so an assertion
+  on it is an expected failure until the counter lands (V1 #308), never a skip.
+- `Engine::create_user`, `grant` and `create_api_key` (a key limited to a role
+  on one knowledge graph and optionally to relations) with
+  `WsClient::connect_with_key` give scenarios scoped agents besides the
+  bootstrap admin key.
+- `WsClient::execute_expecting(program, revision, relations)` sends
+  `expect_revision`; `execute_at(program, revision)` sends `at` (V13 #316).
+  `QueryResult::revision` is the reply's revision: set for writes, `None` for
+  queries until V9 (#315).
+- `Fixture::shop_pack(Size)` installs one knowledge graph whose rules cover
+  join, comparison, negation, recursion, negation over recursion and an
+  aggregate (`Size::Vector` adds embeddings, the `emb_idx` HNSW index and the
+  `near` rule; `Size::Lab` is about a million `link` edges for the benchmark
+  host). Its anchors (order `o-42`, chains `i0`-`i4` and `i5`-`i9`) are
+  documented on the function. `Size::Small` installs in well under 200 ms.
+
+### Reactive agent path
+
+The `reactive` module drives the supported agent path end to end: each test
 starts a real `inputlayer-server` process with its own data directory, agents
 subscribe to standing queries over `/ws`, and independent writer connections
 insert and retract facts and change rules. Agents must receive the exact
@@ -147,16 +195,11 @@ exactly one copy.
 
 Every request the harness sends carries an `id`, and a reply that does not
 echo it fails the scenario (`Violation::Uncorrelated`); a `notice` is never
-taken for a reply. `tests/e2e_reactive/wire.rs` pipelines requests (malformed
+taken for a reply. `tests/scenarios/wire.rs` pipelines requests (malformed
 ones included) while the engine interleaves pushes, a streamed result and a
 `notifications_missed` notice, and requires every reply to correlate in order.
 
-```bash
-make e2e-reactive                                   # release build, writes latency samples
-cargo test --test e2e_reactive                      # same scenarios, debug build
-```
-
-`tests/e2e_reactive/stream.rs` requires the stream contract: notifications
+`tests/scenarios/stream.rs` requires the stream contract: notifications
 arrive in strictly increasing `seq` order under concurrent writers, a reconnect
 cursor from before an engine restart gets one `replay_gap` notice and nothing
 replayed, and commits racing a `.subscribe` all reach the agent.
@@ -165,25 +208,26 @@ Results over `storage.performance.max_result_rows` are required to fail
 closed: the subscription is refused, or a refresh pushes `subscription_error`
 and the next delta is relative to the last complete result.
 
-`tests/e2e_reactive/delivery.rs` requires payloads over one frame to arrive
+`tests/scenarios/delivery.rs` requires payloads over one frame to arrive
 whole: a delta past the 16 MiB frame limit streams as one logical delta that
 the agent applies only at its end and converges from, and a large snapshot
 streams as a `.subscribe` reply naming its subscription. The testkit agent
 rejects a streamed delta whose chunks are missing, duplicated, out of order or
 short of its end frame's counts (`Violation::BrokenStream`).
 
-`tests/e2e_reactive/saturation.rs` requires correct deliveries under overload,
+`tests/scenarios/saturation.rs` requires correct deliveries under overload,
 at the scale of issue #292: 960 sessions, each subscribed to its own bound
 standing query, while writers saturate the engine for 30 s. Each probe's delta
 reaches exactly its session, once, within a bound of the write's
 acknowledgement, and no session gets a stray delta or a `subscription_error`
 (its module doc states the full contract).
 
-Defects tracked by the reactive plan run as **expected failures** in a
-`tests/e2e_reactive/known_defects.rs` module (none is open today). Each
-asserts the correct contract; its own violation passes as `XFAIL`, any other
-violation fails, and a holding contract fails as `XPASS` so the marker is
-removed and the scenario becomes required when the plan item lands.
+Tracked defects run as **expected failures** through
+`inputlayer_testkit::KnownDefect`, naming the issue that fixes them (today:
+`harness::counters_scrape_the_running_engine`, #308). Each asserts the
+correct contract; its own violation passes as `XFAIL`, any other violation
+fails, and a holding contract fails as `XPASS` so the marker is removed and
+the scenario becomes required when the issue lands.
 
 Not yet covered by this pipeline (each is added when the work that enables it
 lands):
@@ -257,7 +301,7 @@ Source-to-category mapping:
 | `make bench-engine-remote` | Engine suite (rules, closure, deletes and updates, claims, `.why`, sessions, memory, recovery, WAL share) on the benchmark host | Release checkpoints and engine baselines |
 | `make perf-gate-check` | Clippy + unit tests of the gate tool | After changing `perf-gate/` |
 | `make pre-pr-selftest` | Behavioural tests of `make pre-pr` routing (`scripts/test_pre_pr.py`) | After changing `Makefile` or `scripts/` |
-| `make e2e-reactive` | Reactive agent path against real engines, latency samples | Subscription or wire changes |
+| `make e2e-reactive` | Scenario suite in release against real engines, latency samples | Subscription or wire changes |
 | `make oracle-test` | Differential correctness oracle only | Changing evaluation, subscriptions or rule catalog changes |
 
 ### Code Quality

@@ -324,9 +324,10 @@ soak:
 e2e-test:
 	./scripts/run_snapshot_tests.sh
 
-# Reactive agent path E2E: real engine processes, agents subscribed over /ws,
-# independent writers; release build for representative latency. Known
-# defects, when any is tracked, run as expected failures. Raw writer->agent delta
+# Scenario suite (tests/scenarios) in a release build for representative
+# latency: real engine processes, agents subscribed over /ws, independent
+# writers. Plain `cargo test` runs the same scenarios in debug. Known defects
+# run as expected failures. Raw writer->agent delta
 # latency samples (schema inputlayer.reactive.delta_latency.v1) land in
 # $(E2E_REACTIVE_SAMPLES)/<scenario>.jsonl.
 E2E_REACTIVE_SAMPLES ?= target/e2e-reactive
@@ -334,7 +335,7 @@ e2e-reactive:
 	rm -rf $(E2E_REACTIVE_SAMPLES)
 	cargo test --release -p inputlayer-testkit
 	INPUTLAYER_REACTIVE_SAMPLES_DIR=$(abspath $(E2E_REACTIVE_SAMPLES)) \
-		cargo test --release --test e2e_reactive -- --nocapture
+		cargo test --release --test scenarios -- --nocapture
 	@ls $(E2E_REACTIVE_SAMPLES)/*.jsonl >/dev/null || { echo "ERROR: no latency samples written"; exit 1; }
 
 # Regenerate snapshot .iql.out files (sequential mode)
@@ -599,7 +600,6 @@ fmt-check:
 # Run clippy lints
 lint:
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
-	cargo clippy --all-features --test e2e_reactive -- -D warnings
 
 # Pre-PR gate: affected fast checks run in parallel before every push to a PR,
 # then the same-host performance gate. Formatting always runs; PRE_PR_BASE
