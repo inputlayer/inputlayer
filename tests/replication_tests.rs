@@ -6,7 +6,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -730,4 +730,198 @@ async fn degrade_falls_back_to_async_and_rearms_once_the_follower_catches_up() {
         .await
         .expect("confirmed write");
     converge(&primary, &follower, "?edge(X, Y)").await;
+}
+
+// Measurement lab (run on the perf gate host, release build):
+//
+//   cargo test --release --test replication_tests sync_shipping_cost -- --ignored --nocapture
+//
+// LAB_ROUNDS (default 3), LAB_TRIALS (default 5) and LAB_BASELINE_BIN (an
+// older inputlayer-server, measured as the `async-base` arm) tune it.
+
+fn env_or(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+/// A primary and, unless standalone, a caught-up follower, for `arm`.
+async fn lab_pair(arm: &str) -> (Engine, Option<Engine>) {
+    let binary = match arm {
+        "async-base" => std::env::var("LAB_BASELINE_BIN").expect("LAB_BASELINE_BIN"),
+        _ => env!("CARGO_BIN_EXE_inputlayer-server").to_string(),
+    };
+    let builder = EngineBuilder::new(&binary);
+    if arm == "standalone" {
+        return (builder.start().await.expect("start"), None);
+    }
+    let sync = arm == "sync";
+    let primary = builder
+        .replication(Replication {
+            role: "primary",
+            token: TOKEN.into(),
+            primary_url: None,
+            retain_bytes: None,
+            heartbeat_ms: None,
+            timeout_ms: None,
+            mode: sync.then_some("sync"),
+            sync_timeout_ms: None,
+            on_follower_loss: None,
+        })
+        .start()
+        .await
+        .expect("start primary");
+    let mut follower = EngineBuilder::new(&binary)
+        .replication(Replication {
+            role: "follower",
+            token: TOKEN.into(),
+            primary_url: Some(primary.http_url()),
+            retain_bytes: None,
+            heartbeat_ms: None,
+            timeout_ms: None,
+            mode: None,
+            sync_timeout_ms: None,
+            on_follower_loss: None,
+        })
+        .start()
+        .await
+        .expect("start follower");
+    follower.set_api_key(primary.api_key());
+    caught_up(&follower).await;
+    (primary, Some(follower))
+}
+
+fn percentile(sorted: &[Duration], p: f64) -> f64 {
+    if sorted.is_empty() {
+        return f64::NAN;
+    }
+    let index = ((sorted.len() - 1) as f64 * p).round() as usize;
+    sorted[index].as_secs_f64() * 1000.0
+}
+
+/// `writers` connections committing `+lab(w, i)` for `run` (or `count`
+/// commits each); the latency of every acknowledged commit.
+async fn lab_writes(
+    engine: &Engine,
+    writers: u64,
+    count: Option<u64>,
+    run: Duration,
+) -> Vec<Duration> {
+    let deadline = std::time::Instant::now() + run;
+    let mut tasks = Vec::new();
+    for writer in 0..writers {
+        let mut client = WsClient::connect(engine, KG).await.expect("connect");
+        tasks.push(tokio::spawn(async move {
+            let mut latencies = Vec::new();
+            for i in 0u64.. {
+                if count.map_or(std::time::Instant::now() >= deadline, |c| i >= c) {
+                    break;
+                }
+                let commit = client
+                    .commit(&format!("+lab({writer}, {i})"))
+                    .await
+                    .expect("commit");
+                latencies.push(commit.acked_at - commit.sent_at);
+            }
+            client.close().await;
+            latencies
+        }));
+    }
+    let mut all = Vec::new();
+    for task in tasks {
+        all.extend(task.await.unwrap());
+    }
+    all.sort();
+    all
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "measurement lab: run on the perf gate host"]
+async fn sync_shipping_cost() {
+    let rounds = env_or("LAB_ROUNDS", 3);
+    let trials = env_or("LAB_TRIALS", 5);
+    let mut arms = vec!["standalone", "async", "sync"];
+    if std::env::var("LAB_BASELINE_BIN").is_ok() {
+        arms.insert(1, "async-base");
+    }
+
+    // Commit latency, arms interleaved round by round.
+    let mut single: BTreeMap<&str, Vec<Duration>> = BTreeMap::new();
+    let mut concurrent: BTreeMap<&str, (Vec<Duration>, f64)> = BTreeMap::new();
+    for round in 0..rounds {
+        for &arm in &arms {
+            let (primary, follower) = lab_pair(arm).await;
+            lab_writes(&primary, 1, Some(200), Duration::ZERO).await;
+            let one = lab_writes(&primary, 1, Some(1000), Duration::ZERO).await;
+            let run = Duration::from_secs(5);
+            let four = lab_writes(&primary, 4, None, run).await;
+            let rate = four.len() as f64 / run.as_secs_f64();
+            println!(
+                "round {round} {arm:>11}: 1 writer p50 {:.3} ms p99 {:.3} ms | 4 writers {rate:.0}/s p50 {:.3} ms p99 {:.3} ms",
+                percentile(&one, 0.5),
+                percentile(&one, 0.99),
+                percentile(&four, 0.5),
+                percentile(&four, 0.99),
+            );
+            single.entry(arm).or_default().extend(one);
+            let entry = concurrent.entry(arm).or_default();
+            entry.0.extend(four);
+            entry.1 += rate / rounds as f64;
+            drop((primary, follower));
+        }
+    }
+    println!("\n| arm | 1 writer p50 | p99 | 4 writers commits/s | p50 | p99 |");
+    println!("|---|---|---|---|---|---|");
+    for &arm in &arms {
+        let one = single.get_mut(arm).unwrap();
+        one.sort();
+        let (four, rate) = concurrent.get_mut(arm).unwrap();
+        four.sort();
+        println!(
+            "| {arm} | {:.3} ms | {:.3} ms | {rate:.0} | {:.3} ms | {:.3} ms |",
+            percentile(one, 0.5),
+            percentile(one, 0.99),
+            percentile(four, 0.5),
+            percentile(four, 0.99),
+        );
+    }
+
+    // RPO: kill the primary under 4 writers; count acknowledged writes the
+    // follower does not hold.
+    println!("\n| mode | trial | acknowledged | lost | primary lag at kill (events) |");
+    println!("|---|---|---|---|---|");
+    for arm in ["async", "sync"] {
+        for trial in 0..trials {
+            let (mut primary, follower) = lab_pair(arm).await;
+            let follower = follower.unwrap();
+            let acked = Arc::new(parking_lot::Mutex::new(Vec::new()));
+            let mut writers = Vec::new();
+            for writer in 0..4u64 {
+                let mut client = WsClient::connect(&primary, KG).await.expect("connect");
+                let acked = Arc::clone(&acked);
+                writers.push(tokio::spawn(async move {
+                    for i in 0u64.. {
+                        if client.commit(&format!("+w({writer}, {i})")).await.is_err() {
+                            break;
+                        }
+                        acked.lock().push(json!([writer, i]).to_string());
+                    }
+                }));
+            }
+            while acked.lock().len() < 2000 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            let lag = status_of(&primary).await["primary"]["lag_events"].clone();
+            primary.stop().await.expect("kill primary");
+            for writer in writers {
+                writer.await.unwrap();
+            }
+            wait_status(&follower, "a lost primary", |f| f["state"] == "connecting").await;
+            let held = rows(&follower, "?w(W, I)").await;
+            let acked: BTreeSet<String> = acked.lock().drain(..).collect();
+            let lost = acked.difference(&held).count();
+            println!("| {arm} | {trial} | {} | {lost} | {lag} |", acked.len());
+        }
+    }
 }
