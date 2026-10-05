@@ -249,6 +249,7 @@ async fn subscribe_loop(
     let stall = Duration::from_millis(config.stall_ms);
     let mut session: Option<Session> = None;
     let mut quiet_since = Instant::now();
+    let mut settling_since: Option<Instant> = None;
     let mut next_stall = Instant::now() + stall.mul_f64(1.0 + rng.below(100) as f64 / 50.0);
     let mut leave_at = Instant::now();
     loop {
@@ -306,7 +307,10 @@ async fn subscribe_loop(
             }
             Ok(false) => {
                 if let Some(at) = settling {
-                    if quiet_since.elapsed() >= quiet {
+                    // Quiet counts from no earlier than the settling: a delta
+                    // older than that says nothing about the final commits.
+                    let since = *settling_since.get_or_insert_with(Instant::now);
+                    if quiet_since.max(since).elapsed() >= quiet {
                         current
                             .claim_final(ctx, who, class, at)
                             .map_err(|e| e.to_string())?;
@@ -387,6 +391,7 @@ async fn group_loop(ctx: &Ctx, who: &Arc<str>, stats: &mut ConsumerStats) -> Res
     let (mut seq, mut revision) = (0u64, snapshot.revision);
     let quiet = Duration::from_millis(ctx.config.quiet_ms);
     let mut quiet_since = Instant::now();
+    let mut settling_since: Option<Instant> = None;
     let mut last_ping = Instant::now();
     loop {
         if ctx.shared.aborted() {
@@ -399,7 +404,8 @@ async fn group_loop(ctx: &Ctx, who: &Arc<str>, stats: &mut ConsumerStats) -> Res
         let frame = client.poll_push(POLL).await.map_err(|e| e.to_string())?;
         let Some(frame) = frame else {
             if let Some(at) = ctx.shared.final_revision() {
-                if quiet_since.elapsed() >= quiet {
+                let since = *settling_since.get_or_insert_with(Instant::now);
+                if quiet_since.max(since).elapsed() >= quiet {
                     if revision > at {
                         return Err(format!("group at revision {revision} past the final {at}"));
                     }

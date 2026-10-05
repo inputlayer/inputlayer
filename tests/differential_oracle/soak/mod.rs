@@ -117,7 +117,7 @@ impl Default for Config {
             slow_pause_ms: 4,
             stall_ms: 1000,
             audit_ms: 50,
-            quiet_ms: 500,
+            quiet_ms: 2000,
             settle_secs: 120,
             send_timeout_ms: None,
             notification_buffer: None,
