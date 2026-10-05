@@ -43,6 +43,9 @@ mod program_commit;
 #[cfg(test)]
 mod program_commit_tests;
 mod relation_store;
+mod replica;
+#[cfg(test)]
+mod replica_tests;
 mod residency;
 mod snapshot;
 mod vector_index;
@@ -51,6 +54,7 @@ pub use catalog_change::{CatalogChange, CatalogOutcome};
 pub use checkpoint::{CheckpointExport, ExportStatus};
 pub use precondition::{ChangeLog, Precondition, PreconditionError};
 pub use relation_store::RelationStore;
+pub use replica::{GraphEvent, GraphState, ReplicaChange};
 pub use residency::{KgPin, KgSummary};
 pub use snapshot::{CachedRun, KnowledgeGraphSnapshot, PersistentRules};
 pub use write_program::{
@@ -58,10 +62,11 @@ pub use write_program::{
     StagedStatement, StatementEffect, StatementOutcome, WriteProgram,
 };
 
-use crate::config::Config;
+use crate::config::{Config, ReplicationRole};
 use crate::incremental::IncrementalEngine;
 use crate::index_manager::IndexManager;
 use crate::naming;
+use crate::replication::{EngineEvent, ReplicationLog};
 use crate::rule_catalog::RuleCatalog;
 use crate::schema::catalog::SCHEMA_CATALOG_FILE;
 use crate::schema::{RelationSchema, SchemaCatalog, ValidationEngine};
@@ -204,6 +209,9 @@ pub struct StorageEngine {
     kg_set: RwLock<()>,
     /// The online checkpoint export slot.
     checkpoint_exports: checkpoint::CheckpointExports,
+    /// A replication follower: client writes are refused and only the
+    /// replication applier changes state (see `replica`).
+    replica: AtomicBool,
     /// Single-writer ownership of `data_dir` for this engine's lifetime.
     /// Declared last so it is released only after every other field drops.
     _data_dir_lock: DataDirLock,
@@ -298,16 +306,29 @@ impl StorageEngine {
             kg_drops_in_flight: parking_lot::Mutex::new(HashSet::new()),
             kg_set: RwLock::new(()),
             checkpoint_exports: checkpoint::CheckpointExports::default(),
+            replica: AtomicBool::new(false),
             _data_dir_lock: data_dir_lock,
         };
 
         // Register the knowledge graphs on disk; each loads on first use
         engine.register_knowledge_graphs()?;
 
-        // Create default knowledge graph if it doesn't exist
+        // A primary ships every change from here on; a follower takes no
+        // client writes from the start.
+        match engine.config.replication.role {
+            ReplicationRole::Primary => {
+                let log = ReplicationLog::new(engine.config.replication.retain_bytes);
+                engine.persist.attach_replication_log(Arc::new(log));
+            }
+            ReplicationRole::Follower => engine.replica.store(true, Ordering::SeqCst),
+            ReplicationRole::Standalone => {}
+        }
+
+        // Create default knowledge graph if it doesn't exist (on a follower
+        // too: the primary's stream reconciles it like any other graph)
         let default_db = engine.config.storage.default_knowledge_graph.clone();
         if !engine.knowledge_graphs.contains_key(&default_db) {
-            engine.create_knowledge_graph(&default_db)?;
+            engine.create_graph(&default_db)?;
         }
 
         // Set current knowledge graph to default
@@ -324,6 +345,32 @@ impl StorageEngine {
         self.persist.inject_wal_fault(fault);
     }
 
+    /// Fail unless this engine takes client writes: a replication follower
+    /// refuses them (only its applier writes), and so does a store that is
+    /// read-only until restart recovery.
+    ///
+    /// # Errors
+    /// [`StorageError::ReadOnlyReplica`] or [`StorageError::StoreReadOnly`].
+    pub fn check_client_write(&self) -> StorageResult<()> {
+        if self.replica.load(Ordering::SeqCst) {
+            return Err(StorageError::ReadOnlyReplica);
+        }
+        self.persist.check_writable()
+    }
+
+    /// The primary's replication log, when this engine is a primary.
+    pub fn replication_log(&self) -> Option<&Arc<ReplicationLog>> {
+        self.persist.replication_log()
+    }
+
+    /// Ship a non-transaction change to followers. Called under the lock
+    /// that orders the change, so its LSN is in commit order.
+    fn replicate(&self, event: &EngineEvent) {
+        if let Some(log) = self.persist.replication_log() {
+            log.append(crate::replication::event::engine_line(event));
+        }
+    }
+
     /// Create a new knowledge graph
     pub fn create_knowledge_graph(&self, name: &str) -> StorageResult<()> {
         self.create_knowledge_graph_at(name).map(drop)
@@ -332,6 +379,13 @@ impl StorageEngine {
     /// Create a new knowledge graph; returns the revision of its first
     /// snapshot.
     pub fn create_knowledge_graph_at(&self, name: &str) -> StorageResult<u64> {
+        self.check_client_write()?;
+        self.create_graph(name)
+    }
+
+    /// Create knowledge graph `name`, also on a follower; returns the
+    /// revision of its first snapshot.
+    fn create_graph(&self, name: &str) -> StorageResult<u64> {
         self.persist.check_writable()?;
         let start = Instant::now();
         naming::validate_kg_name(name).map_err(StorageError::InvalidName)?;
@@ -383,11 +437,19 @@ impl StorageEngine {
                 revision
             }
         };
+        // Under `kg_set`, so a checkpoint either holds the graph or the
+        // stream after it holds this event.
+        self.replicate(&EngineEvent::CreateGraph {
+            name: name.to_string(),
+        });
         drop(adding);
 
         if let Err(e) = self.save_knowledge_graphs_metadata() {
             if let Some((_, slot)) = self.knowledge_graphs.remove(name) {
                 self.retire_dropped(&slot);
+                self.replicate(&EngineEvent::DropGraph {
+                    name: name.to_string(),
+                });
             }
             return Err(e);
         }
@@ -402,6 +464,12 @@ impl StorageEngine {
     /// Returns a `KgDropCleanup` token for Phase 2.
     /// Uses interior mutability (DashMap + RwLock) so only needs `&self`.
     pub fn prepare_drop_knowledge_graph(&self, name: &str) -> StorageResult<KgDropCleanup> {
+        self.check_client_write()?;
+        self.prepare_graph_drop(name)
+    }
+
+    /// Phase 1 of a KG drop, also on a follower.
+    fn prepare_graph_drop(&self, name: &str) -> StorageResult<KgDropCleanup> {
         self.persist.check_writable()?;
         let start = Instant::now();
         // Cannot drop default knowledge graph
@@ -439,6 +507,11 @@ impl StorageEngine {
         // waits for in-flight writes, and writers still holding a handle bail.
         if let Some((_, slot)) = self.knowledge_graphs.remove(name) {
             self.retire_dropped(&slot);
+            // Retiring waited for every commit to the graph, and later ones
+            // fail as not found, so the drop follows all of them in the stream.
+            self.replicate(&EngineEvent::DropGraph {
+                name: name.to_string(),
+            });
         }
 
         // The tombstone outranks a stale listing, so a failure here is benign.
@@ -1064,6 +1137,12 @@ impl StorageEngine {
     ///
     /// Returns the revision of the snapshot the drop published.
     pub fn drop_relation_in(&self, kg: &str, name: &str) -> StorageResult<u64> {
+        self.check_client_write()?;
+        self.drop_relation_unchecked(kg, name)
+    }
+
+    /// [`Self::drop_relation_in`], also on a follower.
+    fn drop_relation_unchecked(&self, kg: &str, name: &str) -> StorageResult<u64> {
         self.persist.check_writable()?;
         let mut db = self.lock_kg(kg)?;
         if !db.has_relation(name) {
@@ -1125,6 +1204,11 @@ impl StorageEngine {
                 warn!(kg = %kg, relation = %name, error = %e, "relation_drop_tombstone_clear_failed");
             }
         }
+        // Still under the graph's write lock: in commit order.
+        self.replicate(&EngineEvent::DropRelation {
+            kg: kg.to_string(),
+            relation: name.to_string(),
+        });
         Ok(db.snapshot.load().revision)
     }
 
@@ -1148,6 +1232,7 @@ impl StorageEngine {
         kg: &str,
         prefix: &str,
     ) -> StorageResult<(Vec<(String, usize)>, u64)> {
+        self.check_client_write()?;
         let mut db = self.lock_kg(kg)?;
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
         let cleared = db.clear_relations_by_prefix(prefix, time, &self.persist, kg)?;
@@ -1363,7 +1448,7 @@ impl StorageEngine {
     where
         F: FnOnce(&mut KnowledgeGraph) -> Result<T, String>,
     {
-        self.persist.check_writable()?;
+        self.check_client_write()?;
         let mut db = self.lock_kg(kg)?;
         f(&mut db).map_err(StorageError::Other)
     }

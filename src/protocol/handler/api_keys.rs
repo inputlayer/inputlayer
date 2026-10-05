@@ -370,6 +370,10 @@ impl Handler {
 
     /// Persist key uses not yet persisted, in one batch.
     pub fn persist_api_key_usage(&self) {
+        // A follower writes nothing; key uses there stay in memory.
+        if self.storage.read().is_replica() {
+            return;
+        }
         let usage = self.credentials.unpersisted_usage();
         if usage.is_empty() {
             return;

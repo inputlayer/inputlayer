@@ -30,6 +30,7 @@
 pub mod error;
 pub mod handler;
 pub mod notification_log;
+pub mod replication;
 pub mod rest;
 pub mod subscription;
 pub mod wire;

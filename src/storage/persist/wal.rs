@@ -221,10 +221,19 @@ impl PersistWal {
     /// recorded, so a restart may recover the transaction, and when the record went
     /// to a file no longer at the WAL's path (see `check_in_place`).
     pub fn append(&mut self, txn: &Transaction, durable: bool) -> StorageResult<()> {
-        let record = wal_record::encode(txn)?;
+        self.append_record(&wal_record::encode(txn)?, durable)
+    }
+
+    /// [`Self::append`] for a transaction already encoded as one record (by
+    /// `persist::encode_record`), so a caller that also ships the record
+    /// encodes it once.
+    ///
+    /// # Errors
+    /// As [`Self::append`].
+    pub fn append_record(&mut self, record: &[u8], durable: bool) -> StorageResult<()> {
         self.ensure_writer()?;
         let len = self.len;
-        let Err(write) = self.write_record(&record, durable) else {
+        let Err(write) = self.write_record(record, durable) else {
             return self.check_in_place();
         };
         self.discard_writer(Repair::ToLength(len));

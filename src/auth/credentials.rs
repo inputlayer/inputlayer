@@ -249,6 +249,59 @@ impl CredentialRegistry {
         self.expiry_changed.notify_one();
     }
 
+    /// Bring the index to `users` and `keys`, as a replication follower
+    /// does when its primary's `_internal` changes: add what is new, replace
+    /// what changed, revoke what is gone, and leave every unchanged
+    /// credential (and the sessions bound to it) alive.
+    pub fn sync(&self, users: Vec<UserRecord>, keys: Vec<ApiKeyRecord>) {
+        let mut state = self.state.write();
+        let wanted: std::collections::HashSet<&str> =
+            users.iter().map(|user| user.username.as_str()).collect();
+        state.users.retain(|username, user| {
+            let keep = wanted.contains(username.as_str());
+            if !keep {
+                user.password.end(CredentialEnded::Revoked);
+            }
+            keep
+        });
+        for user in users {
+            match state.users.get(&user.username) {
+                Some(current) if current.password_hash == user.password_hash => {
+                    current.role.set(user.role);
+                }
+                _ => state.upsert_user(user),
+            }
+        }
+        let wanted: std::collections::HashSet<&str> =
+            keys.iter().map(|key| key.key_hash.as_str()).collect();
+        state.keys.retain(|hash, key| {
+            let keep = wanted.contains(hash.as_str());
+            if !keep {
+                key.credential.end(CredentialEnded::Revoked);
+            }
+            keep
+        });
+        let mut expiry = false;
+        for key in keys {
+            let unchanged = state.keys.get(&key.key_hash).is_some_and(|current| {
+                let credential = &current.credential;
+                key_label(credential) == key.label
+                    && credential.username == key.username
+                    && credential.scope() == key.scope.as_ref()
+                    && credential.expires_at() == key.times.expires_at
+                    && current.created_at == key.times.created_at
+            });
+            if !unchanged {
+                expiry |= key.times.expires_at.is_some();
+                state.insert_key(key);
+            }
+        }
+        drop(state);
+        if expiry {
+            self.expiry_changed.notify_one();
+        }
+    }
+
     /// Start a password login. `None` for an unknown user; callers still
     /// spend a dummy verification so unknown users cost the same.
     pub fn password_candidate(&self, username: &str) -> Option<PasswordCandidate> {

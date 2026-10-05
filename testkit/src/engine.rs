@@ -31,6 +31,25 @@ pub struct EngineSettings {
     pub ws_max_subscriptions: Option<usize>,
     /// `http.rate_limit.notification_buffer_size`; `None` keeps the default.
     pub notification_buffer_size: Option<usize>,
+    /// `[replication]`; `None` runs standalone.
+    pub replication: Option<Replication>,
+}
+
+/// The `[replication]` section of an engine's config.
+#[derive(Debug, Clone)]
+pub struct Replication {
+    /// `"primary"` or `"follower"`.
+    pub role: &'static str,
+    /// Shared stream token (at least 16 characters).
+    pub token: String,
+    /// A follower's primary, e.g. [`Engine::http_url`].
+    pub primary_url: Option<String>,
+    /// `retain_bytes`; `None` keeps the default.
+    pub retain_bytes: Option<usize>,
+    /// `heartbeat_ms`; `None` keeps the default.
+    pub heartbeat_ms: Option<u64>,
+    /// `timeout_ms`; `None` keeps the default.
+    pub timeout_ms: Option<u64>,
 }
 
 /// Configures and starts an [`Engine`].
@@ -75,7 +94,17 @@ impl EngineBuilder {
         self
     }
 
+    /// Run with this `[replication]` section.
+    #[must_use]
+    pub fn replication(mut self, replication: Replication) -> Self {
+        self.settings.replication = Some(replication);
+        self
+    }
+
     /// Start the engine and wait until it serves `/health`.
+    ///
+    /// A follower bootstraps no admin key of its own (its users come from
+    /// its primary); give it one with [`Engine::set_api_key`].
     pub async fn start(self) -> Result<Engine> {
         let dir = TempDir::new().context("create engine directory")?;
         let mut engine = Engine {
@@ -86,7 +115,7 @@ impl EngineBuilder {
             child: None,
             api_key: String::new(),
         };
-        engine.launch().await?;
+        engine.launch(None).await?;
         Ok(engine)
     }
 }
@@ -112,6 +141,37 @@ impl Engine {
         &self.api_key
     }
 
+    /// Use `key` to authenticate (a follower takes its primary's keys).
+    pub fn set_api_key(&mut self, key: &str) {
+        self.api_key = key.to_string();
+    }
+
+    /// The port the engine listens on.
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// Base HTTP URL, e.g. `http://127.0.0.1:4321`.
+    pub fn http_url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+
+    /// The engine's data directory.
+    pub fn data_dir(&self) -> PathBuf {
+        self.dir.path().join("data")
+    }
+
+    /// Kill the process (SIGKILL: no clean shutdown).
+    pub async fn stop(&mut self) -> Result<()> {
+        self.kill().await
+    }
+
+    /// Start a stopped engine again on the same data directory and port.
+    pub async fn restart(&mut self) -> Result<()> {
+        self.kill().await?;
+        self.launch(Some(self.port)).await
+    }
+
     /// Server log, for diagnosing a failed scenario.
     pub fn log_path(&self) -> PathBuf {
         self.dir.path().join("server.log")
@@ -122,7 +182,7 @@ impl Engine {
     /// [`Engine::ws_url`].
     pub async fn crash_restart(&mut self) -> Result<()> {
         self.kill().await?;
-        self.launch().await
+        self.launch(None).await
     }
 
     async fn kill(&mut self) -> Result<()> {
@@ -132,10 +192,13 @@ impl Engine {
         Ok(())
     }
 
-    async fn launch(&mut self) -> Result<()> {
+    async fn launch(&mut self, port: Option<u16>) -> Result<()> {
         let mut last_error = None;
         for _ in 0..PORT_ATTEMPTS {
-            self.port = free_port()?;
+            self.port = match port {
+                Some(port) => port,
+                None => free_port()?,
+            };
             self.write_config()?;
             let log = std::fs::OpenOptions::new()
                 .create(true)
@@ -164,7 +227,9 @@ impl Engine {
             self.child = Some(child);
             match self.wait_ready().await {
                 Ok(()) => {
-                    self.api_key = read_api_key(&self.credentials_path())?;
+                    if !self.is_follower() {
+                        self.api_key = read_api_key(&self.credentials_path())?;
+                    }
                     return Ok(());
                 }
                 Err(e) => {
@@ -196,6 +261,13 @@ impl Engine {
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+    }
+
+    fn is_follower(&self) -> bool {
+        self.settings
+            .replication
+            .as_ref()
+            .is_some_and(|r| r.role == "follower")
     }
 
     fn config_path(&self) -> PathBuf {
@@ -246,6 +318,24 @@ impl Engine {
         logging.insert("level".into(), "warn".into());
 
         let mut config = toml::Table::new();
+        if let Some(replication) = &self.settings.replication {
+            let mut section = toml::Table::new();
+            section.insert("role".into(), replication.role.into());
+            section.insert("token".into(), replication.token.clone().into());
+            if let Some(url) = &replication.primary_url {
+                section.insert("primary_url".into(), url.clone().into());
+            }
+            if let Some(bytes) = replication.retain_bytes {
+                section.insert("retain_bytes".into(), integer(bytes)?);
+            }
+            if let Some(ms) = replication.heartbeat_ms {
+                section.insert("heartbeat_ms".into(), integer_u64(ms)?);
+            }
+            if let Some(ms) = replication.timeout_ms {
+                section.insert("timeout_ms".into(), integer_u64(ms)?);
+            }
+            config.insert("replication".into(), section.into());
+        }
         config.insert("storage".into(), storage.into());
         config.insert("http".into(), http.into());
         config.insert("logging".into(), logging.into());
@@ -271,6 +361,12 @@ fn path_value(path: &Path) -> Result<toml::Value> {
         .to_str()
         .with_context(|| format!("non-UTF-8 path {}", path.display()))?;
     Ok(path.to_string().into())
+}
+
+fn integer_u64(value: u64) -> Result<toml::Value> {
+    Ok(i64::try_from(value)
+        .context("config value too large")?
+        .into())
 }
 
 fn integer(value: usize) -> Result<toml::Value> {

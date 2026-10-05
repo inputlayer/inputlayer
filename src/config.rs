@@ -45,6 +45,8 @@ pub struct Config {
     pub http: HttpConfig,
     #[serde(default)]
     pub subscriptions: SubscriptionsConfig,
+    #[serde(default)]
+    pub replication: ReplicationConfig,
 }
 
 /// Storage engine configuration
@@ -446,6 +448,128 @@ impl Default for SubscriptionsConfig {
         Self {
             share_parameterized: true,
         }
+    }
+}
+
+/// What part a server plays in warm-standby replication.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReplicationRole {
+    /// No replication (the default).
+    #[default]
+    Standalone,
+    /// Accepts writes and streams every committed change to followers.
+    Primary,
+    /// Read-only copy that applies the primary's stream.
+    Follower,
+}
+
+/// Warm-standby replication (`[replication]`): a primary streams every
+/// committed change to followers, which apply it and serve reads.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplicationConfig {
+    /// `standalone`, `primary` or `follower`.
+    #[serde(default)]
+    pub role: ReplicationRole,
+
+    /// Shared secret a follower presents to the primary's stream endpoint.
+    /// Required for `primary` and `follower`; at least 16 characters.
+    #[serde(default)]
+    pub token: Option<String>,
+
+    /// Primary: bytes of recent changes kept in memory for followers to
+    /// catch up from. A follower further behind is brought up to date from
+    /// a fresh copy of the primary's state instead.
+    #[serde(default = "default_replication_retain_bytes")]
+    pub retain_bytes: usize,
+
+    /// Primary: how often an idle stream carries a heartbeat.
+    #[serde(default = "default_replication_heartbeat_ms")]
+    pub heartbeat_ms: u64,
+
+    /// Follower: the primary's HTTP base URL, e.g. `http://primary:8080`
+    /// (plain HTTP: the stream client has no TLS).
+    #[serde(default)]
+    pub primary_url: Option<String>,
+
+    /// Follower: silence from the primary after which the follower drops
+    /// the connection and reconnects (detects a dead primary or a network
+    /// partition). Must exceed `heartbeat_ms`.
+    #[serde(default = "default_replication_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+fn default_replication_retain_bytes() -> usize {
+    64 * 1024 * 1024
+}
+
+fn default_replication_heartbeat_ms() -> u64 {
+    500
+}
+
+fn default_replication_timeout_ms() -> u64 {
+    3000
+}
+
+impl Default for ReplicationConfig {
+    fn default() -> Self {
+        Self {
+            role: ReplicationRole::Standalone,
+            token: None,
+            retain_bytes: default_replication_retain_bytes(),
+            heartbeat_ms: default_replication_heartbeat_ms(),
+            primary_url: None,
+            timeout_ms: default_replication_timeout_ms(),
+        }
+    }
+}
+
+impl ReplicationConfig {
+    /// Shortest accepted `token`.
+    pub const MIN_TOKEN_LEN: usize = 16;
+
+    /// Refuse a replication setup that cannot work.
+    ///
+    /// # Errors
+    /// A primary or follower without a long enough token, a follower
+    /// without a primary URL, or a timeout no longer than the heartbeat.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.role == ReplicationRole::Standalone {
+            return Ok(());
+        }
+        match &self.token {
+            Some(token) if token.len() >= Self::MIN_TOKEN_LEN => {}
+            _ => {
+                return Err(format!(
+                    "replication.token must be set to at least {} characters for role {:?}",
+                    Self::MIN_TOKEN_LEN,
+                    self.role
+                ))
+            }
+        }
+        if self.heartbeat_ms == 0 {
+            return Err("replication.heartbeat_ms must be greater than 0".to_string());
+        }
+        if self.role == ReplicationRole::Follower {
+            // The stream client has no TLS: reach the primary over a private
+            // network, or through a proxy that terminates TLS.
+            match &self.primary_url {
+                Some(url) if url.starts_with("http://") => {}
+                _ => {
+                    return Err(
+                        "replication.primary_url must be an http:// URL for a follower".to_string(),
+                    )
+                }
+            }
+            if self.timeout_ms <= self.heartbeat_ms {
+                return Err(format!(
+                    "replication.timeout_ms ({}) must exceed replication.heartbeat_ms ({})",
+                    self.timeout_ms, self.heartbeat_ms
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -862,7 +986,8 @@ impl Config {
             "optimization": {},
             "logging": {},
             "http": { "gui": {}, "auth": {}, "rate_limit": {} },
-            "subscriptions": {}
+            "subscriptions": {},
+            "replication": {}
         });
         serde_json::from_value(minimal).expect("minimal config seed must deserialize")
     }
@@ -876,12 +1001,13 @@ impl Config {
     /// strict parsing turned any of them into a startup failure (#92). The
     /// TOML sources stay strict; only the env source is filtered.
     fn env_source() -> Env {
-        const SECTIONS: [&str; 5] = [
+        const SECTIONS: [&str; 6] = [
             "storage",
             "optimization",
             "logging",
             "http",
             "subscriptions",
+            "replication",
         ];
         Env::prefixed("INPUTLAYER_")
             .filter(|key| {
@@ -1003,6 +1129,18 @@ impl Config {
             );
         }
 
+        self.replication.validate()?;
+        if self.replication.role == ReplicationRole::Follower
+            && self.storage.persist.durability_mode == DurabilityMode::Async
+        {
+            return Err(
+                "a follower must be durable: storage.persist.durability_mode = \"async\" writes \
+                 no WAL, so a restarted follower would resume past changes it lost; use \
+                 \"immediate\" or \"batched\""
+                    .to_string(),
+            );
+        }
+
         // Warn about extremely high WS connection limits
         if self.http.rate_limit.max_ws_connections > 100_000 {
             tracing::warn!(
@@ -1112,6 +1250,7 @@ impl Config {
             },
             http: HttpConfig::default(),
             subscriptions: SubscriptionsConfig::default(),
+            replication: ReplicationConfig::default(),
         }
     }
 }
@@ -1308,6 +1447,100 @@ mod tests {
             assert_eq!(config.storage.data_dir, PathBuf::from("/tmp/x"));
             Ok(())
         });
+    }
+
+    #[test]
+    fn test_replication_section_reads_from_file_and_env() {
+        figment::Jail::expect_with(|jail| {
+            assert_eq!(
+                Config::load().unwrap().replication.role,
+                ReplicationRole::Standalone
+            );
+            jail.create_file(
+                "server.toml",
+                "[replication]\nrole = \"follower\"\nprimary_url = \"http://p:8080\"\n",
+            )?;
+            jail.set_env("INPUTLAYER_REPLICATION__TOKEN", "0123456789abcdef-secret");
+            let mut config = Config::from_file("server.toml").expect("parse must succeed");
+            assert_eq!(config.replication.role, ReplicationRole::Follower);
+            assert_eq!(
+                config.replication.token.as_deref(),
+                Some("0123456789abcdef-secret")
+            );
+            config
+                .validate()
+                .expect("a complete follower section is valid");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_replication_validation_refuses_setups_that_cannot_work() {
+        let follower = ReplicationConfig {
+            role: ReplicationRole::Follower,
+            token: Some("0123456789abcdef".into()),
+            primary_url: Some("http://primary:8080".into()),
+            ..ReplicationConfig::default()
+        };
+        assert!(follower.validate().is_ok());
+        let refused = [
+            ReplicationConfig {
+                token: Some("short".into()),
+                ..follower.clone()
+            },
+            ReplicationConfig {
+                token: None,
+                ..follower.clone()
+            },
+            ReplicationConfig {
+                primary_url: None,
+                ..follower.clone()
+            },
+            ReplicationConfig {
+                primary_url: Some("https://primary:8443".into()),
+                ..follower.clone()
+            },
+            ReplicationConfig {
+                timeout_ms: 500,
+                ..follower.clone()
+            },
+            ReplicationConfig {
+                role: ReplicationRole::Primary,
+                heartbeat_ms: 0,
+                ..follower.clone()
+            },
+        ];
+        for config in refused {
+            assert!(config.validate().is_err(), "{config:?}");
+        }
+        // A standalone server ignores the rest of the section.
+        let standalone = ReplicationConfig {
+            role: ReplicationRole::Standalone,
+            token: None,
+            ..follower
+        };
+        assert!(standalone.validate().is_ok());
+    }
+
+    #[test]
+    fn test_a_follower_refuses_async_durability() {
+        let mut config = Config::default();
+        config.replication = ReplicationConfig {
+            role: ReplicationRole::Follower,
+            token: Some("0123456789abcdef".into()),
+            primary_url: Some("http://primary:8080".into()),
+            ..ReplicationConfig::default()
+        };
+        for mode in [DurabilityMode::Immediate, DurabilityMode::Batched] {
+            config.storage.persist.durability_mode = mode;
+            assert!(config.validate().is_ok(), "{mode:?}");
+        }
+        config.storage.persist.durability_mode = DurabilityMode::Async;
+        let err = config.validate().unwrap_err();
+        assert!(err.contains("follower must be durable"), "{err}");
+        // A primary may still trade durability for latency.
+        config.replication.role = ReplicationRole::Primary;
+        assert!(config.validate().is_ok());
     }
 
     #[test]

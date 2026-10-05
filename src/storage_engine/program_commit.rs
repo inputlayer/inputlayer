@@ -98,6 +98,9 @@ impl StorageEngine {
                 revision: db.snapshot.load().revision,
             });
         }
+        // A follower stages and answers session-only programs, but writes
+        // nothing durable: that comes only from its primary.
+        self.check_client_write().map_err(CommitError::from)?;
         if let Some(control) = control {
             control.begin_commit().map_err(CommitError::Cancelled)?;
         }
@@ -347,7 +350,7 @@ impl KnowledgeGraph {
     /// # Errors
     /// A failed incremental-engine shadow write. The delta is still applied
     /// and published, so memory matches the WAL.
-    fn apply_delta(
+    pub(super) fn apply_delta(
         &mut self,
         delta: Vec<(String, RelationDelta)>,
         time: u64,
@@ -415,14 +418,14 @@ impl KnowledgeGraph {
 /// Net effect of a program on each relation it touches, relative to the
 /// store at commit time.
 #[derive(Default)]
-struct FactDelta {
+pub(super) struct FactDelta {
     /// In first-touch order.
     relations: Vec<(String, RelationDelta)>,
     positions: HashMap<String, usize>,
 }
 
 impl FactDelta {
-    fn relation(&mut self, relation: &str) -> &mut RelationDelta {
+    pub(super) fn relation(&mut self, relation: &str) -> &mut RelationDelta {
         let position = match self.positions.get(relation) {
             Some(&position) => position,
             None => {
@@ -442,7 +445,7 @@ impl FactDelta {
     }
 
     /// The relations whose contents change, in first-touch order.
-    fn into_changed(self) -> Vec<(String, RelationDelta)> {
+    pub(super) fn into_changed(self) -> Vec<(String, RelationDelta)> {
         self.relations
             .into_iter()
             .filter(|(_, changes)| !changes.is_empty())
@@ -451,7 +454,7 @@ impl FactDelta {
 }
 
 /// `changed` as one transaction at `time`: per relation, deletes then inserts.
-fn transaction(kg: &str, time: u64, changed: &[(String, RelationDelta)]) -> Transaction {
+pub(super) fn transaction(kg: &str, time: u64, changed: &[(String, RelationDelta)]) -> Transaction {
     let mut txn = Transaction::new(time);
     for (relation, changes) in changed {
         let removed = changes.removed.iter().map(|t| (t.clone(), -1));
@@ -464,7 +467,7 @@ fn transaction(kg: &str, time: u64, changed: &[(String, RelationDelta)]) -> Tran
 /// Net change to one relation. `added` and `removed` are disjoint: a tuple
 /// deleted and re-inserted (or the reverse) cancels out.
 #[derive(Default)]
-struct RelationDelta {
+pub(super) struct RelationDelta {
     /// Tuples absent from the store that the program inserts, in first-insert
     /// order; `None` where a later statement deleted it again.
     added: Vec<Option<Tuple>>,
@@ -478,7 +481,7 @@ struct RelationDelta {
 impl RelationDelta {
     /// Insert `tuple` (`present`: whether the store holds it). Returns whether
     /// the tuple was absent before this change.
-    fn insert(&mut self, tuple: Tuple, present: bool) -> bool {
+    pub(super) fn insert(&mut self, tuple: Tuple, present: bool) -> bool {
         if self.removed.remove(&tuple) {
             return true;
         }
@@ -491,7 +494,7 @@ impl RelationDelta {
     }
 
     /// Delete `tuple`. Returns whether the tuple was present before this change.
-    fn delete(&mut self, tuple: &Tuple, present: bool) -> bool {
+    pub(super) fn delete(&mut self, tuple: &Tuple, present: bool) -> bool {
         if let Some(position) = self.added_at.remove(tuple) {
             self.added[position] = None;
             return true;

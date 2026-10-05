@@ -184,6 +184,8 @@ impl From<ProgramError> for String {
 /// can inject ephemeral facts/rules that combine with persistent data for queries.
 pub struct Handler {
     storage: Arc<RwLock<StorageEngine>>,
+    /// Warm-standby replication state, for `/v1/replication/status`.
+    replication: Arc<super::replication::ReplicationStatus>,
     /// Cached copy of the engine configuration for fast access in hot paths.
     config: Arc<crate::Config>,
     start_time: Instant,
@@ -1027,6 +1029,9 @@ impl Handler {
         let compute_permits = ncpu - io_reserve;
         let total_query_memory = config.storage.performance.total_query_memory_bytes();
         Self {
+            replication: Arc::new(super::replication::ReplicationStatus::new(
+                config.replication.role,
+            )),
             storage: Arc::new(RwLock::new(storage)),
             config,
             start_time: Instant::now(),
@@ -1079,6 +1084,9 @@ impl Handler {
         let compute_permits = ncpu - io_reserve;
         let total_query_memory = config.storage.performance.total_query_memory_bytes();
         Self {
+            replication: Arc::new(super::replication::ReplicationStatus::new(
+                config.replication.role,
+            )),
             storage: Arc::new(RwLock::new(storage)),
             config,
             start_time: Instant::now(),
@@ -1325,6 +1333,11 @@ impl Handler {
         self.start_time.elapsed().as_secs()
     }
 
+    /// Warm-standby replication state.
+    pub fn replication_status(&self) -> &super::replication::ReplicationStatus {
+        &self.replication
+    }
+
     /// Get access to the storage engine (for HTTP handlers).
     pub fn get_storage(&self) -> parking_lot::RwLockReadGuard<'_, StorageEngine> {
         self.storage.read()
@@ -1357,9 +1370,29 @@ impl Handler {
     /// Called once on server startup; until then no credential authenticates.
     /// `Err` when a supplied secret bootstrap would store is too short.
     pub fn bootstrap_auth(&self) -> Result<(), String> {
-        self.seed_admin_credentials()?;
+        // A follower's users and keys come from its primary's `_internal`.
+        if !self.storage.read().is_replica() {
+            self.seed_admin_credentials()?;
+        }
         self.load_credentials();
         Ok(())
+    }
+
+    /// Bring the credential registry to `_internal` without ending
+    /// unchanged credentials' sessions: on a follower, after its primary's
+    /// `_internal` changed.
+    pub fn sync_credentials(&self) {
+        let snapshot = self
+            .storage
+            .read()
+            .get_snapshot_for(crate::auth::INTERNAL_KG);
+        match snapshot {
+            Ok(snapshot) => {
+                let (users, keys) = crate::auth::stored_credentials(&snapshot.input_tuples);
+                self.credentials.sync(users, keys);
+            }
+            Err(e) => warn!(error = %e, "auth_credentials_sync_failed"),
+        }
     }
 
     /// Load every user and API key from `_internal` into the registry.
@@ -5800,7 +5833,7 @@ fn storage_error_code(error: &crate::storage::StorageError, default: ErrorCode) 
     use crate::storage::StorageError;
     match error {
         StorageError::OutcomeUnknown { .. } => ErrorCode::OutcomeUnknown,
-        StorageError::StoreReadOnly => ErrorCode::StoreReadOnly,
+        StorageError::StoreReadOnly | StorageError::ReadOnlyReplica => ErrorCode::StoreReadOnly,
         StorageError::MemoryBudgetExceeded { .. } => ErrorCode::ResourceExhausted,
         StorageError::KnowledgeGraphNotFound(_) | StorageError::RelationNotFound(..) => {
             ErrorCode::NotFound

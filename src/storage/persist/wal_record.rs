@@ -46,6 +46,18 @@ pub(super) fn encode(txn: &Transaction) -> StorageResult<Vec<u8>> {
     Ok(line)
 }
 
+/// Decode one complete record, with or without its trailing newline: the
+/// replication stream ships records in the WAL's own framing.
+///
+/// # Errors
+/// A torn or corrupt record, or one this server cannot decode.
+pub(super) fn decode_line(line: &[u8]) -> Result<Transaction, String> {
+    let content = line.strip_suffix(b"\n").unwrap_or(line);
+    decode(content, true).map_err(|invalid| match invalid {
+        Invalid::Torn(reason) | Invalid::Unreadable(reason) => reason,
+    })
+}
+
 /// What [`scan`] found in a WAL file.
 #[derive(Debug)]
 pub(super) struct Scan {

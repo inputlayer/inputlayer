@@ -127,6 +127,19 @@ impl StorageEngine {
     /// # Errors
     /// Reading a knowledge graph that is not loaded failed.
     pub fn capture_checkpoint(&self) -> BackupResult<Checkpoint> {
+        Ok(self.capture_checkpoint_at_lsn()?.0)
+    }
+
+    /// [`Self::capture_checkpoint`], with the replication log's head LSN
+    /// read under the loaded graphs' locks (0 when this engine is not a
+    /// primary). Every replication event is appended under one of those
+    /// locks, so the loaded graphs hold exactly the events up to that LSN; a
+    /// graph captured on its own after may hold later ones too, which
+    /// replaying from that LSN applies again without changing it.
+    ///
+    /// # Errors
+    /// Reading a knowledge graph that is not loaded failed.
+    pub fn capture_checkpoint_at_lsn(&self) -> BackupResult<(Checkpoint, u64)> {
         let start = Instant::now();
         let no_new_kgs = self.kg_set.write();
         let slots = self.slots();
@@ -134,6 +147,7 @@ impl StorageEngine {
         // Writers each take one KG lock, so read locks in any order cannot deadlock.
         let guards: Vec<_> = handles.iter().map(|kg| kg.read()).collect();
         let mut revision = self.logical_time.load(Ordering::SeqCst).saturating_sub(1);
+        let head = self.replication_log().map_or(0, |log| log.head());
         let mut knowledge_graphs: Vec<KgCheckpoint> = guards
             .iter()
             .filter(|kg| kg.retired.is_none())
@@ -173,7 +187,7 @@ impl StorageEngine {
             elapsed_ms = start.elapsed().as_millis() as u64,
             "checkpoint_captured"
         );
-        Ok(checkpoint)
+        Ok((checkpoint, head))
     }
 
     /// Capture `name` at its own revision, or `None` once it is dropped. A
