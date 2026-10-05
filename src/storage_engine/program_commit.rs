@@ -50,8 +50,7 @@ impl StorageEngine {
         control: Option<&RequestControl>,
     ) -> Result<ProgramCommit, CommitError> {
         self.persist.check_writable().map_err(CommitError::from)?;
-        let handle = self.kg_handle(kg).map_err(CommitError::from)?;
-        let mut db = Self::lock_live(&handle, kg).map_err(CommitError::from)?;
+        let mut db = self.lock_kg(kg).map_err(CommitError::from)?;
         let base = db.snapshot.load_full();
         if let Some(precondition) = control.and_then(RequestControl::precondition) {
             base.changes()

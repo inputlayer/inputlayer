@@ -1,27 +1,43 @@
 //! Online checkpoints: a consistent backup of a running engine.
 //!
-//! [`StorageEngine::capture_checkpoint`] takes every knowledge graph's read
-//! lock at once. Every commit assigns its revision and applies its changes
+//! Knowledge graphs are independent, so a checkpoint holds each one
+//! consistent at its own revision: every commit to it up to that revision,
+//! and none after.
+//!
+//! [`StorageEngine::capture_checkpoint`] takes every loaded knowledge graph's
+//! read lock at once. Every commit assigns its revision and applies its changes
 //! under its knowledge graph's write lock, so with all read locks held no
 //! commit is in flight: every revision assigned so far is fully applied (or
-//! failed and applied nothing), and the newest one names the checkpoint.
-//! Knowledge graph creation waits for the capture too, so a graph created
-//! meanwhile cannot hold a commit the checkpoint misses.
+//! failed and applied nothing), and the newest one is these graphs' revision.
+//! Knowledge graph creation waits for this capture too, so a graph created
+//! meanwhile cannot hold a commit the checkpoint misses. This capture only
+//! clones shared references (see [`Checkpoint`]), so it holds off commits for
+//! O(knowledge graphs + relations) work. Queries read published snapshots and
+//! do not take these locks.
 //!
-//! The capture only clones shared references (see [`Checkpoint`]), so it holds
-//! off commits for O(knowledge graphs + relations) work. Queries read
-//! published snapshots and do not take these locks.
+//! Each knowledge graph that was not loaded is then captured on its own: its
+//! slot is held, so it takes no commit, only while its revision, shard list
+//! and catalogs are read. Its facts are read from disk after, up to that
+//! revision, so a backup never keeps a request waiting for a knowledge graph
+//! to load.
 //!
 //! [`StorageEngine::start_checkpoint_export`] then writes the checkpoint on
 //! one background thread with no engine lock held. One export runs at a time;
 //! dropping the engine cancels a running export and waits for it to remove
 //! what it wrote.
 
+use super::catalog_change::apply_catalog_records;
+use super::residency::KgSlot;
 use super::{KnowledgeGraph, StorageEngine};
+use crate::index_manager::{IndexManager, INDEX_DEFINITIONS_FILE};
 use crate::storage::backup::{
     self, BackupError, BackupResult, Checkpoint, Export, KgCheckpoint, Report,
 };
+use crate::storage::persist::{consolidate_to_current, into_tuples, PersistBackend};
+use crate::storage::{KnowledgeGraphMetadata, StorageResult};
+use crate::value::{Relation, Tuple};
 use parking_lot::Mutex;
+use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -105,26 +121,40 @@ impl Drop for CheckpointExports {
 }
 
 impl StorageEngine {
-    /// Capture every knowledge graph's committed state at one revision; see
-    /// the module documentation for why it is consistent.
-    pub fn capture_checkpoint(&self) -> Checkpoint {
+    /// Capture every knowledge graph's committed state, each at its own
+    /// revision; see the module documentation for why each is consistent.
+    ///
+    /// # Errors
+    /// Reading a knowledge graph that is not loaded failed.
+    pub fn capture_checkpoint(&self) -> BackupResult<Checkpoint> {
         let start = Instant::now();
-        let _no_new_kgs = self.kg_set.write();
-        let handles: Vec<_> = self
-            .knowledge_graphs
-            .iter()
-            .map(|entry| Arc::clone(entry.value()))
-            .collect();
+        let no_new_kgs = self.kg_set.write();
+        let slots = self.slots();
+        let handles: Vec<_> = slots.iter().filter_map(|(_, slot)| slot.graph()).collect();
         // Writers each take one KG lock, so read locks in any order cannot deadlock.
         let guards: Vec<_> = handles.iter().map(|kg| kg.read()).collect();
-        let revision = self.logical_time.load(Ordering::SeqCst).saturating_sub(1);
+        let mut revision = self.logical_time.load(Ordering::SeqCst).saturating_sub(1);
         let mut knowledge_graphs: Vec<KgCheckpoint> = guards
             .iter()
-            .filter(|kg| !kg.dropped)
+            .filter(|kg| kg.retired.is_none())
             .map(|kg| capture_kg(kg))
             .collect();
         drop(guards);
+        drop(no_new_kgs);
         let capture_time = start.elapsed();
+
+        // Unloaded (or dropped) while not held: each of the rest on its own.
+        let captured: std::collections::HashSet<String> =
+            knowledge_graphs.iter().map(|kg| kg.name.clone()).collect();
+        for (name, slot) in &slots {
+            if captured.contains(name) {
+                continue;
+            }
+            if let Some((kg, at)) = self.capture_alone(name, slot)? {
+                revision = revision.max(at);
+                knowledge_graphs.push(kg);
+            }
+        }
 
         knowledge_graphs.sort_by(|a, b| a.name.cmp(&b.name));
         for kg in &mut knowledge_graphs {
@@ -140,9 +170,97 @@ impl StorageEngine {
             knowledge_graphs = checkpoint.knowledge_graphs.len(),
             tuples = checkpoint.tuple_count(),
             capture_us = capture_time.as_micros() as u64,
+            elapsed_ms = start.elapsed().as_millis() as u64,
             "checkpoint_captured"
         );
-        checkpoint
+        Ok(checkpoint)
+    }
+
+    /// Capture `name` at its own revision, or `None` once it is dropped. A
+    /// loaded graph is captured under its read lock. A dormant one is held
+    /// only while its revision, shards and catalogs are read, then its facts
+    /// are read up to that revision; a shard dropped meanwhile starts it over.
+    fn capture_alone(
+        &self,
+        name: &str,
+        slot: &KgSlot,
+    ) -> BackupResult<Option<(KgCheckpoint, u64)>> {
+        loop {
+            let held = slot.hold();
+            if let Some(graph) = held.graph() {
+                let kg = graph.read();
+                let revision = self.logical_time.load(Ordering::SeqCst).saturating_sub(1);
+                return Ok(kg.retired.is_none().then(|| (capture_kg(&kg), revision)));
+            }
+            let Some(dormant) = held.dormant() else {
+                return Ok(None);
+            };
+            // Held: no commit to it is in flight, and any later one gets a
+            // later revision.
+            let revision = self.logical_time.load(Ordering::SeqCst).saturating_sub(1);
+            let mut shards = Vec::new();
+            for (shard, relation) in self.live_shards(name, dormant) {
+                if self.persist.has_shard(shard) {
+                    let since = self.persist.shard_info(shard)?.since;
+                    shards.push((shard.clone(), relation.clone(), since));
+                }
+            }
+            let data_dir = self.config.storage.data_dir.join(name);
+            let (mut rules, mut schemas) = KnowledgeGraph::load_catalogs(name, &data_dir)?;
+            apply_catalog_records(&mut rules, &mut schemas, dormant.catalog.iter());
+            let indexes = IndexManager::load_definitions(&data_dir.join(INDEX_DEFINITIONS_FILE))
+                .unwrap_or_else(|e| {
+                    warn!(kg = %name, error = %e, "index_definitions_load_failed");
+                    Vec::new()
+                });
+            let created_at = held
+                .created_at()
+                .unwrap_or_else(|| KnowledgeGraphMetadata::new(name.to_string()).created_at);
+            drop(held);
+
+            #[cfg(test)]
+            BEFORE_DORMANT_READ.with(|hook| hook.borrow_mut().as_mut().map(|hook| hook(name)));
+            let relations: Option<Vec<(String, Vec<Tuple>)>> = shards
+                .par_iter()
+                .map(|(shard, relation, since)| {
+                    let tuples = self.read_shard_at(shard, *since, revision)?;
+                    Ok(tuples.map(|tuples| (relation.clone(), tuples)))
+                })
+                .collect::<StorageResult<_>>()?;
+            let Some(relations) = relations else {
+                continue;
+            };
+            let kg = KgCheckpoint {
+                name: name.to_string(),
+                created_at,
+                relations: relations
+                    .into_iter()
+                    .filter(|(_, tuples)| !tuples.is_empty())
+                    .map(|(relation, tuples)| (relation, Relation::from(tuples)))
+                    .collect(),
+                rules: rules.detached(),
+                schemas,
+                indexes,
+            };
+            return Ok(Some((kg, revision)));
+        }
+    }
+
+    /// The facts `shard` holds at `revision`, or `None` once it is deleted.
+    fn read_shard_at(
+        &self,
+        shard: &str,
+        since: u64,
+        revision: u64,
+    ) -> StorageResult<Option<Vec<Tuple>>> {
+        let mut updates = match self.persist.read(shard, since) {
+            Ok(updates) => updates,
+            Err(_) if !self.persist.has_shard(shard) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        updates.retain(|update| update.time <= revision);
+        consolidate_to_current(&mut updates);
+        Ok(Some(into_tuples(updates)))
     }
 
     /// Where an export named `name` (or a time-derived name) goes: inside
@@ -174,7 +292,13 @@ impl StorageEngine {
         }
         let export = Export::claim(dest, &self.config.storage.data_dir)?;
         let dir = export.dir().to_path_buf();
-        let checkpoint = self.capture_checkpoint();
+        let checkpoint = match self.capture_checkpoint() {
+            Ok(checkpoint) => checkpoint,
+            Err(e) => {
+                export.abandon()?;
+                return Err(e);
+            }
+        };
         let (revision, capture_time) = (checkpoint.revision, checkpoint.capture_time);
         let (done_tx, done) = mpsc::channel();
 
@@ -253,6 +377,14 @@ fn capture_kg(kg: &KnowledgeGraph) -> KgCheckpoint {
         schemas,
         indexes: kg.indexes.definitions(),
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Run by a capture on this thread after it releases a dormant knowledge
+    /// graph's slot and before it reads its facts.
+    pub(super) static BEFORE_DORMANT_READ: std::cell::RefCell<Option<Box<dyn FnMut(&str)>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 fn log_outcome(dir: &Path, revision: u64, result: &BackupResult<Report>) {

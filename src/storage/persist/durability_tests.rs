@@ -356,3 +356,116 @@ fn durability_existing_root_opens_under_unreadable_ancestor() {
     let recovered = crash_and_reopen(persist, &root);
     assert_eq!(facts(&recovered), [(fact(1), 1)]);
 }
+
+/// Facts of `shard`, consolidated, without multiplicities.
+fn shard_facts(persist: &FilePersist, shard: &str) -> Vec<Tuple> {
+    let mut updates = persist.read(shard, 0).unwrap();
+    consolidate_to_current(&mut updates);
+    let mut tuples = to_tuples(&updates);
+    tuples.sort();
+    tuples
+}
+
+/// After a crash with many shards in the WAL, startup flushes them all and
+/// rewrites the WAL once, not once per shard, and a second crash replays
+/// nothing twice.
+#[test]
+fn startup_drain_of_many_shards_rewrites_the_wal_once() {
+    let temp = TempDir::new().unwrap();
+    let persist = open(temp.path(), 1000);
+    let shards: Vec<String> = (0..40).map(|i| format!("kg:r{i}")).collect();
+    for (i, shard) in shards.iter().enumerate() {
+        let mut txn = Transaction::new(i as u64 + 1);
+        txn.insert(shard.clone(), [fact(i as i32), fact(-1)]);
+        persist.commit(txn).unwrap();
+    }
+    let mut txn = Transaction::new(100);
+    txn.delete(shards[0].clone(), [fact(-1)]);
+    persist.commit(txn).unwrap();
+    assert_eq!(wal_records(temp.path()), 41);
+
+    let reopened = crash_and_reopen(persist, temp.path());
+    assert_eq!(reopened.wal.lock().rewrites, 1);
+    assert_eq!(wal_records(temp.path()), 0);
+    let expected = |i: usize| {
+        let mut facts = vec![fact(i as i32)];
+        if i > 0 {
+            facts.push(fact(-1));
+        }
+        facts.sort();
+        facts
+    };
+    for (i, shard) in shards.iter().enumerate() {
+        assert_eq!(shard_facts(&reopened, shard), expected(i), "{shard}");
+    }
+
+    let reopened = crash_and_reopen(reopened, temp.path());
+    for (i, shard) in shards.iter().enumerate() {
+        assert_eq!(shard_facts(&reopened, shard), expected(i), "{shard}");
+    }
+}
+
+/// The WAL size limit flushes every dirty shard with one WAL rewrite.
+#[test]
+fn wal_size_limit_flushes_every_dirty_shard_with_one_rewrite() {
+    let temp = TempDir::new().unwrap();
+    let persist = FilePersist::new(PersistConfig {
+        path: temp.path().to_path_buf(),
+        buffer_size: 1000,
+        durability_mode: DurabilityMode::Immediate,
+        max_wal_size_bytes: 1,
+    })
+    .unwrap();
+    for i in 0..8 {
+        let mut txn = Transaction::new(i + 1);
+        // The last commit carries every shard over the limit at once.
+        for shard in 0..=(i / 7) * 7 {
+            txn.insert(format!("kg:s{shard}"), [fact(i as i32)]);
+        }
+        persist.commit(txn).unwrap();
+    }
+    assert_eq!(wal_records(temp.path()), 0);
+    let rewrites = persist.wal.lock().rewrites;
+    assert_eq!(rewrites, 8, "one rewrite per commit over the limit");
+    let reopened = crash_and_reopen(persist, temp.path());
+    assert_eq!(
+        shard_facts(&reopened, "kg:s0"),
+        (0..8).map(fact).collect::<Vec<_>>()
+    );
+    for shard in 1..=7 {
+        assert_eq!(shard_facts(&reopened, &format!("kg:s{shard}")), [fact(7)]);
+    }
+}
+
+/// A read takes no lock while it reads batch files: a compaction that removes
+/// them meanwhile makes it start over, and it still sees every fact.
+#[test]
+fn read_racing_compaction_sees_every_fact() {
+    let temp = TempDir::new().unwrap();
+    let persist = Arc::new(open(temp.path(), 1000));
+    let expected: Vec<Tuple> = (0..200).map(fact).collect();
+    for (i, tuple) in expected.iter().enumerate() {
+        let mut txn = Transaction::new(i as u64 + 1);
+        txn.insert(SHARD, [tuple.clone()]);
+        persist.commit(txn).unwrap();
+        persist.flush(SHARD).unwrap();
+    }
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let compactor = {
+        let persist = Arc::clone(&persist);
+        let done = Arc::clone(&done);
+        std::thread::spawn(move || {
+            let mut rounds = 0;
+            while !done.load(Ordering::Relaxed) {
+                persist.compact(SHARD, 0).unwrap();
+                rounds += 1;
+            }
+            rounds
+        })
+    };
+    for _ in 0..200 {
+        assert_eq!(shard_facts(&persist, SHARD), expected);
+    }
+    done.store(true, Ordering::Relaxed);
+    assert!(compactor.join().unwrap() > 0);
+}

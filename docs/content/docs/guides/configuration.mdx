@@ -34,6 +34,16 @@ auto_create_knowledge_graphs = false
 # Maximum number of knowledge graphs (default: 1000)
 max_knowledge_graphs = 1000
 
+# Knowledge graphs load into memory on first use, not at startup, so a
+# restart is ready after reading metadata only. Most knowledge graphs held
+# in memory at once (0 = no limit, the default): past it, loading one unloads
+# the least recently used ones that nothing is using.
+max_loaded_knowledge_graphs = 0
+
+# Unload a knowledge graph nothing has used for this many seconds
+# (0 = never, the default). It loads again on its next use.
+unload_idle_after_secs = 0
+
 # Directory for online checkpoint exports (`.backup`), outside data_dir.
 # Unset (default) disables `.backup`.
 # backup_dir = "/var/backups/inputlayer"
@@ -392,6 +402,11 @@ num_threads = 0
 ### Memory-Constrained Environment
 
 ```toml
+[storage]
+# Keep at most 50 knowledge graphs in memory, and unload any idle for 10 minutes
+max_loaded_knowledge_graphs = 50
+unload_idle_after_secs = 600
+
 [storage.performance]
 initial_capacity = 1000
 batch_size = 100
@@ -399,6 +414,12 @@ batch_size = 100
 [storage.persist]
 buffer_size = 1000
 ```
+
+A knowledge graph stays in memory while anything uses it: a running request, a
+query still reading its snapshot, or a standing subscription. One holding state
+that is not on disk (session schemas, the incremental engine, vector indexes)
+also stays. Unloading is otherwise invisible: the next use loads the same
+state under the same revision, at the cost of reading it from disk.
 
 ## Durability Modes Explained
 

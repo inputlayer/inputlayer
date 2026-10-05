@@ -22,7 +22,7 @@ use futures_util::future::BoxFuture;
 use crate::protocol::rest::handlers::wire_value_to_json;
 use crate::protocol::Handler;
 use crate::statement::{parse_query, QueryGoal};
-use crate::storage_engine::KnowledgeGraphSnapshot;
+use crate::storage_engine::{KgPin, KnowledgeGraphSnapshot};
 
 use super::{Dependencies, QueryRefresh, Refresh, ResultSet, Row, StandingQuery};
 
@@ -35,6 +35,9 @@ pub struct ReevaluatingQuery {
     columns: Vec<String>,
     /// The last complete result.
     current: Arc<ResultSet>,
+    /// Keeps the knowledge graph loaded while the query stands, so a write
+    /// after a quiet spell does not wait for it to load again.
+    _pin: Option<KgPin>,
 }
 
 /// A query's complete result on one snapshot, before it is diffed.
@@ -66,6 +69,11 @@ impl ReevaluatingQuery {
                     .to_string(),
             );
         }
+        // A missing knowledge graph fails at evaluation, with its error.
+        let pin = handler
+            .get_storage()
+            .pin_knowledge_graph(knowledge_graph)
+            .ok();
         Ok(Self {
             handler,
             knowledge_graph: knowledge_graph.to_string(),
@@ -73,6 +81,7 @@ impl ReevaluatingQuery {
             goal,
             columns: Vec::new(),
             current: Arc::default(),
+            _pin: pin,
         })
     }
 

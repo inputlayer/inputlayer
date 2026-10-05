@@ -1,12 +1,12 @@
 //! Writing a [`Checkpoint`] out as a backup.
 //!
 //! The export is a complete, compacted data directory holding exactly the
-//! checkpoint's revision: one batch file per relation with every fact at that
-//! revision, no WAL, each knowledge graph's rule, schema and index
-//! catalogs, and the knowledge graph listing. The manifest is written last and
-//! records the revision, so [`verify`](super::verify) and
-//! [`restore`](super::restore) handle an export like any other backup, and
-//! the engine loads it as it loads any data directory.
+//! checkpoint: one batch file per relation with every fact its knowledge
+//! graph held at its own revision, no WAL, each knowledge graph's rule,
+//! schema and index catalogs, and the knowledge graph listing. The manifest
+//! is written last and records the revision, so [`verify`](super::verify)
+//! and [`restore`](super::restore) handle an export like any other backup,
+//! and the engine loads it as it loads any data directory.
 //!
 //! The destination is claimed ([`Export::claim`]) before the checkpoint is
 //! captured, so a refused destination is reported at once.

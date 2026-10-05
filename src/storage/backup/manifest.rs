@@ -46,8 +46,9 @@ pub struct Manifest {
     pub created_at: String,
     /// Data directory the backup was taken from.
     pub source: PathBuf,
-    /// The committed revision an online export holds: every commit up to
-    /// it and none after. `None` for an offline copy of a stopped server.
+    /// The newest committed revision an online export holds. Each knowledge
+    /// graph holds every commit to it up to its own revision, at most this
+    /// one, and none after. `None` for an offline copy of a stopped server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<u64>,
     /// Every directory, relative and `/`-separated, parents before children.
@@ -72,8 +73,8 @@ impl Manifest {
         }
     }
 
-    /// The same manifest, recording that the backup holds exactly the
-    /// committed state at `revision`.
+    /// The same manifest, recording that the backup holds committed state
+    /// up to `revision`, each knowledge graph at its own revision.
     #[must_use]
     pub fn at_revision(mut self, revision: u64) -> Self {
         self.revision = Some(revision);

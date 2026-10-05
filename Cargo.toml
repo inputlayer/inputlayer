@@ -59,7 +59,7 @@ rayon = "1.10"
 num_cpus = "1.16"
 
 # High-performance synchronization
-parking_lot = "0.12"
+parking_lot = { version = "0.12", features = ["arc_lock"] }
 arc-swap = "1.7"
 dashmap = "5.5"
 
@@ -194,6 +194,11 @@ harness = false
 [[bench]]
 name = "startup_benchmarks"
 path = "benches/startup_benchmarks.rs"
+harness = false
+
+[[bench]]
+name = "restart_benchmarks"
+path = "benches/restart_benchmarks.rs"
 harness = false
 
 [[bench]]
