@@ -139,11 +139,12 @@ make e2e-reactive                                   # release build, writes late
 INPUTLAYER_SCENARIO_VIEWS=maintained cargo test --test scenarios  # refused until V2 (#309)
 ```
 
-Modules: `reactive`, `stream`, `delivery` and `wire` (the agent path below),
-and `harness` (the testkit pieces scenarios build on, checked against a real
-engine). The suite runs in about 25 s in debug on 4 cores. `make test-all` and
-`make ci-test-all` run it once, in release through `make e2e-reactive`: their
-debug unit stage runs every other workspace test without the scenarios binary.
+Modules: `reactive`, `stream`, `delivery`, `saturation` and `wire` (the agent
+path below), and `harness` (the testkit pieces scenarios build on, checked
+against a real engine). The suite runs in about 25 s in debug on 4 cores.
+`make test-all` and `make ci-test-all` run it once, in release through
+`make e2e-reactive`: their debug unit stage runs every other workspace test
+without the scenarios binary.
 
 ### Harness
 
