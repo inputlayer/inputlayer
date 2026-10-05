@@ -31,6 +31,7 @@ make perf-gate-remote                           # the gate for HEAD (commit firs
 make perf-gate-remote REV=<commit> PERF_GATE_ARGS="--aa --rounds 20"
 make pre-pr PRE_PR_PERF=perf-gate-remote        # pre-pr with the gate measured there
 make bench-engine-remote REV=origin/main        # the engine suite (below), not judged
+make bench-sessions-remote REV=origin/main      # the session-scale benchmark (below)
 ```
 
 `scripts/perf-gate-remote.sh` fetches the commit into the host's clone
@@ -132,8 +133,8 @@ both groups, and the default stays the gate's eight.
 
 `delta_single`, `delta_fanout` and `delta_first` already cover write-to-delta
 latency with one and with 64 agents on one query; `sessions` adds many
-sessions with different bound queries in one graph, where every commit
-re-evaluates each session's view. Every fixture records
+sessions with different bound queries in one graph, at a gentle write rate.
+The session-scale benchmark (below) loads them until they saturate. Every fixture records
 `server_peak_rss_kb`.
 
 ## How it judges

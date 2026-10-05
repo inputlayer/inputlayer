@@ -15,6 +15,7 @@ make pre-pr         # Before every push to a PR: formatting and affected compone
 make perf-gate      # Performance gate: this tree vs the approved baseline (same host)
 make perf-gate-remote     # The same gate for HEAD on the benchmark host (heavy runs go there)
 make bench-engine-remote  # Engine suite on the benchmark host: absolute numbers, not judged
+make bench-sessions-remote  # Session-scale benchmark on the benchmark host
 make bench-genbi    # Reactive agent benchmark on genbi-trust (needs GENBI_TRUST_DIR)
 make oracle-test    # Differential correctness oracle only (~15s)
 ```
