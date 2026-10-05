@@ -36,9 +36,11 @@
 //! shares while its views' own evaluations fit on the compute permits at
 //! once. Otherwise it shares while a round is, on average, no slower than
 //! those evaluations run in parallel on the permits, or does at most half
-//! their combined work: the views' own evaluations take the compute permits
-//! every request needs, so saving them a little latency on an idle server
-//! must not cost the server many times the work. Costs leave out waiting
+//! their combined work and is at most twice as slow as them in parallel:
+//! the views' own evaluations take the compute permits every request needs,
+//! so saving them a little latency on an idle server must not cost the
+//! server many times the work, and saving the server work must not make
+//! every delta wait many times longer. Costs leave out waiting
 //! for a permit and compiling a plan, and a view's own cost counts only
 //! evaluations that reused a compiled plan. Costs hold under the rules they
 //! were measured with: a rule change stops sharing and starts them over. A
@@ -102,15 +104,20 @@ const SAMPLE_EVERY: u64 = 64;
 /// by this keeps sharing, however soon they would finish in parallel.
 const SHARED_WORK_DIVISOR: u64 = 2;
 
+/// A round keeps sharing for the work it saves only while it is at most
+/// this many times slower than its views' own evaluations in parallel.
+const SHARED_SLOWDOWN: u64 = 2;
+
 /// Whether a family keeps sharing with rounds of `shared_us`, against its
 /// `bindings` views' own evaluations of `own_us` each on `permits` compute
 /// permits: while a round is no slower than those evaluations run `permits`
 /// at a time, or does at most their combined work divided by
-/// [`SHARED_WORK_DIVISOR`].
+/// [`SHARED_WORK_DIVISOR`] and is at most [`SHARED_SLOWDOWN`] times slower
+/// than them run `permits` at a time.
 fn keeps_sharing(shared_us: u64, own_us: u64, bindings: u64, permits: u64) -> bool {
     let parallel = own_us.saturating_mul(bindings.div_ceil(permits.max(1)).max(1));
     let combined = own_us.saturating_mul(bindings) / SHARED_WORK_DIVISOR;
-    shared_us <= parallel.max(combined)
+    shared_us <= parallel.max(combined).min(parallel.saturating_mul(SHARED_SLOWDOWN))
 }
 
 /// Fold `cost` into the running `average` of costs in microseconds (0: none

@@ -170,6 +170,18 @@ fn a_round_shares_while_it_does_at_most_half_the_views_combined_work() {
 }
 
 #[test]
+fn a_round_saving_work_shares_while_at_most_twice_as_slow_as_the_views_in_parallel() {
+    // 1,000 bindings of 1ms on 18 permits: 56 waves of own evaluations take
+    // 56ms, and 1s of work in all.
+    assert!(keeps_sharing(112_000, 1_000, 1_000, 18), "twice as slow");
+    assert!(!keeps_sharing(112_001, 1_000, 1_000, 18), "slower");
+    assert!(
+        !keeps_sharing(450_000, 1_000, 1_000, 18),
+        "under half the work, but eight times as slow"
+    );
+}
+
+#[test]
 fn costs_are_smoothed_so_one_outlier_does_not_decide() {
     let average = AtomicU64::new(0);
     assert_eq!(smooth(&average, Duration::from_micros(800)), 800, "first");
