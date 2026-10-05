@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import concurrent.futures
 import logging
 import threading
 from collections.abc import Coroutine
@@ -63,7 +64,13 @@ class _LoopThread:
             )
         loop = self._ensure_running()
         future = asyncio.run_coroutine_threadsafe(coro, loop)
-        return future.result(timeout=self._timeout)
+        try:
+            return future.result(timeout=self._timeout)
+        except concurrent.futures.TimeoutError as e:
+            # Python 3.10's concurrent.futures.TimeoutError is not the
+            # builtin TimeoutError (they merged in 3.11); raise the builtin
+            # so callers catch the same type on every supported version.
+            raise TimeoutError from e
 
     def shutdown(self) -> None:
         """Stop the background loop and join the thread."""
