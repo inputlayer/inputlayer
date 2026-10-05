@@ -33,7 +33,7 @@ pub struct IndexProofInfo {
 pub struct ProofContext<'a> {
     /// All rules in the knowledge graph
     pub rules: &'a [Rule],
-    /// Base relations, including valid materializations of derived relations.
+    /// Base relations.
     pub base_data: ProofRelations<'a>,
     /// Derived relations from the evaluation that produced the results.
     pub derived_data: Option<ProofRelations<'a>>,
@@ -70,7 +70,7 @@ impl<'a> ProofContext<'a> {
         }
     }
 
-    /// Set derived/materialized relation data for candidate lookup.
+    /// Set the derived relation data the evaluation produced, for candidate lookup.
     pub fn with_derived_data(mut self, derived_data: &'a RelationMap) -> Self {
         self.derived_data = Some(ProofRelations::new(derived_data));
         self
@@ -332,7 +332,7 @@ pub(crate) fn build_node(
     }
 
     // Fallback: if no rule proof found but tuple exists in derived_data,
-    // record it as a fact (the engine materialized it but we can't trace further)
+    // record it as a fact (the evaluation derived it but we can't trace further)
     if result_ids.is_empty() && in_derived {
         let id = builder.insert(ProofNode {
             kind: NodeKind::Fact,

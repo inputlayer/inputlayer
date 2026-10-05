@@ -1,12 +1,12 @@
-//! Base-relation mirror (not used on the server path)
+//! Long-lived differential dataflow worker for one knowledge graph.
 //!
-//! `IncrementalEngine` mirrors the base relations of one knowledge graph in a
-//! long-lived timely worker thread with Differential Dataflow InputSessions
-//! and arrangements. No rule is compiled into it: it holds base relations
-//! only. It is enabled only by tests (`KnowledgeGraph::enable_incremental`);
-//! production storage engines leave it off, so persistent rules are
-//! re-derived from base facts on every query. Keeping deployed rules as
-//! maintained views is milestone 9 (issue #305).
+//! `IncrementalEngine` owns a timely worker thread with one Differential
+//! Dataflow `InputSession` and arrangement per base relation, fed through a
+//! command channel. Nothing in the server uses it yet: persistent rules are
+//! stored definitions that every read evaluates from the base facts in a
+//! fresh dataflow (recompute-on-read, see `storage_engine::snapshot`). This
+//! worker skeleton is the seed of the per-graph view maintainer that will
+//! keep deployed rules as incrementally maintained arrangements.
 //!
 //! ## Architecture
 //!
@@ -15,7 +15,6 @@
 //!                              ├─ InputSessions (one per base relation)
 //!                              ├─ Arrangements (queryable via cursor)
 //!                              └─ Command loop (steps and compacts per window)
-//! Main thread --mutex--------► DerivedRelationsManager (rule tracking)
 //! ```
 //!
 //! ## Thread Safety
@@ -25,7 +24,6 @@
 //! command channel. Writes are queued sends; the channel holds 1024 commands,
 //! so a worker that falls behind blocks writers.
 
-use crate::derived_relations::{CompiledRule, DerivedRelationsManager};
 use crate::value::Tuple;
 use crossbeam_channel as channel;
 use parking_lot::Mutex;
@@ -101,7 +99,6 @@ pub struct IncrementalEngine {
     current_time: Arc<AtomicU64>,
     max_write_time: Arc<AtomicU64>,
     known_relations: Mutex<HashSet<String>>,
-    derived_relations: Arc<Mutex<DerivedRelationsManager>>,
 }
 
 impl IncrementalEngine {
@@ -113,7 +110,6 @@ impl IncrementalEngine {
         let current_time = Arc::new(AtomicU64::new(0));
         let max_write_time = Arc::new(AtomicU64::new(0));
         let known_relations = Mutex::new(relations.iter().cloned().collect());
-        let derived_relations = Arc::new(Mutex::new(DerivedRelationsManager::new()));
 
         let worker_handle = std::thread::Builder::new()
             .name("incremental-worker".to_string())
@@ -129,7 +125,6 @@ impl IncrementalEngine {
             current_time,
             max_write_time,
             known_relations,
-            derived_relations,
         })
     }
 
@@ -428,62 +423,6 @@ impl IncrementalEngine {
             .map_err(|_| "Worker disconnected while reading trace".to_string())
     }
 
-    // === Derived Relations API ===
-
-    /// Register a compiled rule for materialization.
-    pub fn register_rule(&self, rule: CompiledRule) -> Result<(), String> {
-        self.derived_relations.lock().register_rule(rule);
-        Ok(())
-    }
-
-    /// Remove a rule and its materialization.
-    pub fn remove_rule(&self, name: &str) -> Result<(), String> {
-        self.derived_relations.lock().remove_rule(name);
-        Ok(())
-    }
-
-    /// Read materialized data for a derived relation.
-    pub fn read_derived_relation(&self, relation: &str) -> Result<Option<Vec<Tuple>>, String> {
-        Ok(self
-            .derived_relations
-            .lock()
-            .get_materialized(relation)
-            .map(|m| m.tuples.clone()))
-    }
-
-    /// Set materialized data for a derived relation.
-    pub fn set_materialized(&self, relation: &str, tuples: Vec<Tuple>) -> Result<(), String> {
-        self.derived_relations
-            .lock()
-            .set_materialized(relation, tuples);
-        Ok(())
-    }
-
-    /// Notify that a base relation was updated. Returns invalidated relation names.
-    pub fn notify_base_update(&self, relation: &str) -> Result<Vec<String>, String> {
-        Ok(self.derived_relations.lock().notify_base_update(relation))
-    }
-
-    /// Get (total_rules, materialized_count, invalid_count).
-    pub fn get_derived_stats(&self) -> Result<(usize, usize, usize), String> {
-        let stats = self.derived_relations.lock().stats();
-        Ok((
-            stats.total_rules,
-            stats.materialized_count,
-            stats.invalid_count,
-        ))
-    }
-
-    /// Check if a relation is derived (has a registered rule).
-    pub fn is_derived_relation(&self, name: &str) -> bool {
-        self.derived_relations.lock().is_derived(name)
-    }
-
-    /// Get direct access to the derived relations manager.
-    pub fn derived_relations(&self) -> Arc<Mutex<DerivedRelationsManager>> {
-        Arc::clone(&self.derived_relations)
-    }
-
     /// Shut down the computation cleanly.
     pub fn shutdown(mut self) -> Result<(), String> {
         let (tx, rx) = channel::bounded(1);
@@ -662,78 +601,6 @@ mod tests {
         drop(engine);
     }
 
-    fn make_compiled_rule(name: &str, deps: Vec<&str>) -> CompiledRule {
-        CompiledRule {
-            name: name.to_string(),
-            clauses: vec![],
-            dependencies: deps.into_iter().map(|s| s.to_string()).collect(),
-            is_recursive: false,
-            output_schema: vec![],
-            stratum: 0,
-        }
-    }
-
-    #[test]
-    fn test_register_rule() {
-        let engine = IncrementalEngine::new(vec!["edge".to_string()]).unwrap();
-        let rule = make_compiled_rule("path", vec!["edge"]);
-        engine.register_rule(rule).unwrap();
-        assert!(engine.is_derived_relation("path"));
-        assert!(!engine.is_derived_relation("edge"));
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
-    fn test_materialization() {
-        let engine = IncrementalEngine::new(vec![]).unwrap();
-        let rule = make_compiled_rule("path", vec!["edge"]);
-        engine.register_rule(rule).unwrap();
-        assert!(engine.read_derived_relation("path").unwrap().is_none());
-
-        let tuples = vec![
-            Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
-            Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
-        ];
-        engine.set_materialized("path", tuples).unwrap();
-        let result = engine.read_derived_relation("path").unwrap().unwrap();
-        assert_eq!(result.len(), 2);
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
-    fn test_invalidation() {
-        let engine = IncrementalEngine::new(vec![]).unwrap();
-        let rule = make_compiled_rule("path", vec!["edge"]);
-        engine.register_rule(rule).unwrap();
-        engine
-            .set_materialized("path", vec![Tuple::new(vec![Value::Int32(1)])])
-            .unwrap();
-        assert!(engine.read_derived_relation("path").unwrap().is_some());
-
-        let invalidated = engine.notify_base_update("edge").unwrap();
-        assert!(invalidated.contains(&"path".to_string()));
-        assert!(engine.read_derived_relation("path").unwrap().is_none());
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
-    fn test_derived_stats() {
-        let engine = IncrementalEngine::new(vec![]).unwrap();
-        let (total, mat, inv) = engine.get_derived_stats().unwrap();
-        assert_eq!((total, mat, inv), (0, 0, 0));
-
-        let rule = make_compiled_rule("path", vec!["edge"]);
-        engine.register_rule(rule).unwrap();
-        let (total, mat, inv) = engine.get_derived_stats().unwrap();
-        assert_eq!((total, mat), (1, 0));
-        assert_eq!(inv, 1);
-
-        engine.set_materialized("path", vec![]).unwrap();
-        let (total, mat, inv) = engine.get_derived_stats().unwrap();
-        assert_eq!((total, mat, inv), (1, 1, 0));
-        engine.shutdown().unwrap();
-    }
-
     // =========================================================================
     // Stress Tests: IncrementalEngine High-Throughput & Concurrency
     // =========================================================================
@@ -894,68 +761,6 @@ mod tests {
     }
 
     #[test]
-    fn stress_multiple_rules_same_base() {
-        let engine = IncrementalEngine::new(vec!["edge".to_string()]).unwrap();
-
-        // Register 5 rules all depending on "edge"
-        for i in 0..5 {
-            let rule = make_compiled_rule(&format!("derived_{i}"), vec!["edge"]);
-            engine.register_rule(rule).unwrap();
-        }
-
-        // Materialize all
-        for i in 0..5 {
-            engine
-                .set_materialized(
-                    &format!("derived_{i}"),
-                    vec![Tuple::new(vec![Value::Int32(i)])],
-                )
-                .unwrap();
-        }
-
-        // Verify all materialized
-        for i in 0..5 {
-            assert!(engine
-                .read_derived_relation(&format!("derived_{i}"))
-                .unwrap()
-                .is_some());
-        }
-
-        // Update base → should invalidate all 5
-        let invalidated = engine.notify_base_update("edge").unwrap();
-        assert_eq!(invalidated.len(), 5);
-
-        // All should be invalidated now
-        for i in 0..5 {
-            assert!(engine
-                .read_derived_relation(&format!("derived_{i}"))
-                .unwrap()
-                .is_none());
-        }
-
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
-    fn stress_rule_register_remove_cycle() {
-        let engine = IncrementalEngine::new(vec!["base".to_string()]).unwrap();
-
-        for i in 0..20 {
-            let name = format!("rule_{i}");
-            let rule = make_compiled_rule(&name, vec!["base"]);
-            engine.register_rule(rule).unwrap();
-            assert!(engine.is_derived_relation(&name));
-
-            engine.remove_rule(&name).unwrap();
-            assert!(!engine.is_derived_relation(&name));
-        }
-
-        let (total, _, _) = engine.get_derived_stats().unwrap();
-        assert_eq!(total, 0);
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
     fn stress_large_tuple_batches() {
         let engine = IncrementalEngine::new(vec!["wide".to_string()]).unwrap();
 
@@ -1088,26 +893,6 @@ mod tests {
         engine.shutdown().unwrap();
     }
 
-    #[test]
-    fn stress_derived_materialization_refresh() {
-        let engine = IncrementalEngine::new(vec!["base".to_string()]).unwrap();
-
-        let rule = make_compiled_rule("derived", vec!["base"]);
-        engine.register_rule(rule).unwrap();
-
-        // Simulate 10 cycles of: materialize → invalidate → re-materialize
-        for cycle in 0..10 {
-            let mat_data = vec![Tuple::new(vec![Value::Int32(cycle)])];
-            engine.set_materialized("derived", mat_data).unwrap();
-            assert!(engine.read_derived_relation("derived").unwrap().is_some());
-
-            engine.notify_base_update("base").unwrap();
-            assert!(engine.read_derived_relation("derived").unwrap().is_none());
-        }
-
-        engine.shutdown().unwrap();
-    }
-
     // Batch 20: Index lifecycle, accessors, edge cases
 
     #[test]
@@ -1136,15 +921,6 @@ mod tests {
     }
 
     #[test]
-    fn test_derived_relations_accessor() {
-        let engine = IncrementalEngine::new(vec!["base".to_string()]).unwrap();
-        let dr = engine.derived_relations();
-        // Just verify the accessor returns an Arc and we can lock it
-        let _guard = dr.lock();
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
     fn test_ensure_relation_new() {
         let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
         engine.ensure_relation("new_rel").unwrap();
@@ -1163,48 +939,6 @@ mod tests {
         let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
         // Should not error for existing relation
         engine.ensure_relation("data").unwrap();
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
-    fn test_is_derived_relation() {
-        let engine = IncrementalEngine::new(vec!["base".to_string()]).unwrap();
-        assert!(!engine.is_derived_relation("base"));
-
-        let rule = make_compiled_rule("derived", vec!["base"]);
-        engine.register_rule(rule).unwrap();
-        assert!(engine.is_derived_relation("derived"));
-
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
-    fn test_get_derived_stats() {
-        let engine = IncrementalEngine::new(vec!["base".to_string()]).unwrap();
-        let (total, mat, inval) = engine.get_derived_stats().unwrap();
-        assert_eq!(total, 0);
-        assert_eq!(mat, 0);
-        assert_eq!(inval, 0);
-
-        let rule = make_compiled_rule("derived", vec!["base"]);
-        engine.register_rule(rule).unwrap();
-        let (total2, _, _) = engine.get_derived_stats().unwrap();
-        assert_eq!(total2, 1);
-
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
-    fn test_remove_rule() {
-        let engine = IncrementalEngine::new(vec!["base".to_string()]).unwrap();
-
-        let rule = make_compiled_rule("view", vec!["base"]);
-        engine.register_rule(rule).unwrap();
-        assert!(engine.is_derived_relation("view"));
-
-        engine.remove_rule("view").unwrap();
-        assert!(!engine.is_derived_relation("view"));
-
         engine.shutdown().unwrap();
     }
 

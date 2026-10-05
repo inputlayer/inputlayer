@@ -105,7 +105,6 @@ static ALLOCATOR: execution::memory::MeteredAllocator = execution::memory::Meter
 
 // AST and IR modules (consolidated from crates/)
 pub mod ast;
-pub mod derived_relations; // Derived relation materialization
 pub mod hnsw_index; // HNSW vector index implementation
 pub mod incremental;
 pub mod index_manager; // Index manager for vector similarity search

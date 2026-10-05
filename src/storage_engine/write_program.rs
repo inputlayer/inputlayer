@@ -233,8 +233,7 @@ impl WriteProgram {
     /// [`CatalogChange::apply_to_rules`]); the view evaluates with them.
     ///
     /// Only relations the program touches are rebuilt; the others are shared
-    /// with `snapshot`. Materialized derived relations are dropped once any
-    /// change is staged, since they may be stale; their rules run instead.
+    /// with `snapshot`.
     pub fn view(
         &self,
         snapshot: &Arc<KnowledgeGraphSnapshot>,
@@ -245,23 +244,16 @@ impl WriteProgram {
             return Arc::clone(snapshot);
         }
         let mut inputs: RelationMap = (*snapshot.input_tuples).clone();
-        for name in snapshot.materialized_relations.iter() {
-            inputs.remove(name);
-        }
         for (relation, membership) in overlay {
             let tuples = inputs.entry(relation).or_default();
             tuples.retain(|t| !membership.removed.contains(t) && !membership.added.contains(t));
             tuples.extend(membership.added);
         }
 
-        let mut view = if snapshot.materialized_relations.is_empty() && rules.is_none() {
-            (**snapshot).clone()
-        } else {
-            let rules =
-                rules.map_or_else(|| snapshot.rules.as_ref().clone(), RuleCatalog::all_rules);
+        let mut view = if let Some(rules) = rules {
             let mut view = KnowledgeGraphSnapshot::new_with_workers(
                 HashMap::<String, Vec<Tuple>>::new(),
-                rules,
+                rules.all_rules(),
                 snapshot.num_workers,
             );
             view.max_result_rows = snapshot.max_result_rows;
@@ -270,6 +262,8 @@ impl WriteProgram {
             view.optimization = snapshot.optimization.clone();
             view.hnsw_search_fn.clone_from(&snapshot.hnsw_search_fn);
             view
+        } else {
+            (**snapshot).clone()
         };
         view.input_tuples = Arc::new(inputs);
         Arc::new(view)
@@ -356,8 +350,7 @@ pub struct ProgramCommit {
 }
 
 /// Why a write program was not committed. In every case but
-/// [`CommitError::Unknown`] and [`CommitError::OutcomeUnknown`] nothing was
-/// written, published or applied.
+/// [`CommitError::OutcomeUnknown`] nothing was written, published or applied.
 #[derive(Debug)]
 pub enum CommitError {
     /// The KG published a new snapshot after the program read it. Stage the
@@ -375,10 +368,6 @@ pub enum CommitError {
     },
     /// The KG is gone or the transaction could not be persisted.
     Failed(StorageError),
-    /// The transaction reached the WAL, so it is durable and replays on
-    /// restart, but applying it to the live KG failed: this process may not
-    /// show it. The outcome is unknown to the caller.
-    Unknown(StorageError),
     /// The WAL write failed and could not be undone, so a restart may still
     /// recover it; the store is read-only until restart recovery.
     OutcomeUnknown(StorageError),
@@ -404,10 +393,6 @@ impl CommitError {
                 error
             }
             Self::StoreReadOnly => StorageError::StoreReadOnly,
-            Self::Unknown(error) => StorageError::Other(format!(
-                "The write is durable but failed to apply ({error}); its outcome is \
-                 unknown until restart."
-            )),
             Self::Stale => StorageError::Other(
                 "The knowledge graph changed while the write was staged; nothing was applied."
                     .to_string(),

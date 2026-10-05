@@ -125,9 +125,7 @@ impl ChangeLog {
         let revision = snapshot.revision;
         let mut log = Self::starting_at(revision);
         for name in snapshot.input_tuples.keys() {
-            if !snapshot.is_materialized(name) {
-                log.stamp_relation(name, revision);
-            }
+            log.stamp_relation(name, revision);
         }
         if !snapshot.rules.is_empty() {
             log.rules = revision;
@@ -149,8 +147,7 @@ impl ChangeLog {
     }
 
     /// The log of the snapshot `revision`, which publishes `base` (the base
-    /// relations, without materializations) and `rules`, following
-    /// `previous`, whose log this is.
+    /// relations) and `rules`, following `previous`, whose log this is.
     pub(super) fn next(
         &self,
         previous: &KnowledgeGraphSnapshot,
@@ -159,19 +156,17 @@ impl ChangeLog {
         revision: u64,
     ) -> Self {
         let mut next = self.clone();
-        let was_base = |name: &str| !previous.materialized_relations.contains(name);
         for (name, relation) in base {
-            let unchanged = was_base(name)
-                && previous
-                    .input_tuples
-                    .get(name)
-                    .is_some_and(|before| before.shares_tuples_with(relation));
+            let unchanged = previous
+                .input_tuples
+                .get(name)
+                .is_some_and(|before| before.shares_tuples_with(relation));
             if !unchanged {
                 next.stamp_relation(name, revision);
             }
         }
         for name in previous.input_tuples.keys() {
-            if was_base(name) && !base.contains_key(name) {
+            if !base.contains_key(name) {
                 next.stamp_relation(name, revision);
             }
         }

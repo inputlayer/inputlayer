@@ -389,7 +389,7 @@ pub enum NodeKind {
 pub enum FactSource {
     /// Base fact from an extensional database relation (user-inserted data).
     Edb,
-    /// Derived fact that the engine materialized but we can't trace further.
+    /// Derived fact the evaluation produced but we can't trace further.
     Derived,
 }
 

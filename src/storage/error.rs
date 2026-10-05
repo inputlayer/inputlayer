@@ -178,19 +178,6 @@ pub enum StorageError {
     /// Lock acquisition timeout
     #[error("Lock acquisition timed out after {0}ms")]
     LockTimeout(u64),
-
-    /// Incremental engine error
-    ///
-    /// Occurs when the incremental engine fails to process an operation (insert, delete, query).
-    /// This is a critical error - the in-memory and DD state may be inconsistent.
-    #[error("Incremental engine error: {0}")]
-    IncrementalEngineError(String),
-
-    /// DD worker disconnected
-    ///
-    /// The DD background worker thread terminated unexpectedly.
-    #[error("DD worker disconnected")]
-    DDWorkerDisconnected,
 }
 
 /// Result type for storage operations
@@ -272,18 +259,6 @@ mod tests {
     fn test_lock_timeout_display() {
         let err = StorageError::LockTimeout(5000);
         assert!(err.to_string().contains("5000ms"));
-    }
-
-    #[test]
-    fn test_incremental_engine_error_display() {
-        let err = StorageError::IncrementalEngineError("worker failed".to_string());
-        assert!(err.to_string().contains("worker failed"));
-    }
-
-    #[test]
-    fn test_dd_worker_disconnected_display() {
-        let err = StorageError::DDWorkerDisconnected;
-        assert!(err.to_string().contains("DD worker disconnected"));
     }
 
     #[test]

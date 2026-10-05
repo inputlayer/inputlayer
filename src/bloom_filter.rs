@@ -1,7 +1,7 @@
 //! Bloom filter implementation for efficient set membership testing.
 //!
 //! Used by SIP (Sideways Information Passing) to quickly test if a
-//! join key might exist in a relation without materializing the full
+//! join key might exist in a relation without building the full
 //! relation.
 //!
 //! # Properties

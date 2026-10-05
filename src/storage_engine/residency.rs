@@ -20,10 +20,10 @@
 //!   shares the current snapshot's tuples), or
 //! - a [`KgPin`] is held on it (a subscription holds one for its lifetime).
 //!
-//! A KG whose state is not all on disk stays loaded: session schemas, the
-//! incremental engine, vector indexes (rebuilding them on reload would be
-//! slow and could change approximate results), and catalog changes whose save
-//! to the catalog files failed (only a restart replays them from the WAL).
+//! A KG whose state is not all on disk stays loaded: session schemas, vector
+//! indexes (rebuilding them on reload would be slow and could change
+//! approximate results), and catalog changes whose save to the catalog files
+//! failed (only a restart replays them from the WAL).
 //!
 //! The hot path takes no lock: a lookup is a map read, an atomic pointer load
 //! and an atomic store of the access time. Activation, unloading and removal
@@ -249,8 +249,6 @@ impl KnowledgeGraph {
     /// Whether everything this KG holds is on disk, so a reload rebuilds it.
     fn reloadable(&self) -> bool {
         self.retired.is_none()
-            && self.incremental.is_none()
-            && !self.auto_materialize
             && self.schema_catalog.session_len() == 0
             && self.indexes.is_empty()
             && !self.catalog_unsaved

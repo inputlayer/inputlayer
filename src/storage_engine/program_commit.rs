@@ -16,7 +16,7 @@ use crate::value::{Relation, Tuple};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::time::Instant;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 impl StorageEngine {
     /// Commit `program` to `kg` as one transaction.
@@ -39,10 +39,10 @@ impl StorageEngine {
     /// a later stop cannot interrupt it.
     ///
     /// # Errors
-    /// See [`CommitError`]. On any error but [`CommitError::Unknown`] and
-    /// [`CommitError::OutcomeUnknown`] nothing was written or published; an
-    /// unknown outcome requires restart recovery before the caller can
-    /// determine whether the transaction persisted.
+    /// See [`CommitError`]. On any error but [`CommitError::OutcomeUnknown`]
+    /// nothing was written or published; an unknown outcome requires restart
+    /// recovery before the caller can determine whether the transaction
+    /// persisted.
     pub fn commit_program(
         &self,
         kg: &str,
@@ -121,13 +121,12 @@ impl StorageEngine {
 
         let catalog_durable = catalog.is_durable();
         let catalog_saved = db.install_catalog(catalog, time);
-        let relations = db.apply_delta(facts, time);
+        let relations = db.apply_delta(facts);
         if catalog_durable && catalog_saved {
             if let Err(e) = self.persist.catalog_saved(kg, time) {
                 warn!(kg = %kg, time, error = %e, "catalog_wal_prune_failed");
             }
         }
-        let relations = relations.map_err(CommitError::Unknown)?;
         // Still under the write lock, so this is the snapshot just published.
         let revision = db.snapshot.load().revision;
         Ok(ProgramCommit {
@@ -344,19 +343,13 @@ impl KnowledgeGraph {
         }
     }
 
-    /// Apply a persisted fact delta at `time` and publish it, with any
-    /// installed catalog changes, as one snapshot.
-    ///
-    /// # Errors
-    /// A failed incremental-engine shadow write. The delta is still applied
-    /// and published, so memory matches the WAL.
+    /// Apply a persisted fact delta and publish it, with any installed
+    /// catalog changes, as one snapshot.
     pub(super) fn apply_delta(
         &mut self,
         delta: Vec<(String, RelationDelta)>,
-        time: u64,
-    ) -> StorageResult<Vec<RelationChange>> {
+    ) -> Vec<RelationChange> {
         let mut changed = Vec::with_capacity(delta.len());
-        let mut shadow_error = None;
         for (relation, changes) in delta {
             let (added, removed) = changes.into_parts();
             let removed = self.store.delete(&relation, &removed);
@@ -376,42 +369,13 @@ impl KnowledgeGraph {
                 .add_relation(relation.clone(), schema, tuple_count);
 
             changed.push(RelationChange {
-                relation: relation.clone(),
+                relation,
                 inserted: added.len(),
                 deleted: removed.len(),
             });
-            if shadow_error.is_none() {
-                shadow_error = self.shadow_write(&relation, added, removed, time).err();
-            }
         }
         self.publish_snapshot();
-        match shadow_error {
-            Some(e) => {
-                error!(kg = %self.name, error = %e, "program_commit_shadow_write_failed");
-                Err(StorageError::IncrementalEngineError(e))
-            }
-            None => Ok(changed),
-        }
-    }
-
-    /// Mirror one relation's committed change into the incremental engine.
-    fn shadow_write(
-        &self,
-        relation: &str,
-        added: Vec<Tuple>,
-        removed: Vec<Tuple>,
-        time: u64,
-    ) -> Result<(), String> {
-        let Some(dd) = &self.incremental else {
-            return Ok(());
-        };
-        if !removed.is_empty() {
-            dd.delete(relation, removed, time)?;
-        }
-        if !added.is_empty() {
-            dd.insert(relation, added, time)?;
-        }
-        dd.notify_base_update(relation).map(drop)
+        changed
     }
 }
 

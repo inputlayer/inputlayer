@@ -7,6 +7,8 @@
 //! - Knowledge-graph-scoped CRUD operations
 //! - Parquet-based storage for efficiency
 //! - Lock-free read path via snapshots
+//! - Persistent rules stored as definitions and evaluated by each read from
+//!   the snapshot's base facts
 //!
 //! ## Example
 //!
@@ -36,8 +38,6 @@ mod catalog_commit_tests;
 mod checkpoint;
 #[cfg(test)]
 mod commit_tests;
-#[cfg(test)]
-mod materialize_tests;
 mod precondition;
 mod program_commit;
 #[cfg(test)]
@@ -63,7 +63,6 @@ pub use write_program::{
 };
 
 use crate::config::{Config, ReplicationRole};
-use crate::incremental::IncrementalEngine;
 use crate::index_manager::IndexManager;
 use crate::naming;
 use crate::replication::{EngineEvent, ReplicationLog};
@@ -231,12 +230,6 @@ pub struct KnowledgeGraph {
     schema_catalog: SchemaCatalog,
     /// Current snapshot for lock-free reads (updated atomically on writes)
     snapshot: ArcSwap<KnowledgeGraphSnapshot>,
-    /// Optional base-relation mirror fed by shadow writes; `None` in both
-    /// production constructors (enabled only by tests)
-    incremental: Option<IncrementalEngine>,
-    /// Recompute every rule from base into the incremental engine on each
-    /// publish; test-only, no config key
-    auto_materialize: bool,
     /// Vector indexes, kept in sync with base relations on every write
     indexes: IndexManager,
     /// Number of workers for parallel query execution
@@ -1191,8 +1184,7 @@ impl StorageEngine {
             }
         }
 
-        let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
-        if let Err(e) = db.drop_relation(name, time) {
+        if let Err(e) = db.drop_relation(name) {
             warn!(kg = %kg, relation = %name, error = %e, "relation_drop_cleanup_deferred");
             if settled && !tombstoned {
                 if let Err(e) = self.update_tombstones(|t| {
@@ -1438,9 +1430,6 @@ impl StorageEngine {
     }
 
     /// Execute a closure with read access to a specific KnowledgeGraph.
-    ///
-    /// This helper provides a convenient way to access KG internals
-    /// (like the IncrementalEngine) from Handler methods.
     pub fn with_kg_read<T, F>(&self, kg: &str, f: F) -> StorageResult<T>
     where
         F: FnOnce(&KnowledgeGraph) -> Result<T, String>,
@@ -2206,8 +2195,6 @@ impl KnowledgeGraph {
             rule_catalog,
             schema_catalog,
             snapshot,
-            incremental: None,
-            auto_materialize: false,
             indexes: IndexManager::new(),
             num_workers,
             max_result_rows: 0,
@@ -2265,8 +2252,6 @@ impl KnowledgeGraph {
             rule_catalog,
             schema_catalog,
             snapshot: ArcSwap::from_pointee(initial),
-            incremental: None,
-            auto_materialize: false,
             indexes: IndexManager::new(),
             num_workers: performance.num_threads,
             max_result_rows: performance.max_result_rows,
@@ -2312,141 +2297,32 @@ impl KnowledgeGraph {
         self.optimization = config;
     }
 
-    /// Enable the IncrementalEngine (a base-relation mirror; test-only, no
-    /// production caller).
-    ///
-    /// Creates a persistent DD computation worker thread for this knowledge graph.
-    /// Once enabled, all inserts and deletes are shadow-written to DD.
-    /// This is required for reading from arrangements.
-    ///
-    /// # Errors
-    /// Returns error if worker thread fails to spawn or replaying existing data fails.
-    pub fn enable_incremental(&mut self) -> StorageResult<()> {
-        if self.incremental.is_none() {
-            let dd =
-                IncrementalEngine::new(vec![]).map_err(StorageError::IncrementalEngineError)?;
-
-            // Replay existing data into IncrementalEngine so arrangements are
-            // populated immediately. This handles the case where data was
-            // loaded from persistence before IncrementalEngine was enabled.
-            for (relation, tuples) in self.store.relations() {
-                if !tuples.is_empty() {
-                    dd.insert(relation, tuples.to_vec(), 0)
-                        .map_err(StorageError::IncrementalEngineError)?;
-                }
-            }
-
-            self.incremental = Some(dd);
-        }
-        Ok(())
-    }
-
-    /// Serve rules from materializations recomputed on every publish.
-    ///
-    /// Takes effect only with the incremental engine enabled. Turning it off
-    /// drops every materialization, since nothing keeps them fresh.
-    pub fn set_auto_materialize(&mut self, enabled: bool) {
-        self.auto_materialize = enabled;
-        if !enabled {
-            if let Some(dd) = &self.incremental {
-                dd.derived_relations().lock().clear_all_materialized();
-            }
-        }
-        self.publish_snapshot();
-    }
-
-    /// Get a reference to the IncrementalEngine (if enabled).
-    ///
-    /// Used for reading from DD arrangements and verifying consistency.
-    pub fn incremental(&self) -> Option<&IncrementalEngine> {
-        self.incremental.as_ref()
-    }
-
     /// Publish a new snapshot atomically
     ///
     /// Called after data modifications to make changes visible to readers.
-    /// Relations are shared with the store, so this copies no tuples (apart
-    /// from merging valid materializations).
-    ///
-    /// If IncrementalEngine has valid materializations, includes them
-    /// in the snapshot. Materialized tuples are merged into input_tuples,
-    /// and their rules are skipped during query execution.
-    ///
-    /// IMPORTANT: This method holds the DerivedRelationsManager lock through
-    /// the entire snapshot creation AND publication to prevent TOCTOU races.
-    /// Without this, another thread could invalidate materializations between
-    /// reading them and publishing the snapshot.
+    /// Relations are shared with the store, so this copies no tuples. The
+    /// snapshot carries the persistent rules as definitions: every read
+    /// evaluates the ones it needs from these base facts.
     fn publish_snapshot(&self) {
         let snapshot_start = Instant::now();
-        if self.auto_materialize {
-            self.refresh_materializations();
-        }
-        // Start with base relation data
-        let mut input_tuples = self.store.relations().clone();
-        let rules = self.rule_catalog.all_rules();
-
-        // Gather valid materializations from IncrementalEngine
-        // CRITICAL: Hold the lock through snapshot creation AND publication
-        // to prevent TOCTOU race conditions.
-        if let Some(ref dd) = self.incremental {
-            let manager = dd.derived_relations();
-            let manager_guard = manager.lock();
-
-            // Get all valid materializations
-            let materializations = manager_guard.get_all_valid_materializations();
-
-            // Merge materialized tuples into input_tuples
-            // They appear as base facts so the rules don't need to recompute them
-            for (rel_name, tuples) in materializations {
-                input_tuples
-                    .entry(rel_name.clone())
-                    .or_default()
-                    .extend(tuples);
-            }
-
-            // Get names of materialized relations
-            let materialized_names = manager_guard.get_materialized_relation_names();
-
-            // Create AND publish snapshot while still holding the lock
-            // This ensures no concurrent invalidation can occur between
-            // reading materializations and making them visible to readers.
-            let mut new_snapshot = KnowledgeGraphSnapshot::with_rules_after(
-                input_tuples,
-                rules,
-                self.num_workers,
-                materialized_names,
-                Some(&self.snapshot.load()),
-            );
-            new_snapshot.max_result_rows = self.max_result_rows;
-            new_snapshot.max_query_cost = self.max_query_cost;
-            new_snapshot.max_recursion_iterations = self.max_recursion_iterations;
-            new_snapshot.optimization = self.optimization.clone();
-            new_snapshot.hnsw_search_fn = self.hnsw_search_fn();
-            self.stamp_changes(&mut new_snapshot);
-            self.snapshot.store(Arc::new(new_snapshot));
-
-            // Lock drops here AFTER publication - this is the fix for TOCTOU
-        } else {
-            // No DD computation - publish without materializations
-            let mut new_snapshot = KnowledgeGraphSnapshot::with_rules_after(
-                input_tuples,
-                rules,
-                self.num_workers,
-                HashSet::new(),
-                Some(&self.snapshot.load()),
-            );
-            new_snapshot.max_result_rows = self.max_result_rows;
-            new_snapshot.max_query_cost = self.max_query_cost;
-            new_snapshot.max_recursion_iterations = self.max_recursion_iterations;
-            new_snapshot.optimization = self.optimization.clone();
-            new_snapshot.hnsw_search_fn = self.hnsw_search_fn();
-            self.stamp_changes(&mut new_snapshot);
-            self.snapshot.store(Arc::new(new_snapshot));
-        }
+        let mut new_snapshot = KnowledgeGraphSnapshot::with_rules_after(
+            self.store.relations().clone(),
+            self.rule_catalog.all_rules(),
+            self.num_workers,
+            Some(&self.snapshot.load()),
+        );
+        new_snapshot.max_result_rows = self.max_result_rows;
+        new_snapshot.max_query_cost = self.max_query_cost;
+        new_snapshot.max_recursion_iterations = self.max_recursion_iterations;
+        new_snapshot.optimization = self.optimization.clone();
+        new_snapshot.hnsw_search_fn = self.hnsw_search_fn();
+        self.stamp_changes(&mut new_snapshot);
+        let rules = new_snapshot.rules.len();
+        self.snapshot.store(Arc::new(new_snapshot));
 
         info!(
             relations = self.store.relations().len(),
-            rules = self.rule_catalog.all_rules().len(),
+            rules,
             snapshot_ms = snapshot_start.elapsed().as_millis() as u64,
             "snapshot_publish_complete"
         );
@@ -2485,27 +2361,6 @@ impl KnowledgeGraph {
         self.snapshot.load_full()
     }
 
-    /// Materialize a derived relation and publish a new snapshot
-    ///
-    /// This is the proper way to store materialized data:
-    /// 1. Stores the tuples in IncrementalEngine's DerivedRelationsManager
-    /// 2. Publishes a new snapshot that includes the materialized data
-    ///
-    /// After this call, queries via `snapshot()` will see the materialized data.
-    pub fn materialize_derived_relation(
-        &self,
-        relation: &str,
-        tuples: Vec<Tuple>,
-    ) -> Result<(), String> {
-        if let Some(ref dd) = self.incremental {
-            dd.set_materialized(relation, tuples)?;
-            self.publish_snapshot();
-            Ok(())
-        } else {
-            Err("IncrementalEngine not enabled".to_string())
-        }
-    }
-
     /// Get knowledge graph name
     pub fn name(&self) -> &str {
         &self.name
@@ -2514,53 +2369,6 @@ impl KnowledgeGraph {
     /// Get knowledge graph metadata
     pub fn metadata(&self) -> &KnowledgeGraphMetadata {
         &self.metadata
-    }
-
-    /// Recompute every rule from base data into the incremental engine.
-    ///
-    /// A rule that fails to evaluate loses its materialization, so queries
-    /// fall back to evaluating it.
-    fn refresh_materializations(&self) {
-        let Some(dd) = &self.incremental else {
-            return;
-        };
-        for name in self.rule_catalog.list() {
-            match self.evaluate_rule(&name) {
-                Ok(tuples) => {
-                    let _ = dd.set_materialized(&name, tuples);
-                }
-                Err(e) => {
-                    dd.derived_relations().lock().clear_materialized(&name);
-                    warn!(rule = %name, error = %e, "auto_materialize_failed");
-                }
-            }
-        }
-    }
-
-    /// Evaluate one rule over base data with every registered rule in scope.
-    fn evaluate_rule(&self, rule_name: &str) -> Result<Vec<Tuple>, String> {
-        let arity = self
-            .rule_catalog
-            .rule_arity(rule_name)
-            .ok_or_else(|| format!("Rule '{rule_name}' not found"))?;
-
-        let mut program = String::new();
-        for clause in self.rule_catalog.all_rules() {
-            program.push_str(&format_rule(&clause));
-            program.push('\n');
-        }
-        let vars = (0..arity)
-            .map(|i| format!("V{i}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        program.push_str(&format!("__materialize({vars}) <- {rule_name}({vars})"));
-
-        let mut temp_engine = crate::IQLEngine::with_config(self.optimization.clone());
-        temp_engine.set_inputs(self.store.relations().clone());
-        temp_engine.set_num_workers(self.num_workers);
-        temp_engine.set_max_query_cost(self.max_query_cost);
-        temp_engine.set_max_recursion_iterations(self.max_recursion_iterations);
-        temp_engine.execute_tuples(&program)
     }
 
     /// Whether `name` exists as data, metadata, a rule, or a schema.
@@ -2572,21 +2380,16 @@ impl KnowledgeGraph {
     }
 
     /// Drop a relation entirely: data, metadata, schema, any associated rules
-    /// and indexes, and its DD base data; invalidates dependents.
+    /// and indexes.
     ///
     /// # Errors
     /// Returns an error if the relation is missing, or if persisting the
     /// schema or rule removal fails (memory is dropped regardless).
-    pub fn drop_relation(&mut self, name: &str, time: u64) -> Result<(), String> {
+    pub fn drop_relation(&mut self, name: &str) -> Result<(), String> {
         if !self.has_relation(name) {
             return Err(format!("Relation '{name}' not found."));
         }
 
-        let tuples = self
-            .store
-            .get(name)
-            .map(Relation::to_vec)
-            .unwrap_or_default();
         self.store.remove(name);
         self.metadata.relations.remove(name);
         self.schema_catalog.remove_session(name);
@@ -2598,20 +2401,6 @@ impl KnowledgeGraph {
         };
         if schema.is_err() || rule.is_err() {
             self.catalog_unsaved = true;
-        }
-
-        if let Some(ref dd) = self.incremental {
-            let retracted = if tuples.is_empty() {
-                Ok(())
-            } else {
-                dd.delete(name, tuples, time)
-            };
-            let result = retracted
-                .and_then(|()| dd.remove_rule(name))
-                .and_then(|()| dd.notify_base_update(name).map(|_| ()));
-            if let Err(e) = result {
-                warn!(relation = %name, error = %e, "incremental_drop_relation_failed");
-            }
         }
 
         self.drop_indexes_for(name);
@@ -2671,18 +2460,7 @@ impl KnowledgeGraph {
 
         let mut results = Vec::with_capacity(matching.len());
         for relation in matching {
-            let tuples = self
-                .store
-                .get(&relation)
-                .map(Relation::to_vec)
-                .unwrap_or_default();
-            let count = tuples.len();
-
-            if let Some(ref dd) = self.incremental {
-                let _ = dd.delete(&relation, tuples, time);
-                let _ = dd.notify_base_update(&relation);
-            }
-
+            let count = self.store.get(&relation).map_or(0, Relation::len);
             self.store.clear(&relation);
             self.rebuild_indexes_for(&relation);
 
@@ -2731,9 +2509,6 @@ impl KnowledgeGraph {
     }
 
     /// Execute a query with persistent rules on the current snapshot.
-    ///
-    /// Rules for materialized relations are skipped - their data is already
-    /// present in the snapshot as base facts.
     pub fn execute_with_rules(&self, program: &str) -> Result<Vec<(i32, i32)>, String> {
         self.snapshot().execute_with_rules(program)
     }
@@ -3294,28 +3069,6 @@ mod tests {
         assert_eq!(relation_tuples(&storage, "gone", "edge"), None);
     }
 
-    #[test]
-    fn test_rel_drop_retracts_incremental_base_data() {
-        let temp = TempDir::new().unwrap();
-        let storage = StorageEngine::new(create_test_config(temp.path().to_path_buf())).unwrap();
-        storage.insert_into("default", "r", vec![(1, 2)]).unwrap();
-        storage
-            .with_kg_mut("default", |kg| {
-                kg.enable_incremental().map_err(|e| e.to_string())
-            })
-            .unwrap();
-        storage.drop_relation_in("default", "r").unwrap();
-        storage.insert_into("default", "r", vec![(3, 4)]).unwrap();
-
-        let db = storage.kg_handle("default").unwrap();
-        let db = db.read();
-        let dd = db.incremental().unwrap();
-        assert_eq!(
-            dd.read_relation_consistent("r").unwrap(),
-            vec![Tuple::from_pair(3, 4)]
-        );
-    }
-
     fn create_test_config(data_dir: PathBuf) -> Config {
         let mut config = Config::default();
         config.storage.data_dir = data_dir;
@@ -3578,683 +3331,6 @@ mod tests {
         assert_eq!(specific_result[0], (1, 3));
     }
 
-    #[test]
-    fn test_dd_shadow_writes_receive_inserts() {
-        use crate::value::Value;
-
-        let temp = TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        // Enable IncrementalEngine for shadow writes
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        // Insert tuples through StorageEngine
-        storage
-            .insert_tuples(
-                "edge",
-                vec![
-                    Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
-                    Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
-                    Tuple::new(vec![Value::Int32(3), Value::Int32(4)]),
-                ],
-            )
-            .unwrap();
-
-        // Access the KG's IncrementalEngine and verify it received the data
-        let kg = storage
-            .kg_handle("default")
-            .expect("default KG should exist");
-        let kg = kg.read();
-        let dd = kg
-            .incremental()
-            .expect("IncrementalEngine should be enabled");
-
-        // Use consistent read  -  lazily advances time and waits
-        let dd_tuples = dd.read_relation_consistent("edge").unwrap();
-        assert_eq!(
-            dd_tuples.len(),
-            3,
-            "IncrementalEngine should have received all 3 tuples"
-        );
-    }
-
-    #[test]
-    fn test_dd_shadow_writes_skip_duplicates() {
-        use crate::value::Value;
-
-        let temp = TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        // Enable IncrementalEngine
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        let t1 = Tuple::new(vec![Value::Int32(1), Value::Int32(2)]);
-        let t2 = Tuple::new(vec![Value::Int32(2), Value::Int32(3)]);
-
-        // Insert first batch
-        storage
-            .insert_tuples("data", vec![t1.clone(), t2.clone()])
-            .unwrap();
-
-        // Insert again  -  t1 is duplicate, t3 is new
-        let t3 = Tuple::new(vec![Value::Int32(3), Value::Int32(4)]);
-        storage
-            .insert_tuples("data", vec![t1.clone(), t3.clone()])
-            .unwrap();
-
-        // Verify IncrementalEngine has exactly 3 tuples (not 4 with duplicate)
-        let kg = storage.kg_handle("default").expect("default KG");
-        let kg = kg.read();
-        let dd = kg.incremental().unwrap();
-
-        let dd_tuples = dd.read_relation_consistent("data").unwrap();
-        assert_eq!(
-            dd_tuples.len(),
-            3,
-            "IncrementalEngine should have 3 unique tuples (duplicates filtered)"
-        );
-    }
-
-    #[test]
-    fn test_dd_shadow_writes_handle_deletes() {
-        use crate::value::Value;
-
-        let temp = TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        // Enable IncrementalEngine
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        let t1 = Tuple::new(vec![Value::Int32(1), Value::Int32(2)]);
-        let t2 = Tuple::new(vec![Value::Int32(2), Value::Int32(3)]);
-        let t3 = Tuple::new(vec![Value::Int32(3), Value::Int32(4)]);
-
-        // Insert 3 tuples
-        storage
-            .insert_tuples("rel", vec![t1.clone(), t2.clone(), t3.clone()])
-            .unwrap();
-
-        // Delete one tuple
-        storage.delete_tuple("rel", &t2).unwrap();
-
-        // Verify IncrementalEngine reflects the delete
-        let kg = storage.kg_handle("default").expect("default KG");
-        let kg = kg.read();
-        let dd = kg.incremental().unwrap();
-
-        let dd_tuples = dd.read_relation_consistent("rel").unwrap();
-        assert_eq!(
-            dd_tuples.len(),
-            2,
-            "IncrementalEngine should have 2 tuples after delete"
-        );
-        assert!(dd_tuples.contains(&t1));
-        assert!(dd_tuples.contains(&t3));
-        assert!(!dd_tuples.contains(&t2));
-    }
-
-    #[test]
-    fn test_dd_shadow_writes_legacy_tuple2() {
-        let temp = TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        // Enable IncrementalEngine
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        // Insert via binary tuple API
-        storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
-
-        // Verify IncrementalEngine received the data
-        let kg = storage.kg_handle("default").expect("default KG");
-        let kg = kg.read();
-        let dd = kg
-            .incremental()
-            .expect("IncrementalEngine should be enabled");
-
-        let dd_tuples = dd.read_relation_consistent("edge").unwrap();
-        assert_eq!(dd_tuples.len(), 2, "IncrementalEngine should have 2 tuples");
-    }
-
-    // Arrangement Read Consistency Verification Tests
-    //
-    // These tests verify that DD arrangement reads produce exactly the same
-    // data as the HashMap in-memory state, proving the arrangement read path
-    // is correct and ready for HNSW indexing.
-
-    #[test]
-    fn test_dd_arrangement_read_parity_with_hashmap() {
-        use crate::value::Value;
-
-        let temp = TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        // Insert data
-        storage
-            .insert_tuples(
-                "edge",
-                vec![
-                    Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
-                    Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
-                    Tuple::new(vec![Value::Int32(3), Value::Int32(4)]),
-                ],
-            )
-            .unwrap();
-
-        // Read from HashMap (via snapshot) and from DD arrangement
-        let kg = storage.kg_handle("default").unwrap();
-        let kg = kg.read();
-
-        // HashMap state
-        let hashmap_tuples = &kg.store.get("edge").unwrap().to_vec();
-
-        // DD arrangement state
-        let dd = kg.incremental().unwrap();
-        let mut dd_tuples = dd.read_relation_consistent("edge").unwrap();
-        dd_tuples.sort();
-
-        let mut hashmap_sorted: Vec<_> = hashmap_tuples.clone();
-        hashmap_sorted.sort();
-
-        // Verify exact parity
-        assert_eq!(
-            hashmap_sorted, dd_tuples,
-            "DD arrangement should contain exactly the same tuples as HashMap"
-        );
-    }
-
-    #[test]
-    fn test_dd_arrangement_parity_after_multi_batch_inserts() {
-        use crate::value::Value;
-
-        let temp = TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        // Batch 1
-        storage
-            .insert_tuples(
-                "data",
-                vec![
-                    Tuple::new(vec![Value::Int32(1)]),
-                    Tuple::new(vec![Value::Int32(2)]),
-                ],
-            )
-            .unwrap();
-
-        // Batch 2 (includes a duplicate)
-        storage
-            .insert_tuples(
-                "data",
-                vec![
-                    Tuple::new(vec![Value::Int32(2)]), // duplicate
-                    Tuple::new(vec![Value::Int32(3)]),
-                ],
-            )
-            .unwrap();
-
-        // Batch 3
-        storage
-            .insert_tuples(
-                "data",
-                vec![
-                    Tuple::new(vec![Value::Int32(4)]),
-                    Tuple::new(vec![Value::Int32(5)]),
-                ],
-            )
-            .unwrap();
-
-        // Verify parity
-        let kg = storage.kg_handle("default").unwrap();
-        let kg = kg.read();
-        let hashmap_tuples = &kg.store.get("data").unwrap().to_vec();
-        let dd = kg.incremental().unwrap();
-        let mut dd_tuples = dd.read_relation_consistent("data").unwrap();
-        dd_tuples.sort();
-
-        let mut hashmap_sorted: Vec<_> = hashmap_tuples.clone();
-        hashmap_sorted.sort();
-
-        assert_eq!(
-            hashmap_sorted.len(),
-            5,
-            "Should have 5 unique tuples in HashMap"
-        );
-        assert_eq!(
-            hashmap_sorted, dd_tuples,
-            "DD arrangement should match HashMap after multi-batch inserts with duplicates"
-        );
-    }
-
-    #[test]
-    fn test_dd_arrangement_parity_after_inserts_and_deletes() {
-        use crate::value::Value;
-
-        let temp = TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        let t1 = Tuple::new(vec![Value::Int32(1), Value::string("a")]);
-        let t2 = Tuple::new(vec![Value::Int32(2), Value::string("b")]);
-        let t3 = Tuple::new(vec![Value::Int32(3), Value::string("c")]);
-        let t4 = Tuple::new(vec![Value::Int32(4), Value::string("d")]);
-
-        // Insert 4 tuples
-        storage
-            .insert_tuples(
-                "mixed",
-                vec![t1.clone(), t2.clone(), t3.clone(), t4.clone()],
-            )
-            .unwrap();
-
-        // Delete 2 tuples
-        storage.delete_tuple("mixed", &t2).unwrap();
-        storage.delete_tuple("mixed", &t4).unwrap();
-
-        // Insert one more
-        let t5 = Tuple::new(vec![Value::Int32(5), Value::string("e")]);
-        storage.insert_tuples("mixed", vec![t5.clone()]).unwrap();
-
-        // Verify parity
-        let kg = storage.kg_handle("default").unwrap();
-        let kg = kg.read();
-        let hashmap_tuples = &kg.store.get("mixed").unwrap().to_vec();
-        let dd = kg.incremental().unwrap();
-        let mut dd_tuples = dd.read_relation_consistent("mixed").unwrap();
-        dd_tuples.sort();
-
-        let mut hashmap_sorted: Vec<_> = hashmap_tuples.clone();
-        hashmap_sorted.sort();
-
-        assert_eq!(hashmap_sorted.len(), 3, "Should have t1, t3, t5");
-        assert_eq!(
-            hashmap_sorted, dd_tuples,
-            "DD arrangement should match HashMap after mixed inserts and deletes"
-        );
-    }
-
-    #[test]
-    fn test_dd_arrangement_parity_multi_relation() {
-        use crate::value::Value;
-
-        let temp = TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        // Insert into multiple relations
-        storage
-            .insert_tuples(
-                "edges",
-                vec![
-                    Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
-                    Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
-                ],
-            )
-            .unwrap();
-
-        storage
-            .insert_tuples(
-                "nodes",
-                vec![
-                    Tuple::new(vec![Value::string("a"), Value::Float64(1.0)]),
-                    Tuple::new(vec![Value::string("b"), Value::Float64(2.0)]),
-                    Tuple::new(vec![Value::string("c"), Value::Float64(3.0)]),
-                ],
-            )
-            .unwrap();
-
-        // Verify parity for each relation
-        let kg = storage.kg_handle("default").unwrap();
-        let kg = kg.read();
-        let dd = kg.incremental().unwrap();
-
-        for rel_name in &["edges", "nodes"] {
-            let hashmap_tuples = &kg.store.get(rel_name).unwrap().to_vec();
-            let mut dd_tuples = dd.read_relation_consistent(rel_name).unwrap();
-            dd_tuples.sort();
-
-            let mut hashmap_sorted: Vec<_> = hashmap_tuples.clone();
-            hashmap_sorted.sort();
-
-            assert_eq!(
-                hashmap_sorted, dd_tuples,
-                "DD arrangement for '{rel_name}' should match HashMap"
-            );
-        }
-    }
-
-    #[test]
-    fn test_dd_arrangement_max_write_time_tracks_logical_time() {
-        use crate::value::Value;
-
-        let temp = TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        // Record logical time before insert
-        let time_before = storage.logical_time.load(Ordering::SeqCst);
-
-        // Insert triggers logical_time.fetch_add(1)
-        storage
-            .insert_tuples("data", vec![Tuple::new(vec![Value::Int32(42)])])
-            .unwrap();
-
-        // DD's max_write_time should be >= time_before (the time used for this insert)
-        let kg = storage.kg_handle("default").unwrap();
-        let kg = kg.read();
-        let dd = kg.incremental().unwrap();
-
-        assert!(
-            dd.max_write_time() >= time_before,
-            "DD max_write_time ({}) should be >= logical time at insert ({})",
-            dd.max_write_time(),
-            time_before
-        );
-    }
-
-    // WAL Replay into IncrementalEngine Tests
-    #[test]
-    fn test_dd_replay_existing_data_on_enable() {
-        use crate::value::Value;
-
-        let temp = TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        // Insert data BEFORE enabling IncrementalEngine
-        storage
-            .insert_tuples(
-                "edge",
-                vec![
-                    Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
-                    Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
-                    Tuple::new(vec![Value::Int32(3), Value::Int32(4)]),
-                ],
-            )
-            .unwrap();
-
-        storage
-            .insert_tuples(
-                "node",
-                vec![
-                    Tuple::new(vec![Value::string("a")]),
-                    Tuple::new(vec![Value::string("b")]),
-                ],
-            )
-            .unwrap();
-
-        // NOW enable IncrementalEngine  -  should replay existing data
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        // Verify IncrementalEngine has all pre-existing data
-        let kg = storage.kg_handle("default").unwrap();
-        let kg = kg.read();
-        let dd = kg.incremental().unwrap();
-
-        let edges = dd.read_relation_consistent("edge").unwrap();
-        assert_eq!(edges.len(), 3, "DD should have 3 edges from replay");
-
-        let nodes = dd.read_relation_consistent("node").unwrap();
-        assert_eq!(nodes.len(), 2, "DD should have 2 nodes from replay");
-    }
-
-    #[test]
-    fn test_dd_replay_parity_with_hashmap() {
-        use crate::value::Value;
-
-        let temp = TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        // Insert data before enabling DD
-        storage
-            .insert_tuples(
-                "data",
-                vec![
-                    Tuple::new(vec![Value::Int32(10), Value::string("x")]),
-                    Tuple::new(vec![Value::Int32(20), Value::string("y")]),
-                    Tuple::new(vec![Value::Int32(30), Value::string("z")]),
-                ],
-            )
-            .unwrap();
-
-        // Enable DD (triggers replay)
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        // Verify exact parity between DD and HashMap
-        let kg = storage.kg_handle("default").unwrap();
-        let kg = kg.read();
-        let hashmap_tuples = &kg.store.get("data").unwrap().to_vec();
-        let dd = kg.incremental().unwrap();
-        let mut dd_tuples = dd.read_relation_consistent("data").unwrap();
-        dd_tuples.sort();
-
-        let mut hashmap_sorted: Vec<_> = hashmap_tuples.clone();
-        hashmap_sorted.sort();
-
-        assert_eq!(
-            hashmap_sorted, dd_tuples,
-            "DD arrangement after replay should match HashMap exactly"
-        );
-    }
-
-    #[test]
-    fn test_dd_replay_then_new_writes() {
-        use crate::value::Value;
-
-        let temp = TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        // Insert data before enabling DD
-        storage
-            .insert_tuples(
-                "items",
-                vec![
-                    Tuple::new(vec![Value::Int32(1)]),
-                    Tuple::new(vec![Value::Int32(2)]),
-                ],
-            )
-            .unwrap();
-
-        // Enable DD (triggers replay)
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        // Now insert MORE data (after DD is enabled)
-        storage
-            .insert_tuples(
-                "items",
-                vec![
-                    Tuple::new(vec![Value::Int32(3)]),
-                    Tuple::new(vec![Value::Int32(4)]),
-                ],
-            )
-            .unwrap();
-
-        // Verify DD has ALL data (replayed + new)
-        let kg = storage.kg_handle("default").unwrap();
-        let kg = kg.read();
-        let dd = kg.incremental().unwrap();
-        let mut dd_tuples = dd.read_relation_consistent("items").unwrap();
-        dd_tuples.sort();
-
-        assert_eq!(
-            dd_tuples.len(),
-            4,
-            "DD should have 4 items (2 replayed + 2 new)"
-        );
-
-        // Verify parity with HashMap
-        let mut hashmap_sorted: Vec<_> = kg.store.get("items").unwrap().to_vec();
-        hashmap_sorted.sort();
-
-        assert_eq!(
-            hashmap_sorted, dd_tuples,
-            "DD should match HashMap after replay + new writes"
-        );
-    }
-
-    #[test]
-    fn test_dd_replay_legacy_tuple2_data() {
-        let temp = TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        // Insert data before enabling DD
-        storage
-            .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
-            .unwrap();
-
-        // Enable DD (should replay legacy data)
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        // Verify DD has the replayed data
-        let kg = storage.kg_handle("default").unwrap();
-        let kg = kg.read();
-        let dd = kg.incremental().unwrap();
-        let dd_tuples = dd.read_relation_consistent("edge").unwrap();
-        assert_eq!(
-            dd_tuples.len(),
-            3,
-            "DD should have 3 edges from legacy replay"
-        );
-    }
-
-    #[test]
-    fn test_dd_replay_from_persistence() {
-        let temp = TempDir::new().unwrap();
-
-        // Create and populate, then save
-        {
-            let config = create_test_config(temp.path().to_path_buf());
-            let mut storage = StorageEngine::new(config).unwrap();
-            storage.use_knowledge_graph("default").unwrap();
-            storage
-                .insert("edge", vec![(10, 20), (20, 30), (30, 40)])
-                .unwrap();
-            storage.save_all().unwrap();
-        }
-
-        // Reload from persistence
-        {
-            let config = create_test_config(temp.path().to_path_buf());
-            let mut storage = StorageEngine::new(config).unwrap();
-            storage.use_knowledge_graph("default").unwrap();
-
-            // Enable IncrementalEngine  -  should replay persisted data
-            {
-                let kg = storage.kg_handle("default").unwrap();
-                let mut kg = kg.write();
-                kg.enable_incremental().unwrap();
-            }
-
-            // Verify DD has the persisted data
-            let kg = storage.kg_handle("default").unwrap();
-            let kg = kg.read();
-            let dd = kg.incremental().unwrap();
-            let dd_tuples = dd.read_relation_consistent("edge").unwrap();
-            assert_eq!(
-                dd_tuples.len(),
-                3,
-                "DD should have 3 edges from persistence replay"
-            );
-        }
-    }
-
-    // === Materialization Pipeline Integration Tests ===
-
     use crate::statement::{RuleDef, SerializableBodyPred, SerializableRule, SerializableTerm};
     use crate::value::Value;
 
@@ -4291,245 +3367,6 @@ mod tests {
                     negated: false,
                 }],
             },
-        }
-    }
-
-    #[test]
-    fn test_materialization_snapshot_includes_valid_materializations() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        // Enable IncrementalEngine
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        // Insert base data
-        storage
-            .insert_tuples(
-                "edge",
-                vec![
-                    Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
-                    Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
-                ],
-            )
-            .unwrap();
-
-        // Register a rule
-        let rule_def = make_path_rule_def();
-        storage.register_rule(&rule_def).unwrap();
-
-        // Materialize the derived relation (uses the new method that also publishes snapshot)
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let kg = kg.read();
-
-            // Simulate materializing path with some tuples
-            let path_tuples = vec![
-                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
-                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
-                Tuple::new(vec![Value::Int32(99), Value::Int32(100)]), // Extra tuple
-            ];
-            kg.materialize_derived_relation("path", path_tuples)
-                .unwrap();
-        }
-
-        // Get the updated snapshot
-        let kg = storage.kg_handle("default").unwrap();
-        let kg = kg.read();
-        let snapshot = kg.snapshot();
-
-        // Verify snapshot has the materialized relation
-        assert!(
-            snapshot.is_materialized("path"),
-            "path should be marked as materialized"
-        );
-        assert_eq!(snapshot.materialized_count(), 1);
-
-        // Verify the materialized tuples are in input_tuples
-        let path_tuples = snapshot.input_tuples.get("path");
-        assert!(path_tuples.is_some(), "path tuples should be in snapshot");
-        assert_eq!(
-            path_tuples.unwrap().len(),
-            3,
-            "should have 3 materialized tuples"
-        );
-    }
-
-    #[test]
-    fn test_materialization_invalidation_removes_from_snapshot() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        // Enable IncrementalEngine
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        // Insert base data and register rule
-        storage
-            .insert_tuples(
-                "edge",
-                vec![Tuple::new(vec![Value::Int32(1), Value::Int32(2)])],
-            )
-            .unwrap();
-
-        let rule_def = make_path_rule_def();
-        storage.register_rule(&rule_def).unwrap();
-
-        // Materialize (uses the new method that also publishes snapshot)
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let kg = kg.read();
-            kg.materialize_derived_relation(
-                "path",
-                vec![Tuple::new(vec![Value::Int32(1), Value::Int32(2)])],
-            )
-            .unwrap();
-        }
-
-        // Verify materialized
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let kg = kg.read();
-            let snapshot = kg.snapshot();
-            assert!(snapshot.is_materialized("path"));
-        }
-
-        // Insert more data - this should invalidate the materialization
-        // (insert triggers notify_base_update which invalidates derived relations)
-        storage
-            .insert_tuples(
-                "edge",
-                vec![Tuple::new(vec![Value::Int32(2), Value::Int32(3)])],
-            )
-            .unwrap();
-
-        // Verify no longer materialized (invalidated)
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let kg = kg.read();
-            let snapshot = kg.snapshot();
-            assert!(
-                !snapshot.is_materialized("path"),
-                "path should be invalidated after base data change"
-            );
-        }
-    }
-
-    #[test]
-    fn test_materialization_query_uses_cached_data() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        // Enable IncrementalEngine
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        // Insert base data
-        storage
-            .insert_tuples(
-                "edge",
-                vec![
-                    Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
-                    Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
-                ],
-            )
-            .unwrap();
-
-        // Register rule
-        let rule_def = make_path_rule_def();
-        storage.register_rule(&rule_def).unwrap();
-
-        // Materialize with DIFFERENT data than what the rule would produce
-        // This proves the query uses cached data, not the rule
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let kg = kg.read();
-            kg.materialize_derived_relation(
-                "path",
-                vec![
-                    Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
-                    Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
-                    Tuple::new(vec![Value::Int32(99), Value::Int32(100)]), // Extra!
-                ],
-            )
-            .unwrap();
-        }
-
-        // Query path - should get 3 results (from materialized), not 2 (from rule)
-        let results = storage
-            .execute_query_with_rules_tuples("result(X, Y) <- path(X, Y)")
-            .unwrap();
-        assert_eq!(
-            results.len(),
-            3,
-            "Should use materialized data (3 tuples), not rule evaluation (2 tuples)"
-        );
-    }
-
-    #[test]
-    fn test_materialization_stats() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let config = create_test_config(temp.path().to_path_buf());
-        let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_knowledge_graph("default").unwrap();
-
-        // Enable IncrementalEngine
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let mut kg = kg.write();
-            kg.enable_incremental().unwrap();
-        }
-
-        // Register two rules
-        let rule1 = make_simple_rule_def("derived1", "base");
-        let rule2 = make_simple_rule_def("derived2", "base");
-
-        storage.register_rule(&rule1).unwrap();
-        storage.register_rule(&rule2).unwrap();
-
-        // Check stats - 2 rules, 0 materialized, 2 invalid
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let kg = kg.read();
-            let dd = kg.incremental().unwrap();
-            let (total, materialized, invalid) = dd.get_derived_stats().unwrap();
-            assert_eq!(total, 2, "should have 2 rules");
-            assert_eq!(materialized, 0, "nothing materialized yet");
-            assert_eq!(invalid, 2, "both should be invalid (not materialized)");
-        }
-
-        // Materialize one
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let kg = kg.read();
-            let dd = kg.incremental().unwrap();
-            dd.set_materialized("derived1", vec![]).unwrap();
-        }
-
-        // Check stats - 2 rules, 1 materialized, 1 invalid
-        {
-            let kg = storage.kg_handle("default").unwrap();
-            let kg = kg.read();
-            let dd = kg.incremental().unwrap();
-            let (total, materialized, invalid) = dd.get_derived_stats().unwrap();
-            assert_eq!(total, 2);
-            assert_eq!(materialized, 1);
-            assert_eq!(invalid, 1);
         }
     }
 
@@ -6186,20 +5023,17 @@ mod tests {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
-mod incremental_scc_tests {
+mod rule_scc_tests {
     use super::*;
     use crate::config::Config;
     use crate::value::Value;
     use tempfile::TempDir;
 
-    fn storage_with_incremental(temp: &TempDir) -> StorageEngine {
+    fn storage(temp: &TempDir) -> StorageEngine {
         let mut config = Config::default();
         config.storage.data_dir = temp.path().to_path_buf();
         let mut storage = StorageEngine::new(config).unwrap();
         storage.use_knowledge_graph("default").unwrap();
-        let kg = storage.kg_handle("default").unwrap();
-        kg.write().enable_incremental().unwrap();
-        drop(kg);
         storage
     }
 
@@ -6238,9 +5072,9 @@ mod incremental_scc_tests {
     }
 
     #[test]
-    fn test_incremental_kg_mutual_recursion_is_full_fixpoint() {
+    fn test_mutual_recursion_is_full_fixpoint() {
         let temp = TempDir::new().unwrap();
-        let storage = storage_with_incremental(&temp);
+        let storage = storage(&temp);
         storage
             .insert_tuples("succ", pairs(&[(0, 1), (1, 2), (2, 3), (3, 4)]))
             .unwrap();
@@ -6260,9 +5094,9 @@ mod incremental_scc_tests {
     }
 
     #[test]
-    fn test_incremental_kg_rule_chain_sees_upstream_rules() {
+    fn test_rule_chain_sees_upstream_rules() {
         let temp = TempDir::new().unwrap();
-        let storage = storage_with_incremental(&temp);
+        let storage = storage(&temp);
         storage.insert_tuples("base", ints(&[1, 2])).unwrap();
         register(&storage, "a(X) <- base(X)");
         register(&storage, "b(X) <- a(X)");

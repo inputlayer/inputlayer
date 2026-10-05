@@ -11,13 +11,12 @@
 //! the files ([`KnowledgeGraph::replay_catalog`]).
 
 use super::{validate_names, KnowledgeGraph};
-use crate::derived_relations::CompiledRule;
 use crate::rule_catalog::{RuleCatalog, RuleDefinition, RuleRegisterResult};
 use crate::schema::{RelationSchema, SchemaCatalog};
-use crate::statement::{RuleDef, SerializableBodyPred};
+use crate::statement::RuleDef;
 use crate::storage::persist::{CatalogEntry, CatalogRecord, Transaction};
 use crate::storage::{StorageError, StorageResult};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use tracing::warn;
 
 /// One edit of a knowledge graph's rule or schema catalog.
@@ -379,15 +378,6 @@ impl KnowledgeGraph {
     pub(super) fn install_catalog(&mut self, delta: CatalogDelta, time: u64) -> bool {
         let durable = delta.is_durable();
         for (name, definition) in delta.rules {
-            if let Some(dd) = &self.incremental {
-                let compiled = definition.as_ref().map(compile_for_dd);
-                let result = dd
-                    .remove_rule(&name)
-                    .and_then(|()| compiled.map_or(Ok(()), |rule| dd.register_rule(rule)));
-                if let Err(e) = result {
-                    warn!(rule = %name, error = %e, "incremental_rule_update_failed");
-                }
-            }
             self.rule_catalog.set(&name, definition);
         }
         if let Some(schemas) = delta.schema_catalog {
@@ -458,32 +448,4 @@ pub(super) fn apply_catalog_records<'r>(
     let revision = newest?;
     schemas.advance_revision(revision);
     Some(revision)
-}
-
-/// Compile every clause of a rule into the incremental engine's description
-/// of it: its dependencies across all clauses, and whether it is recursive.
-fn compile_for_dd(definition: &RuleDefinition) -> CompiledRule {
-    let name = definition.name.clone();
-    let mut dependencies = HashSet::new();
-    let mut is_recursive = false;
-    for clause in &definition.rules {
-        for pred in &clause.body {
-            if let SerializableBodyPred::Atom { relation, .. } = pred {
-                if relation == &name {
-                    is_recursive = true;
-                } else {
-                    dependencies.insert(relation.clone());
-                }
-            }
-        }
-    }
-    let arity = definition.rules.first().map_or(0, |r| r.head_args.len());
-    CompiledRule {
-        name,
-        clauses: vec![], // IR compilation deferred to execution time
-        dependencies,
-        is_recursive,
-        output_schema: (0..arity).map(|i| format!("col{i}")).collect(),
-        stratum: 0, // Stratum computed by RuleCatalog
-    }
 }

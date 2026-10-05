@@ -424,12 +424,7 @@ impl StorageEngine {
 
         let catalog_durable = catalog.is_durable();
         let catalog_saved = db.install_catalog(catalog, time);
-        match db.apply_delta(facts, time) {
-            Ok(relations) => change.relations = relations,
-            // Durable and applied to the store; only the incremental
-            // engine's shadow copy missed it, as on a primary.
-            Err(e) => warn!(kg = %kg, time, error = %e, "replica_apply_shadow_write_failed"),
-        }
+        change.relations = db.apply_delta(facts);
         if catalog_durable && catalog_saved {
             if let Err(e) = self.persist.catalog_saved(kg, time) {
                 warn!(kg = %kg, time, error = %e, "catalog_wal_prune_failed");
