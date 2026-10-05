@@ -231,10 +231,8 @@ a refused pre-crash `expect_revision` pinned to its epoch, and, as an expected
 failure (#380), a refused bare pre-crash `expect_revision` once the new run
 has issued that revision again; it also asserts the notifications after the
 reconnect are exactly the new run's writes with contiguous `seq`), and a `writer` key may subscribe on
-its own graph (S15 refuses its access to the other graph instead). A
-permission refusal carries no structured `code` today; S15 asserts
-`access_denied` as an expected failure (`KnownDefect`, #364), so it fails
-loudly once the code is sent.
+its own graph (S15 refuses its access to the other graph instead). S15 also
+asserts that each permission refusal carries the code `access_denied`.
 
 ### Expected-failure scenarios
 
@@ -331,7 +329,6 @@ once #377 was fixed).
 Tracked defects run as **expected failures** through
 `inputlayer_testkit::KnownDefect`, naming the issue that fixes them (the
 milestone 9 ones are listed under Expected-failure scenarios;
-`tenancy::s15_tenants_and_scoped_keys_are_isolated`, #364;
 `restart::s12_restart_mid_scenario_preserves_revisions`, #380). Each asserts the
 correct contract; its own violation passes as `XFAIL`, any other violation
 fails, and a holding contract fails as `XPASS` so the marker is removed and

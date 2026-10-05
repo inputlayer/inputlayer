@@ -165,6 +165,8 @@ class AuthenticatedResponse:
 class AuthErrorResponse:
     message: str
     id: str | None = None
+    #: ``access_denied`` when the credential may not use the knowledge graph.
+    code: ErrorCode | None = None
 
 
 ErrorCode = Literal[
@@ -181,6 +183,7 @@ ErrorCode = Literal[
     "outcome_unknown",
     "resource_exhausted",
     "replica_unconfirmed",
+    "access_denied",
 ]
 """Why the engine rejected a statement or request (``code`` on ``error`` and ``errors[]``).
 
@@ -192,7 +195,9 @@ leaves the changes possibly applied: read the state back before retrying.
 or its server-wide query memory budget, or a write past its knowledge graph's
 memory budget; nothing was applied. ``replica_unconfirmed``: the write committed
 on a primary shipping synchronously, but no replica confirmed it in time; it is
-applied there, so do not retry it as a failed write."""
+applied there, so do not retry it as a failed write. ``access_denied`` refuses
+what the caller may not do (its role, write grants or API key scope do not allow
+a statement, or its credential was revoked or has expired); nothing ran."""
 
 
 @dataclass(frozen=True)
@@ -524,6 +529,8 @@ class SubscriptionErrorResponse:
     subscription: str
     generation: int
     message: str
+    #: ``access_denied`` when the subscriber may no longer read the knowledge graph.
+    code: ErrorCode | None = None
 
 
 @dataclass(frozen=True)
@@ -735,7 +742,9 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             id=obj.get("id"),
         )
     if msg_type == "auth_error":
-        return AuthErrorResponse(message=obj["message"], id=obj.get("id"))
+        return AuthErrorResponse(
+            message=obj["message"], id=obj.get("id"), code=obj.get("code")
+        )
     if msg_type == "result":
         return ResultResponse(
             columns=obj["columns"],
@@ -898,6 +907,7 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             subscription=obj["subscription"],
             generation=obj["generation"],
             message=obj["message"],
+            code=obj.get("code"),
         )
     if msg_type == "subscription_reset":
         return SubscriptionResetResponse(

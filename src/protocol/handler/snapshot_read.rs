@@ -53,10 +53,7 @@ impl Handler {
                 code: Some(ErrorCode::Validation),
             });
         }
-        let identity = auth
-            .map(crate::auth::Principal::identity)
-            .transpose()
-            .map_err(String::from)?;
+        let identity = auth.map(crate::auth::Principal::identity).transpose()?;
         let mut parsed = Vec::with_capacity(queries.len());
         for query in queries {
             let statements = parse_read_query(query)?;

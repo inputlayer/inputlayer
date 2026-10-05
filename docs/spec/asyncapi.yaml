@@ -982,7 +982,7 @@ components:
 
     ErrorCode:
       type: string
-      enum: [validation, not_found, conflict, unsupported, internal, invalid_request, rate_limited, deadline_exceeded, cancelled, outcome_unknown, store_read_only, resource_exhausted, precondition_failed, replica_unconfirmed]
+      enum: [validation, not_found, conflict, unsupported, internal, invalid_request, rate_limited, deadline_exceeded, cancelled, outcome_unknown, store_read_only, resource_exhausted, precondition_failed, replica_unconfirmed, access_denied]
       description: |
         Why a statement or request failed. `invalid_request` (malformed frame or `id`)
         and `rate_limited` reject a whole request before anything runs.
@@ -999,6 +999,9 @@ components:
         synchronously, but no replica confirmed it within
         `replication.sync_timeout_ms`; it is applied there, so do not retry it
         as a failed write.
+        `access_denied`: the caller may not do this (its role, its write grants
+        or its API key's scope do not allow the statement, or its credential was
+        revoked or has expired); nothing ran.
 
     StatementError:
       type: object
@@ -1157,11 +1160,17 @@ components:
           format: int64
         message:
           type: string
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+          description: |
+            `access_denied` when the subscriber may no longer read the knowledge
+            graph. Absent for a failed re-evaluation.
       examples:
         - type: subscription_error
           subscription: late_orders
           generation: 1
           message: Access denied
+          code: access_denied
 
     SubscriptionDeltaStartResponse:
       type: object
@@ -1904,9 +1913,17 @@ components:
         message:
           type: string
           description: Human-readable authentication error
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+          description: |
+            `access_denied` when the credential is valid but may not use the
+            knowledge graph. Absent for failed credentials.
       examples:
         - type: auth_error
           message: "Invalid username or password"
+        - type: auth_error
+          message: "Access denied"
+          code: access_denied
 
     ResultResponse:
       type: object

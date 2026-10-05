@@ -55,6 +55,7 @@ export interface WsAuthErrorMessage {
   type: "auth_error"
   id?: string
   message: string
+  code?: WsErrorCode
 }
 
 // --- Proof Tree Types ---
@@ -144,6 +145,7 @@ export type WsErrorCode =
   | "store_read_only"
   | "resource_exhausted"
   | "replica_unconfirmed"
+  | "access_denied"
 
 /** A failed statement of a multi-statement program (0-based `index`). */
 export interface WsStatementError {
@@ -300,6 +302,7 @@ export interface WsSubscriptionErrorMessage {
   subscription: string
   generation: number
   message: string
+  code?: WsErrorCode
 }
 
 /** The server ended a subscription it could not keep current; subscribe again. */

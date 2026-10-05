@@ -134,6 +134,8 @@ export interface AuthErrorResponse {
   type: 'auth_error';
   id?: string;
   message: string;
+  /** `access_denied` when the credential may not use the knowledge graph. */
+  code?: ErrorCode;
 }
 
 export interface RuleTiming {
@@ -164,6 +166,9 @@ export interface TimingBreakdown {
  * graph's memory budget; nothing was applied. `replica_unconfirmed`: the write
  * committed on a primary shipping synchronously, but no replica confirmed it in
  * time; it is applied there, so do not retry it as a failed write.
+ * `access_denied` refuses what the caller may not do (its role, write grants
+ * or API key scope do not allow a statement, or its credential was revoked or
+ * has expired); nothing ran.
  */
 export type ErrorCode =
   | 'store_read_only'
@@ -178,7 +183,8 @@ export type ErrorCode =
   | 'cancelled'
   | 'outcome_unknown'
   | 'resource_exhausted'
-  | 'replica_unconfirmed';
+  | 'replica_unconfirmed'
+  | 'access_denied';
 
 /** A failed statement of a multi-statement program (0-based `index`). */
 export interface StatementError {
@@ -513,6 +519,8 @@ export interface SubscriptionErrorResponse {
   subscription: string;
   generation: number;
   message: string;
+  /** `access_denied` when the subscriber may no longer read the knowledge graph. */
+  code?: ErrorCode;
 }
 
 export interface NotificationResponse {

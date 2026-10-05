@@ -44,6 +44,9 @@ pub enum ServerFrame {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<RequestId>,
         message: String,
+        /// Why it failed, when known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<ErrorCode>,
     },
     /// A complete result in one frame.
     Result(ResultFrame),

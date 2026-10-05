@@ -63,8 +63,8 @@ use crate::protocol::notification_log::{Cursor, Resumed};
 use crate::protocol::rest::error::RestError;
 use crate::protocol::rest::{ClientIp, PreAuthSlots, WsSemaphore};
 use crate::protocol::subscription::ConnectionSubscriptions;
-use crate::protocol::Handler;
 use crate::protocol::MAX_MESSAGE_SIZE;
+use crate::protocol::{Handler, ProgramError};
 
 // =============================================================================
 // Global WebSocket Endpoint (/ws)
@@ -347,8 +347,14 @@ async fn handle_global_ws_connection(
             id
         }
         Err(e) => {
-            warn!(kg = %kg, error = %e, "ws_session_create_failed");
-            auth::auth_error(&mut sender, auth_request, e).await;
+            warn!(kg = %kg, error = %e.message, "ws_session_create_failed");
+            sender
+                .send_frame(&ServerFrame::AuthError {
+                    id: auth_request,
+                    message: e.message,
+                    code: e.code,
+                })
+                .await;
             sender.close().await;
             return;
         }
@@ -771,7 +777,8 @@ fn start_requests(
                 let started = std::time::Instant::now();
                 let kg = handler
                     .session_manager()
-                    .session_kg(&session_id.to_string());
+                    .session_kg(&session_id.to_string())
+                    .map_err(ProgramError::from);
                 let (name, members, opening) = match job {
                     Job::Subscribe { name, query } => {
                         let opening =
@@ -797,8 +804,8 @@ fn start_requests(
                         });
                         requests.run(ticket, work.in_current_span());
                     }
-                    Err(message) => {
-                        let frame = encode(&ServerFrame::error(id, None, message));
+                    Err(error) => {
+                        let frame = encode(&ServerFrame::error(id, error.code, error.message));
                         requests.complete(ticket, Reply::Frames(vec![frame]));
                     }
                 }
@@ -881,7 +888,7 @@ fn release_reply(
                         ))]
                     })
                 }
-                Err(message) => vec![encode(&ServerFrame::error(id, None, message))],
+                Err(error) => vec![encode(&ServerFrame::error(id, error.code, error.message))],
             }
         }
         None => vec![encode(&ServerFrame::error(

@@ -28,7 +28,7 @@ use tracing::debug;
 use inputlayer_ws_protocol::{NamedQuery, SubscriptionPush};
 
 use crate::auth::Principal;
-use crate::protocol::Handler;
+use crate::protocol::{Handler, ProgramError};
 use crate::storage_engine::KnowledgeGraphSnapshot;
 
 use super::publication::{Doorbell, SubscriberId};
@@ -86,7 +86,7 @@ impl ConnectionSubscriptions {
         knowledge_graph: &str,
         id: &str,
         query: &str,
-    ) -> Result<Opening, String> {
+    ) -> Result<Opening, ProgramError> {
         self.check_can_add(id, 1)?;
         self.begin(knowledge_graph, id, &[query], None)
     }
@@ -99,7 +99,7 @@ impl ConnectionSubscriptions {
         knowledge_graph: &str,
         id: &str,
         queries: &[NamedQuery],
-    ) -> Result<Opening, String> {
+    ) -> Result<Opening, ProgramError> {
         let members = query_names(queries, "A subscription group")?;
         self.check_can_add(id, members.len())?;
         let texts: Vec<&str> = queries.iter().map(|q| q.query.as_str()).collect();
@@ -112,7 +112,7 @@ impl ConnectionSubscriptions {
         id: &str,
         queries: &[&str],
         members: Option<Arc<[String]>>,
-    ) -> Result<Opening, String> {
+    ) -> Result<Opening, ProgramError> {
         // Checked for the `subscribe` frame; `.subscribe` parsed it already.
         crate::statement::meta::parse_subscription_id(id)?;
         let key = ViewKey {
@@ -180,7 +180,7 @@ impl ConnectionSubscriptions {
         &mut self,
         opened: Opened,
         readable: impl FnOnce(&str) -> bool,
-    ) -> Result<(Snapshot, u64), String> {
+    ) -> Result<(Snapshot, u64), ProgramError> {
         let Opened {
             id,
             key,
@@ -190,10 +190,10 @@ impl ConnectionSubscriptions {
         } = opened;
         let attachment = attachment?;
         if !readable(&key.knowledge_graph) {
-            return Err(format!(
+            return Err(ProgramError::access_denied(format!(
                 "Access denied to knowledge graph '{}'.",
                 key.knowledge_graph
-            ));
+            )));
         }
         // Checked again: another subscribe may have taken the name or the
         // remaining capacity meanwhile.

@@ -7,7 +7,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use inputlayer::auth::{Principal, Role};
-use inputlayer::protocol::wire::QueryResult;
+use inputlayer::protocol::wire::{ErrorCode, QueryResult, WireValue};
 use inputlayer::protocol::Handler;
 use inputlayer::{Config, StorageEngine};
 use tempfile::TempDir;
@@ -73,10 +73,13 @@ async fn run(
 
 fn assert_denied(result: Result<QueryResult, inputlayer::protocol::ProgramError>) {
     match result {
-        Err(e) => assert!(
-            e.message.contains("Access denied") || e.message.contains("Permission denied"),
-            "unexpected error: {e}"
-        ),
+        Err(e) => {
+            assert!(
+                e.message.contains("Access denied") || e.message.contains("Permission denied"),
+                "unexpected error: {e}"
+            );
+            assert_eq!(e.code, Some(ErrorCode::AccessDenied), "{e}");
+        }
         Ok(r) => panic!("expected denial, got {:?}", r.rows),
     }
 }
@@ -343,4 +346,214 @@ async fn kg_create_and_drop_must_be_single_statement() {
     assert!(h
         .get_kg_role_for_user("fresh", "eve", &Role::Editor)
         .is_none());
+}
+
+/// `program` on `kg` as `who` is refused with exactly `message` and the code
+/// `access_denied`.
+async fn assert_refused(
+    handler: &Handler,
+    who: &Principal,
+    kg: &str,
+    program: &str,
+    message: &str,
+) {
+    let error = run(handler, kg, program, who)
+        .await
+        .expect_err(&format!("{program} on {kg} was not refused"));
+    assert_eq!(error.message, message, "{program} on {kg}");
+    assert_eq!(
+        error.code,
+        Some(ErrorCode::AccessDenied),
+        "{program} on {kg}: {error}"
+    );
+}
+
+/// A principal for the key `.apikey create {args}` returns.
+async fn scoped_key(handler: &Handler, args: &str) -> Principal {
+    let created = run(
+        handler,
+        "public",
+        &format!(".apikey create {args}"),
+        &admin(handler),
+    )
+    .await
+    .unwrap();
+    match &created.rows[0].values[1] {
+        WireValue::String(key) => handler.authenticate_api_key(key).unwrap(),
+        other => panic!("expected the key, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn global_role_refusals_carry_access_denied() {
+    let (h, _t) = setup().await;
+    let viewer = user(&h, "mallory");
+    for (program, message) in [
+        (
+            ".kg create mine",
+            "Permission denied: viewers cannot create knowledge graphs",
+        ),
+        (
+            ".ontology install core",
+            "Permission denied: viewers cannot manage ontologies",
+        ),
+    ] {
+        assert_refused(&h, &viewer, "public", program, message).await;
+    }
+}
+
+#[tokio::test]
+async fn admin_only_commands_carry_access_denied() {
+    let (h, _t) = setup().await;
+    let editor = user(&h, "eve");
+    for (program, message) in [
+        (".compact", "Permission denied: only admins can compact"),
+        (
+            ".backup",
+            "Permission denied: only admins can back up the server",
+        ),
+        (
+            ".backup status",
+            "Permission denied: only admins can back up the server",
+        ),
+        (
+            ".user list",
+            "Permission denied: only admins can manage users",
+        ),
+        (
+            ".user create zed password-zed viewer",
+            "Permission denied: only admins can manage users",
+        ),
+        (
+            ".apikey list",
+            "Permission denied: only admins can manage API keys",
+        ),
+        (
+            ".apikey create mine",
+            "Permission denied: only admins can manage API keys",
+        ),
+    ] {
+        assert_refused(&h, &editor, "public", program, message).await;
+    }
+}
+
+#[tokio::test]
+async fn knowledge_graph_role_refusals_carry_access_denied() {
+    let (h, _t) = setup().await;
+    let eve = user(&h, "eve");
+    // No role on the knowledge graph, and the system knowledge graph.
+    assert_refused(&h, &eve, "secret", "?creds(U, P)", "Access denied").await;
+    assert_refused(
+        &h,
+        &eve,
+        "public",
+        ".kg use _internal",
+        "Access denied: '_internal' is a system knowledge graph",
+    )
+    .await;
+    // Viewer of `public`.
+    for program in ["+pub_data[(2,)]", "+pub_data(x: int)", ".rel drop pub_data"] {
+        assert_refused(
+            &h,
+            &eve,
+            "public",
+            program,
+            "Permission denied: you have viewer access to this knowledge graph",
+        )
+        .await;
+    }
+    // Editor of `secret`: owners alone drop it and manage its access.
+    h.handle_kg_acl_grant("secret", "eve", "editor").unwrap();
+    let eve = user(&h, "eve");
+    assert_refused(
+        &h,
+        &eve,
+        "secret",
+        ".kg drop secret",
+        "Permission denied: only KG owners can drop this knowledge graph",
+    )
+    .await;
+    for program in [
+        ".kg acl grant secret mallory viewer",
+        ".kg acl revoke secret mallory",
+    ] {
+        assert_refused(
+            &h,
+            &eve,
+            "secret",
+            program,
+            "Permission denied: only KG owners can manage ACLs",
+        )
+        .await;
+    }
+    assert_eq!(creds_rows(&h).await, 1);
+}
+
+#[tokio::test]
+async fn write_grant_and_key_scope_refusals_carry_access_denied() {
+    let (h, _t) = setup().await;
+    let agent = scoped_key(&h, "agent role decider on public relations decision").await;
+    for (kg, program, message) in [
+        (
+            "public",
+            "+pub_data[(2,)]",
+            "Permission denied: the decider role on 'public' has no write grant for relation \
+             'pub_data'",
+        ),
+        (
+            "public",
+            "+open(X) <- pub_data(X)",
+            "Permission denied: registering a rule needs the editor role on 'public'; the \
+             decider role may only write facts",
+        ),
+        (
+            "public",
+            ".kg drop public",
+            "Permission denied: only owners of 'public' can drop it or manage its access",
+        ),
+        (
+            "public",
+            ".kg create mine",
+            "Permission denied: this API key is scoped to knowledge graph 'public' and cannot \
+             create one",
+        ),
+        (
+            "public",
+            ".kg use secret",
+            "Access denied: this API key is scoped to knowledge graph 'public'",
+        ),
+        (
+            "secret",
+            "?creds(U, P)",
+            "Access denied: this API key is scoped to knowledge graph 'public'",
+        ),
+        (
+            "public",
+            ".compact",
+            "Permission denied: only admins can compact",
+        ),
+    ] {
+        assert_refused(&h, &agent, kg, program, message).await;
+    }
+    // What it was granted still works.
+    run(&h, "public", "+decision[(1,)]", &agent).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_revoked_credential_is_refused_with_access_denied() {
+    let (h, _t) = setup().await;
+    let key = h.create_api_key("short-lived", "eve", None).unwrap();
+    let eve = h.authenticate_api_key(&key).unwrap();
+    run(&h, "public", "?pub_data(X)", &eve).await.unwrap();
+    run(&h, "public", ".apikey revoke short-lived", &admin(&h))
+        .await
+        .unwrap();
+    assert_refused(
+        &h,
+        &eve,
+        "public",
+        "?pub_data(X)",
+        "Access denied: credential revoked",
+    )
+    .await;
 }

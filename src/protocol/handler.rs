@@ -141,6 +141,22 @@ impl From<String> for ProgramError {
     }
 }
 
+impl ProgramError {
+    /// A refusal: the caller may not do what it asked.
+    pub fn access_denied(message: String) -> Self {
+        Self {
+            message,
+            code: Some(ErrorCode::AccessDenied),
+        }
+    }
+}
+
+impl From<crate::auth::CredentialEnded> for ProgramError {
+    fn from(ended: crate::auth::CredentialEnded) -> Self {
+        Self::access_denied(ended.to_string())
+    }
+}
+
 /// Whether `stmt`, the only statement of its program, changes state in the
 /// intercepts of `run_execute_program` rather than in the program executor:
 /// ontology, user, key and access management, and (on a session) session
@@ -1328,10 +1344,7 @@ impl Handler {
     pub fn create_session(&self, knowledge_graph: &str) -> Result<SessionId, String> {
         // Block direct access to the system KG
         if knowledge_graph == crate::auth::INTERNAL_KG {
-            return Err(format!(
-                "Access denied: '{}' is a system knowledge graph",
-                crate::auth::INTERNAL_KG
-            ));
+            return Err(internal_kg_denied());
         }
 
         // Validate KG exists (or auto-create if configured)
@@ -1349,14 +1362,17 @@ impl Handler {
         &self,
         knowledge_graph: &str,
         principal: &crate::auth::Principal,
-    ) -> Result<SessionId, String> {
+    ) -> Result<SessionId, ProgramError> {
         let auth = principal.identity()?;
         // Admins skip per-KG checks
         if auth.role != crate::auth::Role::Admin && self.kg_access(knowledge_graph, &auth).is_none()
         {
-            return Err("Access denied".to_string());
+            return Err(ProgramError::access_denied("Access denied".to_string()));
         }
-        self.create_session(knowledge_graph)
+        if knowledge_graph == crate::auth::INTERNAL_KG {
+            return Err(ProgramError::access_denied(internal_kg_denied()));
+        }
+        Ok(self.create_session(knowledge_graph)?)
     }
 
     /// Close a session.
@@ -4330,11 +4346,8 @@ impl Handler {
         auth: Option<&crate::auth::Principal>,
         knowledge_graph: &str,
         goal: &crate::statement::QueryGoal,
-    ) -> Result<(), String> {
-        let identity = auth
-            .map(crate::auth::Principal::identity)
-            .transpose()
-            .map_err(String::from)?;
+    ) -> Result<(), ProgramError> {
+        let identity = auth.map(crate::auth::Principal::identity).transpose()?;
         self.authorize_program(
             identity.as_ref(),
             Some(knowledge_graph),
@@ -4370,7 +4383,8 @@ impl Handler {
         if !matches!(statements.as_slice(), [statement::Statement::Query(_)]) {
             return Err("A snapshot query must be a single query".to_string());
         }
-        self.authorize_program(identity.as_ref(), Some(knowledge_graph), &statements)?;
+        self.authorize_program(identity.as_ref(), Some(knowledge_graph), &statements)
+            .map_err(|refusal| refusal.message)?;
         let cache_plan = Arc::new(std::sync::OnceLock::new());
         let job = QueryJob {
             pinned: Some(snapshot),
@@ -4416,10 +4430,7 @@ impl Handler {
         let trimmed = program.trim();
 
         // Admission: one immutable permission snapshot for the whole program.
-        let identity = auth
-            .map(crate::auth::Principal::identity)
-            .transpose()
-            .map_err(String::from)?;
+        let identity = auth.map(crate::auth::Principal::identity).transpose()?;
         let effective_auth = identity.as_ref();
 
         // Protect _internal KG from direct access.
@@ -4458,7 +4469,7 @@ impl Handler {
             if identity.role != crate::auth::Role::Admin
                 && current_kg == Some(crate::auth::INTERNAL_KG)
             {
-                return Err(internal_kg_denied().into());
+                return Err(ProgramError::access_denied(internal_kg_denied()));
             }
         }
 
@@ -4808,7 +4819,7 @@ impl Handler {
         auth: Option<&crate::auth::AuthIdentity>,
         current_kg: Option<&str>,
         statements: &[statement::Statement],
-    ) -> Result<(), String> {
+    ) -> Result<(), ProgramError> {
         use crate::auth::{self, Role, INTERNAL_KG};
         use statement::Statement;
 
@@ -4816,16 +4827,17 @@ impl Handler {
         let non_admin = auth.filter(|identity| identity.role != Role::Admin);
         let kg_role = |kg: &str, identity: &auth::AuthIdentity| {
             if kg == INTERNAL_KG {
-                return Err(internal_kg_denied());
+                return Err(ProgramError::access_denied(internal_kg_denied()));
             }
-            self.kg_access(kg, identity)
-                .ok_or_else(|| match &identity.key_scope {
+            self.kg_access(kg, identity).ok_or_else(|| {
+                ProgramError::access_denied(match &identity.key_scope {
                     Some(key) if key.scope.kg != kg => format!(
                         "Access denied: this API key is scoped to knowledge graph '{}'",
                         key.scope.kg
                     ),
                     _ => "Access denied".to_string(),
                 })
+            })
         };
 
         if statements.is_empty() {
@@ -4838,19 +4850,20 @@ impl Handler {
 
         for stmt in statements {
             if let Some(identity) = non_admin {
-                auth::authorize_statement(&identity.role, stmt)?;
+                auth::authorize_statement(&identity.role, stmt)
+                    .map_err(ProgramError::access_denied)?;
                 if let (Some(key), Statement::Meta(MetaCommand::KgCreate(_))) =
                     (&identity.key_scope, stmt)
                 {
-                    return Err(format!(
+                    return Err(ProgramError::access_denied(format!(
                         "Permission denied: this API key is scoped to knowledge graph '{}' \
                          and cannot create one",
                         key.scope.kg
-                    ));
+                    )));
                 }
             }
             if targets_internal_kg(stmt) {
-                return Err(internal_kg_denied());
+                return Err(ProgramError::access_denied(internal_kg_denied()));
             }
             if let Some(identity) = non_admin {
                 let targets: Vec<&str> = match stmt {
@@ -4875,7 +4888,8 @@ impl Handler {
                     _ => kgs.iter().map(String::as_str).collect(),
                 };
                 for kg in targets {
-                    auth::authorize_kg_operation(&kg_role(kg, identity)?, kg, stmt)?;
+                    auth::authorize_kg_operation(&kg_role(kg, identity)?, kg, stmt)
+                        .map_err(ProgramError::access_denied)?;
                 }
             }
             if let Statement::Meta(MetaCommand::KgUse(name) | MetaCommand::KgCreate(name)) = stmt {

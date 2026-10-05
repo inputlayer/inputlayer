@@ -63,6 +63,7 @@ fn every_reply_echoes_its_id() {
         ServerFrame::AuthError {
             id: id("a"),
             message: "no".into(),
+            code: None,
         },
         result(id("a")),
         ServerFrame::ResultStart(ResultStartFrame {
@@ -160,6 +161,7 @@ fn notices_and_pushes_never_carry_an_id() {
             subscription: "s".into(),
             generation: 2,
             message: "boom".into(),
+            code: None,
         }),
         ServerFrame::Subscription(SubscriptionPush::SubscriptionDeltaStart {
             subscription: "s".into(),
@@ -433,6 +435,7 @@ fn stop_codes_serialize_in_snake_case() {
         (ErrorCode::OutcomeUnknown, "outcome_unknown"),
         (ErrorCode::ResourceExhausted, "resource_exhausted"),
         (ErrorCode::ReplicaUnconfirmed, "replica_unconfirmed"),
+        (ErrorCode::AccessDenied, "access_denied"),
         (ErrorCode::PreconditionFailed, "precondition_failed"),
     ] {
         assert_eq!(serde_json::to_value(code).unwrap(), name);
@@ -475,4 +478,41 @@ fn a_result_names_its_commit_revision_only_when_it_has_one() {
     let json = serde_json::to_value(&frame).unwrap();
     assert_eq!(json["revision"], 42, "{json}");
     assert_eq!(round_trip(&frame), frame);
+}
+
+#[test]
+fn auth_and_subscription_errors_carry_an_optional_code() {
+    let coded = [
+        (
+            ServerFrame::AuthError {
+                id: None,
+                message: "Access denied".into(),
+                code: Some(ErrorCode::AccessDenied),
+            },
+            serde_json::json!({"type": "auth_error", "message": "Access denied"}),
+        ),
+        (
+            ServerFrame::Subscription(SubscriptionPush::SubscriptionError {
+                subscription: "s".into(),
+                generation: 2,
+                message: "Access denied".into(),
+                code: Some(ErrorCode::AccessDenied),
+            }),
+            serde_json::json!({
+                "type": "subscription_error",
+                "subscription": "s",
+                "generation": 2,
+                "message": "Access denied",
+            }),
+        ),
+    ];
+    for (frame, uncoded) in coded {
+        let mut wire = uncoded.clone();
+        wire["code"] = "access_denied".into();
+        assert_eq!(serde_json::to_value(&frame).unwrap(), wire);
+        assert_eq!(serde_json::from_value::<ServerFrame>(wire).unwrap(), frame);
+
+        let parsed: ServerFrame = serde_json::from_value(uncoded.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), uncoded);
+    }
 }

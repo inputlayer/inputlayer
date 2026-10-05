@@ -179,7 +179,8 @@ impl Pacing {
     };
 }
 
-/// The engine's `error` reply to a request: nothing it asked for was applied.
+/// The engine's `error` or `auth_error` reply to a request: nothing it asked
+/// for was applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
     /// The structured `code` (`precondition_failed`, `validation`, ...);
@@ -289,6 +290,30 @@ impl WsClient {
     /// Connect to `url` and authenticate with `api_key`, reading the socket
     /// only as fast as `pacing` allows: a slow consumer.
     pub async fn connect_paced(url: &str, api_key: &str, pacing: Pacing) -> Checked<Self> {
+        Self::try_connect_paced(url, api_key, pacing)
+            .await?
+            .map_err(|reply| Violation::Rejected(format!("authentication: {}", reply.value)))
+    }
+
+    /// Connect to `knowledge_graph` on `engine` with `api_key`: the client,
+    /// or the engine's refusal to authenticate it.
+    pub async fn try_connect_with_key(
+        engine: &Engine,
+        knowledge_graph: &str,
+        api_key: &str,
+    ) -> Checked<Result<Self, Refusal>> {
+        let connected =
+            Self::try_connect_paced(&engine.ws_url(knowledge_graph), api_key, Pacing::EAGER)
+                .await?;
+        Ok(connected.map_err(|reply| Refusal::from_frame(&reply)))
+    }
+
+    /// The client, or the frame that refused to authenticate it.
+    async fn try_connect_paced(
+        url: &str,
+        api_key: &str,
+        pacing: Pacing,
+    ) -> Checked<Result<Self, Frame>> {
         let ws = open_socket(url, pacing.recv_buffer_bytes).await?;
         let (sink, mut stream) = ws.split();
         let (tx, inbox) = mpsc::channel(pacing.inbox_frames.max(1));
@@ -317,16 +342,13 @@ impl WsClient {
             .request(json!({"type": "authenticate", "api_key": api_key}))
             .await?;
         if reply.kind() != "authenticated" {
-            return Err(Violation::Rejected(format!(
-                "authentication: {}",
-                reply.value
-            )));
+            return Ok(Err(reply));
         }
         client.stream_epoch = reply.value["stream_epoch"]
             .as_str()
             .ok_or_else(|| Violation::Transport(format!("no stream_epoch: {}", reply.value)))?
             .to_string();
-        Ok(client)
+        Ok(Ok(client))
     }
 
     /// Connection notices received so far that did not close the connection.

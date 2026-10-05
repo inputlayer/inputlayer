@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use futures_util::future::BoxFuture;
+use inputlayer_ws_protocol::ErrorCode;
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -20,8 +21,11 @@ impl ConnectionSubscriptions {
         id: &str,
         query: &str,
     ) -> Result<(Snapshot, u64), String> {
-        let opening = self.begin_subscribe(knowledge_graph, id, query)?;
+        let opening = self
+            .begin_subscribe(knowledge_graph, id, query)
+            .map_err(|error| error.message)?;
         self.finish_subscribe(opening.run().await, |_| true)
+            .map_err(|error| error.message)
     }
 
     /// Attach `id` to the view of `key`, created from `view`, and register it.
@@ -33,6 +37,7 @@ impl ConnectionSubscriptions {
     ) -> Result<(Snapshot, u64), String> {
         let opening = self.opening(key, id, None, None, view);
         self.finish_subscribe(opening.run().await, |_| true)
+            .map_err(|error| error.message)
     }
 }
 
@@ -345,14 +350,15 @@ async fn a_snapshot_is_withheld_when_access_is_lost_while_it_opens() {
         .run()
         .await;
     let mut asked = None;
-    let message = subscriptions
+    let error = subscriptions
         .finish_subscribe(opened, |kg| {
             asked = Some(kg.to_string());
             false
         })
         .unwrap_err();
     assert_eq!(asked.as_deref(), Some(KG));
-    assert!(message.contains("Access denied"), "{message}");
+    assert_eq!(error.message, "Access denied to knowledge graph 'handoff'.");
+    assert_eq!(error.code, Some(ErrorCode::AccessDenied));
     assert!(subscriptions.is_empty());
     assert_eq!(handler.subscription_metrics().active(), 0);
     no_views_left(&handler).await;
@@ -567,8 +573,11 @@ mod groups {
             id: &str,
             queries: &[(&str, &str)],
         ) -> Result<(Snapshot, u64), String> {
-            let opening = self.begin_subscribe_group(KG, id, &named(queries))?;
+            let opening = self
+                .begin_subscribe_group(KG, id, &named(queries))
+                .map_err(|error| error.message)?;
             self.finish_subscribe(opening.run().await, |_| true)
+                .map_err(|error| error.message)
         }
     }
 

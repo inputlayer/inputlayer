@@ -181,6 +181,25 @@ Switch to a different knowledge graph first:
 .kg drop target   // Now drop works
 ```
 
+### Permission Denied
+
+```
+Error: Permission denied: you have viewer access to this knowledge graph
+```
+
+Code `access_denied`. The caller may not run the statement, and nothing ran. Every permission refusal carries this code, whatever refused it:
+
+- The caller's role: a global `viewer` creating a knowledge graph, or a `viewer` of a knowledge graph writing to it
+- A write grant: a `writer` or `decider` writing a relation it was not granted, or changing a rule or schema
+- An admin-only command (`.compact`, `.backup`, `.user`, `.apikey`)
+- An API key's scope: a key scoped to one knowledge graph used on another
+- No access to the knowledge graph (`Access denied`), including the system knowledge graph
+- A credential that was revoked or has expired
+
+The code comes on whichever frame refuses: an `error` answering a request, the `auth_error` refusing a session on a knowledge graph, or the `subscription_error` pushed when a live subscription loses read access.
+
+Ask an owner of the knowledge graph for the role or grant (`.kg acl grant`), or use a credential that has it.
+
 ## Aggregation Errors
 
 ### Invalid Aggregation Variable
