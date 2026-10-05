@@ -300,7 +300,7 @@ Optional:
 ```
 
 File-to-category mapping:
-- `src/vector_ops.rs`, `src/hnsw_index.rs` → `16_vectors`, `30_quantization`, `31_lsh`
+- `src/vector_ops.rs`, `src/hnsw_index.rs`, `src/hnsw_index_tests.rs` → `16_vectors`, `30_quantization`, `31_lsh`
 - `src/temporal_ops.rs` → `29_temporal`
 - `examples/iql/<category>/...` → that category
 - any other file under `src/`, `Cargo.toml`, `Cargo.lock`, `config.toml`, `ws-protocol/`, `ontology-client/`, `scripts/run_snapshot_tests.sh` → every spec (a plan or parser change can reach any category; the whole corpus takes about 1.5 min on 4 cores against debug binaries)
