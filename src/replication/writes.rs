@@ -7,9 +7,10 @@
 //! that commits them, under the lock that orders them, so the log notes each
 //! LSN on that thread: in the request's task, or on a blocking-pool thread
 //! the request handed its [`Writes`] to with [`Writes::enter`]. A durable
-//! write that changes nothing appends no event, yet its reply reports state
-//! that may rest on events no follower has applied: [`staged`] marks the
-//! request so it waits for the log's head instead.
+//! write, even one that changes nothing and appends no event, reports state
+//! that may rest on events others appended that no follower has applied:
+//! `staged()` marks the request ([`Writes::staged`]) so it also waits for
+//! the log's head.
 
 use std::cell::RefCell;
 use std::future::Future;

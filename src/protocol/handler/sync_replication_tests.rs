@@ -117,26 +117,25 @@ async fn a_write_that_changes_nothing_still_waits_for_the_events_before_it() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_write_that_appended_events_also_waits_for_those_after_them() {
     let (handler, _tmp) = primary(FollowerLoss::Block);
-    let error = handler
-        .replicated(async {
-            // The request's own event, which a follower then confirms.
-            run(&handler, ".kg create other").await?;
-            let own = head(&handler);
-            handler.replication_status().sync().acked(own, true);
-            // Another request commits the fact after it, unconfirmed.
-            let other = {
-                let handler = Arc::clone(&handler);
-                tokio::spawn(async move { run(&handler, "+edge(1, 2)").await })
-            };
-            let other = other.await.unwrap().unwrap_err();
-            assert_eq!(other.code, Some(ErrorCode::ReplicaUnconfirmed));
-            assert!(head(&handler) > own);
-            // This request's insert of the same fact changes nothing, yet
-            // reports it present.
-            run(&handler, "+edge(1, 2)").await
-        })
-        .await
-        .expect_err("acknowledged a fact no follower holds");
+    let error = Box::pin(handler.replicated(async {
+        // The request's own event, which a follower then confirms.
+        run(&handler, ".kg create other").await?;
+        let own = head(&handler);
+        handler.replication_status().sync().acked(own, true);
+        // Another request commits the fact after it, unconfirmed.
+        let other = {
+            let handler = Arc::clone(&handler);
+            tokio::spawn(async move { run(&handler, "+edge(1, 2)").await })
+        };
+        let other = other.await.unwrap().unwrap_err();
+        assert_eq!(other.code, Some(ErrorCode::ReplicaUnconfirmed));
+        assert!(head(&handler) > own);
+        // This request's insert of the same fact changes nothing, yet
+        // reports it present.
+        run(&handler, "+edge(1, 2)").await
+    }))
+    .await
+    .expect_err("acknowledged a fact no follower holds");
     assert_eq!(error.code, Some(ErrorCode::ReplicaUnconfirmed));
 }
 
