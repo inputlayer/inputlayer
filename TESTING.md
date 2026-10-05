@@ -226,7 +226,9 @@ at the scale of issue #292: 960 sessions, each subscribed to its own bound
 standing query, while writers saturate the engine for 30 s. Each probe's delta
 reaches exactly its session, once, within a bound of the write's
 acknowledgement, and no session gets a stray delta or a `subscription_error`
-(its module doc states the full contract).
+(its module doc states the full contract). Its timing bounds hold for a
+release engine, so it runs only in `make e2e-reactive` and is ignored in
+debug builds.
 
 Tracked defects run as **expected failures** through
 `inputlayer_testkit::KnownDefect`, naming the issue that fixes them (today:

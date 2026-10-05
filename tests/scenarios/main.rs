@@ -3,7 +3,8 @@
 //! Each scenario starts an engine with its own data directory, connects
 //! agents and writers over `/ws` the way a deployment does, and checks the
 //! related changes together: rows, deltas, revisions, structured errors and
-//! the engine's work counters. Plain `cargo test` runs the suite in debug;
+//! the engine's work counters. Plain `cargo test` runs the suite in debug
+//! (all but `saturation`, whose timing bounds need a release engine);
 //! `make e2e-reactive` runs it in release and writes writer→agent latency
 //! samples when `INPUTLAYER_REACTIVE_SAMPLES_DIR` is set.
 //!
