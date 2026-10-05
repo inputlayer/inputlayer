@@ -119,7 +119,10 @@ fn a_closed_engine_is_dropped_without_writing_its_bound() {
 
     counter.last.fetch_add(BLOCK, Ordering::SeqCst);
     counter.reserve_ahead().unwrap();
-    assert!(!removed.exists(), "a closed engine's directory was recreated");
+    assert!(
+        !removed.exists(),
+        "a closed engine's directory was recreated"
+    );
     let revision = counter.next();
     assert!(revision <= recorded(&open), "{revision} is not reserved");
 }
