@@ -706,6 +706,46 @@ async fn kg_access_revocation_stops_pushes_on_a_live_connection() {
 }
 
 /// Run `program` over an admin `/ws` session; its `result` frame.
+/// A refused program or subscription is answered by an `error` frame with
+/// the code `access_denied`, whatever refused it: the caller's role on the
+/// knowledge graph, an admin-only command, or access revoked since it
+/// connected.
+#[tokio::test(flavor = "multi_thread")]
+async fn permission_refusals_reply_with_the_access_denied_code() {
+    let server = start_server().await;
+    let key = server.key("bob-refused", "bob");
+    let mut bob = Client::connect(&server, Login::Key(&key)).await;
+    for (program, message) in [
+        (
+            "+d[(7,)]",
+            "Permission denied: you have viewer access to this knowledge graph",
+        ),
+        (
+            "?d(X)\n+d[(7,)]",
+            "Permission denied: you have viewer access to this knowledge graph",
+        ),
+        (".compact", "Permission denied: only admins can compact"),
+        (
+            ".kg use _internal",
+            "Access denied: '_internal' is a system knowledge graph",
+        ),
+    ] {
+        let reply = bob.execute(program).await;
+        assert_eq!(reply["type"], "error", "{program}: {reply}");
+        assert_eq!(reply["code"], "access_denied", "{program}: {reply}");
+        assert_eq!(reply["message"], message, "{program}: {reply}");
+    }
+
+    server.handler.handle_kg_acl_revoke(KG, "bob").unwrap();
+    for program in ["?d(X)", ".subscribe s ?d(X)"] {
+        let reply = bob.execute(program).await;
+        assert_eq!(reply["type"], "error", "{program}: {reply}");
+        assert_eq!(reply["code"], "access_denied", "{program}: {reply}");
+        assert_eq!(reply["message"], "Access denied", "{program}: {reply}");
+    }
+    assert_eq!(server.handler.subscription_metrics().active(), 0);
+}
+
 async fn admin_execute(server: &Server, program: &str) -> Value {
     let mut admin = Client::connect(server, Login::Password("admin", ADMIN_PASSWORD)).await;
     let reply = admin.execute(program).await;

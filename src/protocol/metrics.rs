@@ -89,7 +89,7 @@ const NOTICE_CODES: [NoticeCode; 9] = [
     NoticeCode::ServerShutdown,
 ];
 
-const ERROR_CODES: [ErrorCode; 13] = [
+const ERROR_CODES: [ErrorCode; 15] = [
     ErrorCode::StoreReadOnly,
     ErrorCode::Validation,
     ErrorCode::NotFound,
@@ -103,6 +103,8 @@ const ERROR_CODES: [ErrorCode; 13] = [
     ErrorCode::PreconditionFailed,
     ErrorCode::OutcomeUnknown,
     ErrorCode::ResourceExhausted,
+    ErrorCode::ReplicaUnconfirmed,
+    ErrorCode::AccessDenied,
 ];
 
 /// HTTP status codes counted one by one; any other is counted as 0.

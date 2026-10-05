@@ -433,6 +433,7 @@ fn stop_codes_serialize_in_snake_case() {
         (ErrorCode::OutcomeUnknown, "outcome_unknown"),
         (ErrorCode::ResourceExhausted, "resource_exhausted"),
         (ErrorCode::ReplicaUnconfirmed, "replica_unconfirmed"),
+        (ErrorCode::AccessDenied, "access_denied"),
         (ErrorCode::PreconditionFailed, "precondition_failed"),
     ] {
         assert_eq!(serde_json::to_value(code).unwrap(), name);

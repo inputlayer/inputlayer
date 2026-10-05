@@ -17,13 +17,9 @@
 //! Deviations from the strategy's table, which this scenario asserts the
 //! documented contract for instead: a writer key may subscribe on its own graph
 //! (`writer` includes `viewer`, docs/content/docs/guides/authentication.mdx),
-//! so its refused subscription is on graph B; and a permission refusal carries
-//! no structured `code` today (expected `access_denied`, #364), registered as a
-//! known defect below.
+//! so its refused subscription is on graph B.
 
-use inputlayer_testkit::{
-    Agent, Checked, Fixture, KnownDefect, Reproduction, Size, Violation, WsClient,
-};
+use inputlayer_testkit::{Agent, Checked, Fixture, Size, Violation, WsClient};
 use serde_json::json;
 
 use crate::engine;
@@ -32,13 +28,6 @@ use crate::support::{committed, fresh, others_unaffected, refused, QUIET};
 
 const KG_A: &str = "tenant_a";
 const KG_B: &str = "tenant_b";
-
-const NO_ACCESS_CODE: KnownDefect = KnownDefect {
-    plan_item: "#364",
-    summary: "permission refusals carry no structured `code` (expected access_denied)",
-    signature: |v| matches!(v, Violation::Rejected(m) if m.starts_with("missing code")),
-    reproduction: Reproduction::Deterministic,
-};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s15_tenants_and_scoped_keys_are_isolated() -> Checked<()> {
@@ -86,7 +75,7 @@ async fn s15_tenants_and_scoped_keys_are_isolated() -> Checked<()> {
         ),
     ];
     for (reply, names) in refusals {
-        NO_ACCESS_CODE.judge(refused(reply, "access_denied", names).map(drop));
+        refused(reply, "access_denied", names)?;
     }
     match WsClient::connect_with_key(&engine, KG_B, &writer_key).await {
         Err(Violation::Rejected(message)) if message.contains("Access denied") => {}

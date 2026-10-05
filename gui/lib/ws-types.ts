@@ -144,6 +144,7 @@ export type WsErrorCode =
   | "store_read_only"
   | "resource_exhausted"
   | "replica_unconfirmed"
+  | "access_denied"
 
 /** A failed statement of a multi-statement program (0-based `index`). */
 export interface WsStatementError {

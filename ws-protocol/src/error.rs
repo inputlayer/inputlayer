@@ -47,6 +47,10 @@ pub enum ErrorCode {
     /// applied on the primary; they could be lost if the primary is lost
     /// before a replica receives them. Do not retry it as if it failed.
     ReplicaUnconfirmed,
+    /// The caller may not do this: its role, its write grants or its API
+    /// key's scope do not allow the statement, or its credential was revoked
+    /// or has expired. Nothing ran.
+    AccessDenied,
 }
 
 /// A failed statement of a program.
