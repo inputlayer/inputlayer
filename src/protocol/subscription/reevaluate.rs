@@ -50,9 +50,6 @@ pub struct Evaluated {
     /// Engine time of the evaluation, excluding waits for a compute permit
     /// and compiling its plan.
     pub cost: Duration,
-    /// Whether the evaluation reused a compiled plan: `cost` includes no
-    /// compilation.
-    pub plan_cached: bool,
 }
 
 impl ReevaluatingQuery {
@@ -137,7 +134,6 @@ impl ReevaluatingQuery {
             dependencies,
             revision,
             cost: _,
-            plan_cached: _,
         } = evaluated;
         if let Some(columns) = columns {
             self.columns = columns;
@@ -198,7 +194,6 @@ pub async fn evaluate(
         dependencies,
         revision,
         cost: ran.cost,
-        plan_cached: ran.plan_cached,
     })
 }
 
@@ -211,9 +206,6 @@ pub struct QueryRows {
     /// Engine time of the evaluation, excluding waits for a compute permit
     /// and compiling its plan, plus converting its rows.
     pub cost: Duration,
-    /// Whether the evaluation reused a compiled plan: `cost` includes no
-    /// compilation.
-    pub plan_cached: bool,
 }
 
 /// Run `query` on `snapshot` of `knowledge_graph`, as a sharing `probe` or
@@ -248,7 +240,6 @@ pub async fn run_query(
         columns,
         rows,
         cost: run.executing + converting.elapsed(),
-        plan_cached: run.plan_cached,
     })
 }
 

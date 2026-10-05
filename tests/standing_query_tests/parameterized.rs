@@ -135,8 +135,11 @@ async fn bound_subscriptions_share_one_evaluation_and_get_only_their_rows() {
     assert!(three.rows.is_empty());
     let _idle = idle(&server, r#"?view(S, X, "a")"#, 4).await;
 
-    // The views' first evaluations compiled their plans; the next ones give
-    // the cost a shared evaluation is compared with.
+    // The views' first evaluations give the cost a shared evaluation is
+    // compared with: once the family has more bindings than permits, that
+    // cost starts a probe no view waits for. Judged before any write, the
+    // family shares the first one.
+    judged(&server, 1).await;
     server
         .write("+item[(\"s1\", 9), (\"s2\", 9), (\"s3\", 9)]\n+kind(9, \"a\")")
         .await;
@@ -144,12 +147,8 @@ async fn bound_subscriptions_share_one_evaluation_and_get_only_their_rows() {
         let expected = member.oracle().await;
         member.converge(&expected).await;
     }
-    // That cost starts a probe no view waits for. Once judged, the family
-    // shares, and views still refreshing at its revision read the probe's
-    // round rather than evaluating another.
-    judged(&server, 1).await;
     let before = shared(&server);
-    assert_eq!(before, 1, "one evaluation for the probe's revision");
+    assert_eq!(before, 2, "the probe, then one evaluation for the write");
     server.write("+item(\"s1\", 3)\n+kind(3, \"a\")").await;
     let expected = one.oracle().await;
     one.converge(&expected).await;
@@ -215,7 +214,7 @@ async fn every_subscriber_follows_its_own_query_through_mixed_writes() {
         }
     }
     // Whether the family keeps sharing depends on the host's timing, but
-    // the first own evaluations that reuse a plan always start a probe.
+    // its first own evaluations always start a probe.
     judged(&server, 1).await;
 }
 
@@ -238,8 +237,8 @@ async fn a_family_of_one_binding_evaluates_on_its_own() {
             let expected = member.oracle().await;
             member.converge(&expected).await;
         }
-        // A probe (as early as the subscriptions: `same` reuses the plan of
-        // `one`), judged before the next write, so that the family shares.
+        // A probe (as early as the subscriptions), judged before the next
+        // write, so that the family shares.
         judged(&server, 1).await;
     }
     let after_shared = shared(&server);

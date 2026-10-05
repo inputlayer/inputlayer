@@ -41,13 +41,15 @@
 //! so saving them a little latency on an idle server must not cost the
 //! server many times the work, and saving the server work must not make
 //! every delta wait many times longer. Costs leave out waiting
-//! for a permit and compiling a plan, and a view's own cost counts only
-//! evaluations that reused a compiled plan. Costs hold under the rules they
-//! were measured with: a rule change stops sharing and starts them over. A
-//! family never evaluates its lifted query while a parameter binds an atom
-//! that reads, under the current rules, a recursive relation: the constant
-//! lets Magic Sets restrict the work, and the lifted query may compute the
-//! whole closure. Otherwise, once it has a view's own cost to compare with,
+//! for a permit and compiling a plan, so a view's first evaluation, which
+//! compiles its plan, already gives its own cost: a family is judged while
+//! its views subscribe, not on the first commit that refreshes them all.
+//! Costs hold under the rules they were measured with: a rule change stops
+//! sharing and starts them over. A family never evaluates its lifted query
+//! while a parameter binds an atom that reads, under the current rules, a
+//! recursive relation: the constant lets Magic Sets restrict the work, and
+//! the lifted query may compute the whole closure. Otherwise, once it has a
+//! view's own cost to compare with and more bindings than compute permits,
 //! a family probes: it evaluates the round of that revision, which no view
 //! waits for, under the server's probe permit rather than a compute permit,
 //! and starts sharing only when that round is fast enough. Views that then
@@ -807,24 +809,19 @@ impl Family {
         self.sharing.store(false, Ordering::Relaxed);
     }
 
-    /// Note a view's own evaluation on `snapshot`: its cost when it reused a
-    /// compiled plan (`None` when it compiled one). Whether to probe: no
-    /// parameter binds recursion under `snapshot`'s rules, the own cost is
-    /// known, there are more bindings than compute permits, and the family
-    /// never stopped sharing, enough own evaluations passed since it did, or
-    /// it has twice the bindings it had then.
-    fn record_own(&self, cost: Option<Duration>, snapshot: &KnowledgeGraphSnapshot) -> bool {
+    /// Note a view's own evaluation on `snapshot`, of `cost`. Whether to
+    /// probe: no parameter binds recursion under `snapshot`'s rules, there
+    /// are more bindings than compute permits, and the family never stopped
+    /// sharing, enough own evaluations passed since it did, or it has twice
+    /// the bindings it had then.
+    fn record_own(&self, cost: Duration, snapshot: &KnowledgeGraphSnapshot) -> bool {
         let rules = snapshot.persistent_rules();
         if self.binds_recursion(snapshot) || !self.judges(rules) {
             return false;
         }
-        let average = match cost {
-            Some(cost) => match self.smooth(&self.own_cost_us, cost, rules) {
-                Some(average) => average,
-                None => return false,
-            },
-            None => self.own_cost_us.load(Ordering::Relaxed),
-        };
+        if self.smooth(&self.own_cost_us, cost, rules).is_none() {
+            return false;
+        }
         if self.sharing.load(Ordering::Relaxed) {
             return false;
         }
@@ -836,8 +833,7 @@ impl Family {
                 .stopped_at_bindings
                 .load(Ordering::Relaxed)
                 .saturating_mul(2);
-        average > 0
-            && self.outnumbers_permits()
+        self.outnumbers_permits()
             && (stops == 0 || grown || since_stop >= probe_after(bindings, stops))
     }
 
@@ -972,10 +968,7 @@ impl MemberQuery {
         let snapshot = self.own.current_snapshot()?;
         let rules = Arc::clone(snapshot.persistent_rules());
         let evaluated = self.own.evaluate_on(Arc::clone(&snapshot)).await?;
-        if self
-            .family
-            .record_own(evaluated.plan_cached.then_some(evaluated.cost), &snapshot)
-        {
+        if self.family.record_own(evaluated.cost, &snapshot) {
             Family::probe(&self.family, snapshot);
         }
         self.validated = Some(rules);
@@ -1014,7 +1007,6 @@ impl MemberQuery {
             dependencies: partitions.dependencies.clone(),
             revision: partitions.revision,
             cost: Duration::ZERO,
-            plan_cached: false,
         })
     }
 }
