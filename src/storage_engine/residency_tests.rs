@@ -701,6 +701,17 @@ fn warming_stops_at_the_loaded_limit_and_survives_a_bad_record() {
     assert!(loaded(&storage, "b"), "warming never unloads a used graph");
     assert!(!loaded(&storage, "a"));
     assert!(!storage.warm_knowledge_graph("missing").unwrap());
+    // A graph the limit left dormant is no longer recorded as in memory.
+    assert_eq!(storage.resident_knowledge_graphs(), ["b", "default"]);
+    assert!(!storage.warm_knowledge_graph("default").unwrap());
+    assert_eq!(storage.resident_knowledge_graphs(), ["b"]);
+    crash(storage);
+
+    // The next restart warms the graph that was in memory, not a stale name.
+    let storage = open_limited(temp.path(), 1);
+    assert_eq!(storage.resident_knowledge_graphs(), ["b"]);
+    assert_eq!(warm(&storage), 1);
+    assert!(loaded(&storage, "b"));
     crash(storage);
 
     // An unreadable record warms nothing; graphs load on first use.

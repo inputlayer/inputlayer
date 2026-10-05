@@ -564,19 +564,24 @@ impl StorageEngine {
     /// does for each of [`Self::resident_knowledge_graphs`]. Returns whether
     /// it loaded: not when `kg` is loaded already, was dropped, or
     /// `storage.max_loaded_knowledge_graphs` are loaded (the warm-up never
-    /// unloads a KG a request loaded).
+    /// unloads a KG a request loaded). A KG left dormant by that limit is
+    /// no longer recorded as in memory, until a request loads it.
     ///
     /// # Errors
     /// The load failed; the KG's first request retries it.
     pub fn warm_knowledge_graph(&self, kg: &str) -> StorageResult<bool> {
-        let limit = self.config.storage.max_loaded_knowledge_graphs;
-        if limit > 0 && self.loaded_knowledge_graph_count() >= limit {
-            return Ok(false);
-        }
         let Ok(slot) = self.slot(kg) else {
             return Ok(false);
         };
         if slot.graph().is_some() {
+            return Ok(false);
+        }
+        let limit = self.config.storage.max_loaded_knowledge_graphs;
+        if limit > 0 && self.loaded_knowledge_graph_count() >= limit {
+            let _state = slot.state.lock();
+            if slot.graph().is_none() {
+                self.record_resident(kg, false);
+            }
             return Ok(false);
         }
         match self.activate(kg, &slot) {
