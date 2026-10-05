@@ -543,9 +543,9 @@ Create a new HNSW index on a vector column.
 - `column` - Column name containing vectors
 - `type` - Index type (default: `hnsw`)
 - `metric` - Distance metric: `cosine`, `euclidean`, `dot_product`, `manhattan` (default: `cosine`)
-- `m` - Max connections per node (default: 16, higher = better recall, more memory)
-- `ef_construction` - Beam width during construction (default: 200, higher = better quality, slower build)
-- `ef_search` - Beam width during search (default: 50, higher = better recall, slower search)
+- `m` - Max connections per node, 2 to 256 (default: 16, higher = better recall, more memory)
+- `ef_construction` - Beam width during construction, 1 to 10,000 (default: 200, higher = better quality, slower build)
+- `ef_search` - Beam width during search, 1 to 10,000 (default: 50, higher = better recall, slower search)
 
 **Examples:**
 

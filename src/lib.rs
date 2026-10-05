@@ -135,6 +135,7 @@ pub mod syntax; // PEG-based syntax highlighting for REPL
 // Storage Engine
 pub mod config; // Configuration system
 pub mod naming; // Canonical KG and relation name grammar
+pub mod size_limits; // Bounds on request-supplied sizes
 pub mod storage; // Storage formats (Parquet, metadata)
 pub mod storage_engine; // Multi-knowledge-graph storage engine
 
@@ -256,6 +257,12 @@ pub use statement::{
 
 // Re-export parser functions
 pub use parser::{parse_program, parse_rule};
+
+/// Stack size for threads that parse, plan and evaluate client programs. The
+/// parser's nesting and rule-body limits were measured against it so every
+/// recursive pass fits, in debug as well as release builds; Rust's 2 MiB
+/// default does not. The stack is virtual memory, committed only as used.
+pub const ENGINE_THREAD_STACK_BYTES: usize = 64 * 1024 * 1024;
 
 // Re-export rule catalog
 pub use rule_catalog::{validate_rule, validate_rules_stratification, RuleCatalog, RuleDefinition};

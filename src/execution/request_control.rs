@@ -1,4 +1,4 @@
-//! Deadline and cancellation of one request.
+//! Deadline, cancellation and commit precondition of one request.
 //!
 //! A [`RequestControl`] is created when a request arrives and shared by
 //! whoever may stop it (its deadline, a client `cancel`) and the computation
@@ -27,12 +27,18 @@
 //! every computation of the request, even one that runs after the request
 //! began committing (a query after a write in the same program): the commit
 //! is not interrupted, but that computation is.
+//!
+//! A request may also carry a [`Precondition`] its commit must meet
+//! (`expect_revision`); the commit checks it under the knowledge graph's
+//! write lock, so it reaches the commit the way the deadline does.
 
 use std::sync::atomic::{AtomicI64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::Notify;
+
+use crate::storage_engine::Precondition;
 
 const RUNNING: u8 = 0;
 const STOPPED_DEADLINE: u8 = 1;
@@ -153,7 +159,8 @@ pub enum Halt {
     AlreadyStopped(Stop),
 }
 
-/// Deadline and stop state of one request; see the module docs.
+/// Deadline, stop state and commit precondition of one request; see the
+/// module docs.
 #[derive(Debug)]
 pub struct RequestControl {
     deadline: Option<Instant>,
@@ -165,6 +172,7 @@ pub struct RequestControl {
     pool: Option<Arc<QueryMemoryPool>>,
     /// The memory stop a computation of the request hit, if any (a state).
     memory_exceeded: AtomicU8,
+    precondition: Option<Precondition>,
     state: AtomicU8,
     /// Wakes [`Self::interrupted`] on an explicit cancel.
     cancelled: Notify,
@@ -173,7 +181,7 @@ pub struct RequestControl {
 impl RequestControl {
     /// A running request that must finish by `deadline`, if any.
     pub fn new(deadline: Option<Instant>) -> Arc<Self> {
-        Self::limited(deadline, 0, None)
+        Self::limited_expecting(deadline, 0, None, None)
     }
 
     /// A running request that must finish by `deadline`, if any, holding at
@@ -184,12 +192,30 @@ impl RequestControl {
         memory_limit: u64,
         pool: Option<Arc<QueryMemoryPool>>,
     ) -> Arc<Self> {
+        Self::limited_expecting(deadline, memory_limit, pool, None)
+    }
+
+    /// A running request that must finish by `deadline`, if any, and whose
+    /// commit must meet `precondition`, if any.
+    pub fn expecting(deadline: Option<Instant>, precondition: Option<Precondition>) -> Arc<Self> {
+        Self::limited_expecting(deadline, 0, None, precondition)
+    }
+
+    /// [`Self::limited`] for a request whose commit must meet
+    /// `precondition`, if any.
+    pub fn limited_expecting(
+        deadline: Option<Instant>,
+        memory_limit: u64,
+        pool: Option<Arc<QueryMemoryPool>>,
+        precondition: Option<Precondition>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             deadline,
             memory_limit,
             held: AtomicI64::new(0),
             pool,
             memory_exceeded: AtomicU8::new(RUNNING),
+            precondition,
             state: AtomicU8::new(RUNNING),
             cancelled: Notify::new(),
         })
@@ -197,7 +223,7 @@ impl RequestControl {
 
     /// A request arriving now with `timeout` to finish (`None`: no deadline).
     pub fn with_timeout(timeout: Option<Duration>) -> Arc<Self> {
-        Self::new(timeout.map(|t| Instant::now() + t))
+        Self::new(timeout.and_then(|t| Instant::now().checked_add(t)))
     }
 
     /// Most bytes the computation may hold; 0 = no limit.
@@ -208,6 +234,11 @@ impl RequestControl {
     /// When the request must have finished, if it has a deadline.
     pub fn deadline(&self) -> Option<Instant> {
         self.deadline
+    }
+
+    /// The precondition the request's commit must meet, if any.
+    pub fn precondition(&self) -> Option<&Precondition> {
+        self.precondition.as_ref()
     }
 
     /// Why the request was stopped, if it was.

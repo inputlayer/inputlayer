@@ -17,6 +17,7 @@
 //! - Writers publish new snapshots atomically via `ArcSwap`
 //! - Readers get consistent snapshots without holding locks
 
+use super::precondition::ChangeLog;
 use crate::ast::dependencies::DependencyClosure;
 use crate::ast::{Program, Rule};
 use crate::execution::{TimingBreakdown, TimingMode};
@@ -32,6 +33,12 @@ use tracing::info;
 
 /// Last revision handed to a snapshot, across all knowledge graphs.
 static LAST_REVISION: AtomicU64 = AtomicU64::new(0);
+
+/// The last revision handed to a snapshot of any knowledge graph in this
+/// engine run; no snapshot has a later one yet.
+pub(super) fn last_revision() -> u64 {
+    LAST_REVISION.load(Ordering::SeqCst)
+}
 
 /// Immutable point-in-time snapshot of knowledge graph data
 ///
@@ -82,6 +89,10 @@ pub struct KnowledgeGraphSnapshot {
     /// HNSW search over the index views captured when this snapshot was
     /// published, so `hnsw_nearest` sees the same data as `input_tuples`.
     pub hnsw_search_fn: Option<HnswSearchFn>,
+
+    /// When each relation and the rules last changed, as of this snapshot;
+    /// shared with copies of it.
+    changes: Arc<ChangeLog>,
 }
 
 /// The persistent rules a snapshot evaluates queries with, and the plans
@@ -241,7 +252,20 @@ impl KnowledgeGraphSnapshot {
             max_query_cost: 0,
             optimization: OptimizationConfig::default(),
             hnsw_search_fn: None,
+            changes: Arc::new(ChangeLog::starting_at(revision)),
         }
+    }
+
+    /// When each relation and the rules last changed, as of this snapshot.
+    /// A published snapshot continues its predecessor's log; any other
+    /// starts an empty one at its own revision.
+    pub fn changes(&self) -> &ChangeLog {
+        &self.changes
+    }
+
+    /// Set the change log of a snapshot about to be published.
+    pub(super) fn set_changes(&mut self, changes: ChangeLog) {
+        self.changes = Arc::new(changes);
     }
 
     /// Create an empty snapshot

@@ -199,6 +199,8 @@ pub struct Handler {
     /// Permits of standing-query sharing probes, apart from the compute
     /// permits so that a probe never takes one a query waits for.
     probe_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Whether standing-query families share whatever their rounds cost.
+    share_regardless_of_cost: bool,
     /// Memory held by the computations of every request in flight.
     query_memory: Arc<QueryMemoryPool>,
     /// Accumulated timing histogram buckets for Prometheus export.
@@ -235,39 +237,38 @@ mod index_commands {
         storage: &StorageEngine,
         kg: &str,
         opts: &IndexCreateOptions,
-    ) -> Result<String, ProgramError> {
-        let stats = storage
+    ) -> Result<(String, u64), ProgramError> {
+        let (stats, revision) = storage
             .create_index_in(kg, opts)
             .map_err(ProgramError::from)?;
-        Ok(format!(
+        let message = format!(
             "Index '{}' created on {}.{} ({} vectors).",
             stats.name, stats.relation, stats.column, stats.tuple_count
-        ))
+        );
+        Ok((message, revision))
     }
 
     pub(super) fn drop(
         storage: &StorageEngine,
         kg: &str,
         name: &str,
-    ) -> Result<String, ProgramError> {
-        storage
+    ) -> Result<(String, u64), ProgramError> {
+        let revision = storage
             .drop_index_in(kg, name)
             .map_err(ProgramError::from)?;
-        Ok(format!("Index '{name}' dropped."))
+        Ok((format!("Index '{name}' dropped."), revision))
     }
 
     pub(super) fn rebuild(
         storage: &StorageEngine,
         kg: &str,
         name: &str,
-    ) -> Result<String, ProgramError> {
-        let stats = storage
+    ) -> Result<(String, u64), ProgramError> {
+        let (stats, revision) = storage
             .rebuild_index_in(kg, name)
             .map_err(ProgramError::from)?;
-        Ok(format!(
-            "Index '{name}' rebuilt ({} vectors).",
-            stats.tuple_count
-        ))
+        let message = format!("Index '{name}' rebuilt ({} vectors).", stats.tuple_count);
+        Ok((message, revision))
     }
 
     pub(super) fn stats(
@@ -583,6 +584,10 @@ mod proof_snapshot_tests;
 mod pinned_proof_tests;
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod expect_revision_tests;
+
+#[cfg(test)]
 mod revocation_tests;
 
 #[cfg(test)]
@@ -862,6 +867,7 @@ impl ProofSnapshot {
             ),
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 
@@ -914,6 +920,7 @@ impl ProofSnapshot {
             timing_breakdown: proof_timing(timing_mode, start, query_us, "explanation", explain_us),
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 }
@@ -997,6 +1004,7 @@ impl Handler {
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
+            share_regardless_of_cost: false,
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
@@ -1013,6 +1021,7 @@ impl Handler {
     /// Create a new handler from configuration.
     pub fn from_config(mut config: Config) -> Result<Self, String> {
         config.validate()?;
+        crate::parser::set_max_nesting_depth(config.storage.performance.max_nesting_depth);
         let storage =
             StorageEngine::new(config).map_err(|e| format!("Failed to create storage: {e}"))?;
         let handler = Self::new(storage);
@@ -1047,6 +1056,7 @@ impl Handler {
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
+            share_regardless_of_cost: false,
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
@@ -1079,6 +1089,16 @@ impl Handler {
     /// `query_timeout_ms` from now, or the client's `timeout_ms` when that is
     /// sooner (no deadline when both are unset or the server's is 0).
     pub fn request_control(&self, timeout_ms: Option<u64>) -> Arc<RequestControl> {
+        self.request_control_expecting(timeout_ms, None)
+    }
+
+    /// [`Self::request_control`] for a request whose commit must meet
+    /// `precondition`, if any.
+    pub fn request_control_expecting(
+        &self,
+        timeout_ms: Option<u64>,
+        precondition: Option<crate::storage_engine::Precondition>,
+    ) -> Arc<RequestControl> {
         let server_ms = match self.config.storage.performance.query_timeout_ms {
             0 => None,
             ms => Some(ms),
@@ -1087,10 +1107,12 @@ impl Handler {
             (Some(client), Some(server)) => Some(client.min(server)),
             (client, server) => client.or(server),
         };
-        RequestControl::limited(
-            ms.map(|ms| Instant::now() + std::time::Duration::from_millis(ms)),
+        RequestControl::limited_expecting(
+            // A deadline past what `Instant` can represent is no deadline.
+            ms.and_then(|ms| Instant::now().checked_add(std::time::Duration::from_millis(ms))),
             self.config.storage.performance.max_query_memory_bytes,
             Some(Arc::clone(&self.query_memory)),
+            precondition,
         )
     }
 
@@ -1118,6 +1140,21 @@ impl Handler {
         self.query_semaphore = Arc::new(tokio::sync::Semaphore::new(permits));
         self.compute_permits = permits;
         self
+    }
+
+    /// This handler's standing-query families sharing whenever their views
+    /// outnumber the compute permits, whatever their rounds cost: they still
+    /// probe, and still stop sharing on a failed round. For tests and
+    /// benchmarks that need sharing to happen whatever the host's timing.
+    #[cfg(feature = "test-support")]
+    pub fn with_sharing_regardless_of_cost(mut self) -> Self {
+        self.share_regardless_of_cost = true;
+        self
+    }
+
+    /// Whether standing-query families share whatever their rounds cost.
+    pub(crate) fn shares_regardless_of_cost(&self) -> bool {
+        self.share_regardless_of_cost
     }
 
     /// Standing-query counters.
@@ -1654,6 +1691,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 
@@ -2248,6 +2286,7 @@ impl Handler {
         let storage = self.storage.read();
         storage
             .clear_relations_by_prefix_in(kg, prefix)
+            .map(|(cleared, _)| cleared)
             .map_err(ProgramError::from)
     }
 
@@ -2271,12 +2310,12 @@ impl Handler {
         kg: &str,
         opts: &IndexCreateOptions,
     ) -> Result<String, ProgramError> {
-        index_commands::create(&self.storage.read(), kg, opts)
+        index_commands::create(&self.storage.read(), kg, opts).map(|(message, _)| message)
     }
 
     /// Drop an index.
     pub fn drop_index(&self, kg: &str, name: &str) -> Result<String, ProgramError> {
-        index_commands::drop(&self.storage.read(), kg, name)
+        index_commands::drop(&self.storage.read(), kg, name).map(|(message, _)| message)
     }
 
     /// List all indexes of a knowledge graph.
@@ -2291,7 +2330,7 @@ impl Handler {
 
     /// Rebuild an index from base data, dropping tombstones.
     pub fn rebuild_index(&self, kg: &str, name: &str) -> Result<String, ProgramError> {
-        index_commands::rebuild(&self.storage.read(), kg, name)
+        index_commands::rebuild(&self.storage.read(), kg, name).map(|(message, _)| message)
     }
 
     /// Execute an IQL program and return results.
@@ -2491,6 +2530,9 @@ impl QueryJob {
         let mut session_rules_parsed: Vec<crate::ast::Rule> = Vec::new();
         let mut errors: Vec<StatementError> = Vec::new();
         let mut stmt_index: usize;
+        // The revision the program's last write to persistent state committed
+        // at, if it made one.
+        let mut revision = None;
         // Records a failure of the current statement and reports it as a
         // message row too.
         macro_rules! fail {
@@ -2524,7 +2566,13 @@ impl QueryJob {
                             #[cfg(test)]
                             test_hook::run(test_hook::Point::ProofSearch);
                             match snapshot.explain(proof, timing_mode) {
-                                Ok(qr) => return Ok(QueryResult { errors, ..qr }),
+                                Ok(qr) => {
+                                    return Ok(QueryResult {
+                                        errors,
+                                        revision,
+                                        ..qr
+                                    })
+                                }
                                 Err(e) => {
                                     storage = self.storage.read();
                                     fail!(
@@ -2659,9 +2707,10 @@ impl QueryJob {
                                     }
                                     MetaCommand::KgCreate(name) => {
                                         info!(kg = %name, "meta_kg_create_start");
-                                        match storage.create_knowledge_graph(&name) {
-                                            Ok(()) => {
+                                        match storage.create_knowledge_graph_at(&name) {
+                                            Ok(created) => {
                                                 info!(kg = %name, "meta_kg_create_ok");
+                                                revision = Some(created);
                                                 self.notify_kg_change(&name, "created");
                                                 messages.push(format!(
                                                     "Knowledge graph '{name}' created."
@@ -2812,7 +2861,8 @@ impl QueryJob {
 
                                     MetaCommand::RelDrop(name) => {
                                         match storage.drop_relation_in(kg, &name) {
-                                            Ok(()) => {
+                                            Ok(published) => {
+                                                revision = Some(published);
                                                 self.notify_schema_change(kg, &name, "dropped");
                                                 messages
                                                     .push(format!("Relation '{name}' dropped."));
@@ -2899,7 +2949,8 @@ impl QueryJob {
                                     // === Clear commands ===
                                     MetaCommand::ClearPrefix(prefix) => {
                                         match storage.clear_relations_by_prefix_in(kg, &prefix) {
-                                            Ok(cleared) => {
+                                            Ok((cleared, published)) => {
+                                                revision = Some(published);
                                                 if cleared.is_empty() {
                                                     messages.push(format!(
                                                         "No relations matching prefix '{prefix}'."
@@ -3046,7 +3097,8 @@ impl QueryJob {
                                     MetaCommand::IndexCreate(opts) => {
                                         info!(index = %opts.name, "meta_index_create_start");
                                         match index_commands::create(&storage, kg, &opts) {
-                                            Ok(msg) => {
+                                            Ok((msg, published)) => {
+                                                revision = Some(published);
                                                 info!(index = %opts.name, "meta_index_create_ok");
                                                 messages.push(msg);
                                             }
@@ -3074,7 +3126,8 @@ impl QueryJob {
                                     MetaCommand::IndexDrop(name) => {
                                         info!(index = %name, "meta_index_drop_start");
                                         match index_commands::drop(&storage, kg, &name) {
-                                            Ok(msg) => {
+                                            Ok((msg, published)) => {
+                                                revision = Some(published);
                                                 info!(index = %name, "meta_index_drop_ok");
                                                 messages.push(msg);
                                             }
@@ -3154,7 +3207,10 @@ impl QueryJob {
                                     }
                                     MetaCommand::IndexRebuild(name) => {
                                         match index_commands::rebuild(&storage, kg, &name) {
-                                            Ok(msg) => messages.push(msg),
+                                            Ok((msg, published)) => {
+                                                revision = Some(published);
+                                                messages.push(msg);
+                                            }
                                             Err(e) => fail!(
                                                 e.code
                                                     .filter(|code| matches!(
@@ -3263,9 +3319,10 @@ impl QueryJob {
         if !write_run.is_empty() {
             if errors.is_empty() {
                 match self.commit_write_run(&storage, &kg_name, &mut write_run, &mut messages) {
-                    Ok((base, counts)) => {
+                    Ok((base, counts, committed_at)) => {
                         committed = Some(base);
                         statement_counts = counts;
+                        revision = committed_at.or(revision);
                     }
                     Err(failure) => {
                         stmt_index = failure.index;
@@ -3325,6 +3382,7 @@ impl QueryJob {
                 errors,
                 statements: statement_counts,
                 execution_time_ms: start.elapsed().as_millis() as u64,
+                revision,
                 ..Handler::messages_result(messages)
             });
         }
@@ -3345,6 +3403,7 @@ impl QueryJob {
                 errors,
                 statements: statement_counts,
                 execution_time_ms: start.elapsed().as_millis() as u64,
+                revision,
                 ..Handler::messages_result(messages)
             });
         }
@@ -3367,6 +3426,7 @@ impl QueryJob {
                             errors,
                             statements: statement_counts,
                             execution_time_ms: start.elapsed().as_millis() as u64,
+                            revision,
                             ..Handler::messages_result(messages)
                         });
                     }
@@ -3568,6 +3628,7 @@ impl QueryJob {
             timing_breakdown,
             errors,
             statements: statement_counts,
+            revision,
         })
     }
 }
@@ -3857,6 +3918,7 @@ impl Handler {
             timing_breakdown,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 
@@ -4137,6 +4199,18 @@ impl Handler {
         let statements = parse_program(&program).ok();
         let stmts = statements.as_deref().unwrap_or_default();
         self.authorize_program(effective_auth, current_kg, stmts)?;
+        if control.precondition().is_some()
+            && statements.is_some()
+            && !program_boundary::is_transactional(stmts)
+        {
+            return Err(ProgramError {
+                message: "expect_revision needs a program that writes persistent state \
+                          (facts, schemas or rules): it is checked when those writes commit. \
+                          Nothing ran."
+                    .to_string(),
+                code: Some(ErrorCode::InvalidRequest),
+            });
+        }
         if stmts.len() > 1
             && stmts.iter().any(|stmt| {
                 matches!(
@@ -4542,6 +4616,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         }
     }
 
@@ -4635,6 +4710,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         }
     }
 
@@ -4972,18 +5048,21 @@ impl Handler {
             .into());
         }
 
-        Ok(Self::messages_result(vec![
-            format!(
-                "installed {}@{} into {kg} ({statement_count} statements)",
-                name, entry.version
-            ),
-            format!("digest {}", entry.digest),
-            format!(
-                "recorded {} rule(s), {} relation(s) in pack_item",
-                items.iter().filter(|(k, _)| k == "rule").count(),
-                items.iter().filter(|(k, _)| k == "relation").count()
-            ),
-        ]))
+        Ok(QueryResult {
+            revision: recorded.revision,
+            ..Self::messages_result(vec![
+                format!(
+                    "installed {}@{} into {kg} ({statement_count} statements)",
+                    name, entry.version
+                ),
+                format!("digest {}", entry.digest),
+                format!(
+                    "recorded {} rule(s), {} relation(s) in pack_item",
+                    items.iter().filter(|(k, _)| k == "rule").count(),
+                    items.iter().filter(|(k, _)| k == "relation").count()
+                ),
+            ])
+        })
     }
 
     /// `.ontology remove <name>`: drop the pack's recorded rules and
@@ -5051,6 +5130,7 @@ impl Handler {
         // Failed drops are caught by the read-back below. Surface every
         // sub-result row: drops that fail phrase their errors in many ways,
         // and silence here would misreport a partial removal.
+        let mut revision = None;
         for program in programs {
             let result = Box::pin(self.run_execute_program(
                 session_id,
@@ -5061,6 +5141,7 @@ impl Handler {
             ))
             .await?;
             Self::result_problem_rows(&result)?;
+            revision = result.revision.or(revision);
             for row in &result.rows {
                 if let Some(WireValue::String(s)) = row.values.first() {
                     messages.push(format!("  {s}"));
@@ -5118,7 +5199,10 @@ impl Handler {
                 retained.len()
             ));
         }
-        Ok(Self::messages_result(messages))
+        Ok(QueryResult {
+            revision: cleanup.revision.or(revision),
+            ..Self::messages_result(messages)
+        })
     }
 
     /// `.ontology upgrade <name[@version]>`: re-deploy the pack's rules at
@@ -5206,7 +5290,10 @@ impl Handler {
                 messages.push(s.clone());
             }
         }
-        Ok(Self::messages_result(messages))
+        Ok(QueryResult {
+            revision: install.revision,
+            ..Self::messages_result(messages)
+        })
     }
 
     /// Handle `.session` list command
@@ -5264,6 +5351,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 

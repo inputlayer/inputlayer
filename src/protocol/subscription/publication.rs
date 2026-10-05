@@ -44,7 +44,7 @@ pub struct Publication {
 }
 
 /// What a publication reports.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Outcome {
     /// The view's first result.
     Snapshot,

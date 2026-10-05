@@ -7,6 +7,7 @@
 use crate::ast::dependencies::DependencyClosure;
 use crate::ast::Rule;
 use crate::statement::QueryGoal;
+use crate::storage_engine::ChangeLog;
 
 use super::ChangeSet;
 
@@ -31,6 +32,13 @@ impl Dependencies {
     /// Relations in the closure, sorted.
     pub fn relations(&self) -> impl Iterator<Item = &str> {
         self.closure.relations()
+    }
+
+    /// Whether a result with these dependencies, exact at `revision`, may
+    /// differ at the snapshot whose change log is `changes`.
+    pub fn changed_after(&self, revision: u64, changes: &ChangeLog) -> bool {
+        self.closure.reads_untracked_state()
+            || changes.changed_after(revision, self.closure.relations())
     }
 
     /// Whether `change` can alter a result with these dependencies.

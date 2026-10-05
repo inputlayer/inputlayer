@@ -13,6 +13,7 @@ use crate::index_manager::{
     TupleId, INDEX_DEFINITIONS_FILE,
 };
 use crate::schema::SchemaType;
+use crate::size_limits::{MAX_EF_CONSTRUCTION, MAX_EF_SEARCH};
 use crate::statement::IndexCreateOptions;
 use crate::value::Tuple;
 use std::collections::{HashMap, HashSet};
@@ -109,11 +110,17 @@ impl KnowledgeGraph {
                 config.m
             ));
         }
-        if config.ef_construction < 1 {
-            return Err("HNSW parameter ef_construction must be >= 1".to_string());
+        if !(1..=MAX_EF_CONSTRUCTION).contains(&config.ef_construction) {
+            return Err(format!(
+                "HNSW parameter ef_construction must be between 1 and {MAX_EF_CONSTRUCTION}, got {}",
+                config.ef_construction
+            ));
         }
-        if config.ef_search < 1 {
-            return Err("HNSW parameter ef_search must be >= 1".to_string());
+        if !(1..=MAX_EF_SEARCH).contains(&config.ef_search) {
+            return Err(format!(
+                "HNSW parameter ef_search must be between 1 and {MAX_EF_SEARCH}, got {}",
+                config.ef_search
+            ));
         }
         Ok(RegisteredIndex {
             name: opts.name.clone(),
@@ -372,23 +379,35 @@ impl KnowledgeGraph {
 }
 
 impl StorageEngine {
-    /// Create and build an HNSW index (`.index create`).
+    /// Create and build an HNSW index (`.index create`). Returns its stats
+    /// and the revision of the snapshot that sees it.
     pub fn create_index_in(
         &self,
         kg: &str,
         opts: &IndexCreateOptions,
-    ) -> StorageResult<IndexStats> {
-        self.with_kg_mut(kg, |db| db.create_index(opts))
+    ) -> StorageResult<(IndexStats, u64)> {
+        self.with_kg_mut(kg, |db| {
+            let stats = db.create_index(opts)?;
+            Ok((stats, db.snapshot.load().revision))
+        })
     }
 
-    /// Drop an index (`.index drop`).
-    pub fn drop_index_in(&self, kg: &str, name: &str) -> StorageResult<()> {
-        self.with_kg_mut(kg, |db| db.drop_index(name))
+    /// Drop an index (`.index drop`). Returns the revision of the snapshot
+    /// published without it.
+    pub fn drop_index_in(&self, kg: &str, name: &str) -> StorageResult<u64> {
+        self.with_kg_mut(kg, |db| {
+            db.drop_index(name)?;
+            Ok(db.snapshot.load().revision)
+        })
     }
 
-    /// Rebuild an index from base data (`.index rebuild`).
-    pub fn rebuild_index_in(&self, kg: &str, name: &str) -> StorageResult<IndexStats> {
-        self.with_kg_mut(kg, |db| db.rebuild_index(name))
+    /// Rebuild an index from base data (`.index rebuild`). Returns its stats
+    /// and the revision of the snapshot that sees the rebuilt index.
+    pub fn rebuild_index_in(&self, kg: &str, name: &str) -> StorageResult<(IndexStats, u64)> {
+        self.with_kg_mut(kg, |db| {
+            let stats = db.rebuild_index(name)?;
+            Ok((stats, db.snapshot.load().revision))
+        })
     }
 
     /// Stats for one index or all indexes (`.index stats` / `.index list`).

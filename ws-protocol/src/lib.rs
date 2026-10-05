@@ -45,6 +45,15 @@
 //! result, or [`ErrorCode::OutcomeUnknown`] if the commit itself failed in a
 //! way that leaves the outcome open.
 //!
+//! # Revision preconditions
+//!
+//! An `execute` that writes may set `expect_revision` (see
+//! [`ClientFrame::Execute`]): its writes commit only if no relation in scope
+//! (`expect_relations`, closed over the rules that derive them, or the whole
+//! knowledge graph) and no persistent rule changed after that revision.
+//! Otherwise nothing is applied and it fails with
+//! [`ErrorCode::PreconditionFailed`].
+//!
 //! # Large payloads
 //!
 //! No frame exceeds the engine's message size limit. A result or a

@@ -14,6 +14,7 @@
 //! small datasets get exact top-k.
 
 use crate::index_manager::{DistanceMetric, HnswConfig, TupleId};
+use crate::size_limits::MAX_EF_CONSTRUCTION;
 use hnsw_rs::prelude::{DistL2, Hnsw};
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
@@ -218,11 +219,13 @@ impl HnswIndex {
         if inner.entries.len() <= EXACT_SEARCH_MAX {
             return Ok(self.exact_search(&inner, &prepared, k, epoch));
         }
-        let ef = ef.unwrap_or(self.config.ef_search);
         let manhattan = self.config.metric == DistanceMetric::Manhattan;
         let total = inner.entries.len();
+        // `hnsw_rs` sizes its candidate heaps by `ef`; a wider beam than the
+        // graph has entries finds nothing more.
+        let ef = ef.unwrap_or(self.config.ef_search).min(total);
         // Manhattan reranks L2 candidates, so it needs a wider candidate set.
-        let mut fetch = if manhattan { k * 4 } else { k };
+        let mut fetch = if manhattan { k.saturating_mul(4) } else { k };
 
         // Tombstones and entries newer than `epoch` are filtered after the
         // graph search; widen the search until k visible hits are found.
@@ -250,7 +253,7 @@ impl HnswIndex {
                 hits.truncate(k);
                 return Ok(hits);
             }
-            fetch = fetch_n * 2;
+            fetch = fetch_n.saturating_mul(2);
         }
     }
 
@@ -340,11 +343,14 @@ impl HnswIndex {
 }
 
 fn new_graph(config: &HnswConfig, capacity: usize) -> Hnsw<'static, f32, DistL2> {
+    // `hnsw_rs` exits the process when m is over 256 and sizes a heap by
+    // ef_construction on every insert; definitions saved before these were
+    // bounded may hold anything.
     let mut graph = Hnsw::new(
-        config.m,
+        config.m.clamp(2, 256),
         capacity,
         MAX_LAYER,
-        config.ef_construction,
+        config.ef_construction.clamp(1, MAX_EF_CONSTRUCTION),
         DistL2,
     );
     // Keep pruned links and extend candidates: Navarro pruning alone can
