@@ -106,18 +106,26 @@ impl Counter {
         let mut reservations = self.reservations.lock();
         let mut lowest = u64::MAX;
         let mut raised = Ok(());
-        reservations.retain(|reservation| {
-            let Some(reservation) = reservation.upgrade() else {
+        reservations.retain(|open| {
+            let Some(reservation) = open.upgrade() else {
                 return false;
             };
+            let mut failed = None;
             if reservation.reserved.load(Ordering::SeqCst) < revision {
                 let last = self.last.load(Ordering::SeqCst);
-                if let Err(e) = reservation.reserve(last.max(revision) + BLOCK) {
-                    error!(error = %e, revision, "revision_reservation_failed");
-                    raised = Err(e);
-                }
+                failed = reservation.reserve(last.max(revision) + BLOCK).err();
             }
-            lowest = lowest.min(reservation.reserved.load(Ordering::SeqCst));
+            let reserved = reservation.reserved.load(Ordering::SeqCst);
+            drop(reservation);
+            if let Some(e) = failed {
+                // Closed during the write: it issues nothing more.
+                if open.strong_count() == 0 {
+                    return false;
+                }
+                error!(error = %e, revision, "revision_reservation_failed");
+                raised = Err(e);
+            }
+            lowest = lowest.min(reserved);
             true
         });
         self.reserved.store(lowest, Ordering::SeqCst);

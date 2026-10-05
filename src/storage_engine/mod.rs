@@ -847,6 +847,7 @@ impl StorageEngine {
         &self,
         kg: &str,
     ) -> StorageResult<(Arc<KnowledgeGraphSnapshot>, RuleCatalog)> {
+        revisions::reserve_ahead()?;
         let db = self.kg_handle(kg)?;
         let db = db.read();
         Ok((db.snapshot(), db.rule_catalog.detached()))

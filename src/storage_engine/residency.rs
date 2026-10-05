@@ -418,7 +418,6 @@ impl StorageEngine {
                 "Knowledge graph '{kg}' is neither loaded nor on disk"
             )));
         };
-        super::revisions::reserve_ahead()?;
         let start = Instant::now();
         let created_at = slot.listing.lock().created_at.clone();
         let graph = self.load_graph(kg, dormant, created_at)?;
