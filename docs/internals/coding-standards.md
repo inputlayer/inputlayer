@@ -392,7 +392,6 @@ src/
 ├── protocol/                 # HTTP/API handler
 │   └── handler.rs
 ├── dd_computation.rs         # DDComputation, DDCommand
-├── derived_relations.rs      # DerivedRelationsManager
 ├── rule_catalog.rs           # RuleCatalog, validation
 ├── recursion.rs              # Recursion detection/handling
 ├── vector_ops.rs             # Vector, quantization, LSH functions

@@ -64,7 +64,6 @@ This section contains developer documentation for contributing to InputLayer.
 | `src/storage_engine/mod.rs` | StorageEngine, KnowledgeGraph |
 | `src/storage_engine/snapshot.rs` | KnowledgeGraphSnapshot |
 | `src/dd_computation.rs` | DDComputation, DDCommand |
-| `src/derived_relations.rs` | DerivedRelationsManager |
 | `src/rule_catalog.rs` | RuleCatalog, validation |
 | `src/code_generator/mod.rs` | CodeGenerator, execution |
 | `src/protocol/handler.rs` | Request handling |

@@ -76,8 +76,6 @@ pub struct KnowledgeGraph {
     rule_catalog: RuleCatalog,         // persistent rules (rules/catalog.json)
     schema_catalog: SchemaCatalog,     // per-KG schema isolation
     snapshot: ArcSwap<KnowledgeGraphSnapshot>,
-    incremental: Option<IncrementalEngine>, // None in production, see 2.4
-    auto_materialize: bool,                 // false in production, see 2.4
     indexes: IndexManager,             // vector indexes on base relations
     num_workers: usize,
     // query limits: max_result_rows, max_query_cost, max_recursion_iterations, ...
@@ -92,18 +90,12 @@ pub struct KnowledgeGraph {
 - **revision** names the state a query read and is returned to clients
 - **input_tuples** holds the base relations (Arc-shared with the store, O(1) clone per relation)
 - **rules** holds the persistent rules; **persistent** holds their formatted program prefix and a plan cache, shared with the previous snapshot while the rules are unchanged
-- **materialized_relations** is always empty on the server path (it is filled only when the test-only auto-materialization of 2.4 is on)
 
-### 2.4 IncrementalEngine and DerivedRelationsManager (test-only)
+### 2.4 IncrementalEngine (unused worker skeleton)
 
-`src/incremental.rs` and `src/derived_relations.rs` contain an `IncrementalEngine` (a long-lived timely worker with one DD `InputSession` and arrangement per **base** relation) and a `DerivedRelationsManager` (rule bookkeeping whose compiled rule clauses are always empty). Neither is used by the server:
+`src/incremental.rs` keeps only the `IncrementalEngine` worker skeleton: a long-lived timely worker with one DD `InputSession` and arrangement per **base** relation, driven through a command channel. It is not wired to any `KnowledgeGraph` or to the commit path, and no rule is compiled into a DD dataflow that outlives a query. It is the seed of the Section 16 view maintainer.
 
-- `KnowledgeGraph.incremental` is `None` in both production constructors; `enable_incremental()` and `set_auto_materialize()` are called only from tests.
-- There is no configuration key that turns either on.
-- When a test enables auto-materialization, each publish recomputes every rule from the base facts in a temporary engine and copies the results in; nothing is maintained incrementally.
-- No rule is compiled into a DD dataflow that outlives a query.
-
-The live-views milestone replaces this code (Section 16).
+`DerivedRelationsManager`, auto-materialization and shadow writes were removed ([#307](https://github.com/inputlayer/inputlayer/issues/307)).
 
 ---
 
@@ -123,7 +115,6 @@ commit_program (KG write lock)                     src/storage_engine/program_co
     +-> apply_delta:
     |     store insert/delete
     |     vector index upsert/delete
-    |     shadow_write -> returns at once (incremental is None)
     v
 publish_snapshot() -------------------------------> new revision, ArcSwap.store(new_snapshot)
     |
@@ -338,7 +329,7 @@ pub struct ExecutionConfig {
 
 ### 7.2 No Incremental Execution Path
 
-Every query, ad-hoc or standing, runs through the batch path of 7.1. There is no long-lived dataflow on the server path; see 2.4 for the test-only `IncrementalEngine`.
+Every query, ad-hoc or standing, runs through the batch path of 7.1. There is no long-lived dataflow on the server path; the `IncrementalEngine` of 2.4 is unused.
 
 ---
 
@@ -575,8 +566,7 @@ This node filters `input` to keep only tuples whose key columns exist in `filter
 | `src/value/mod.rs` | Value, Tuple, Abomonation |
 | `src/storage_engine/mod.rs` | StorageEngine, KnowledgeGraph |
 | `src/storage_engine/snapshot.rs` | KnowledgeGraphSnapshot |
-| `src/incremental.rs` | IncrementalEngine (base-relation mirror, test-only) |
-| `src/derived_relations.rs` | DerivedRelationsManager (rule bookkeeping, test-only) |
+| `src/incremental.rs` | IncrementalEngine (unused worker skeleton, see 2.4) |
 | `src/rule_catalog.rs` | RuleCatalog, validation |
 | `src/schema/catalog.rs` | SchemaCatalog (per-KG) |
 | `src/code_generator/mod.rs` | CodeGenerator, execution |
@@ -648,7 +638,7 @@ isolated.entry(relation).or_default().push(session_fact);
 
 The live-views milestone makes every deployed (persistent) rule an incrementally maintained view; everything else is a query.
 
-- **One view maintainer per knowledge graph**: a long-lived Differential Dataflow worker fed from the commit path (the `shadow_write` hook) at each commit's revision. It replaces `IncrementalEngine` and `DerivedRelationsManager`.
+- **One view maintainer per knowledge graph**: a long-lived Differential Dataflow worker fed from the commit path (`apply_delta`) at each commit's revision. It replaces the `IncrementalEngine` skeleton.
 - **Persistent rules as arrangements**: each rule compiles into the maintainer's dataflow (joins, recursion with `iterate`, negation with `antijoin`, aggregates with `reduce`); its rows live only in its arrangements.
 - **Queries never re-derive deployed rules**: ad-hoc queries, session rules and proofs import the view arrangements at a stated revision and run only their own operators.
 - **Writes confirmed once views include them**: a write is acknowledged after the maintainer has applied it, so the acknowledged revision is the revision views and queries show.
