@@ -317,9 +317,9 @@ debug builds.
 
 `tests/scenarios/views.rs` requires the view work counters on
 `/metrics/prometheus` to tell how reads of deployed rules were answered:
-today each read of a deployed rule, subscribing to one and each refresh is
-exactly one rule evaluation, a read of base relations is none, and nothing is
-served from a view yet.
+today each read of a deployed rule, subscribing to one and each evaluation
+that refreshes it is exactly one rule evaluation, a read of base relations is
+none, and nothing is served from a view yet.
 
 Quarantined scenarios are ignored unconditionally, so the PR gate (plain
 `cargo test`) stays deterministic, and run in the nightly tier. Until a

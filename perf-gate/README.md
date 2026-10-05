@@ -446,9 +446,9 @@ filler rules.
   graph's hot heads is skipped, with a note in the result: 10K edges (34
   hot heads) runs P4 at 1/10 and P5 at 1, 100K (334) runs P4 at 1/10/100
   and P5 at 1/100, and 1M (3,334) runs P4 at 1/10/100/1,000 and P5 at
-  1/10. P6 is
-  one unbound `r1` subscriber after 50 and then 200 unrelated rules join the
-  catalog (`--filler-rules`), with the `r1` idle reads repeated. Phases run
+  1/10. P6 is one unbound `r1` subscriber after 50 and then 200 unrelated
+  rules join the catalog (`--filler-rules`), with the `r1` idle reads
+  repeated. Phases run
   30 writes each (`--writes`); at 1M edges or more, the subscriber phases run
   20 (`--large-writes`).
 - **View work.** Every read and phase records the engine's view counters
@@ -460,8 +460,8 @@ filler rules.
   queries. A shared evaluation counts once, not once per subscriber: the
   unbound view P2's 100 subscribers share, or the shared round of a
   parameterized family of keyed subscribers. So P4 with 10 keyed subscribers
-  shows 11 per write only while each subscriber refreshes on its own. The columns are empty for a server
-  that does not export the counters.
+  shows 11 per write only while each subscriber refreshes on its own. The
+  columns are empty for a server that does not export the counters.
 
 A delta that does not arrive within 20 s of its write is **late**. A late
 delta, a failed subscription or a failed step fails the run (exit 1).

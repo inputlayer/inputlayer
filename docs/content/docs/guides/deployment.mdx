@@ -198,6 +198,7 @@ knowledge graph names.
 | `inputlayer_compute_permits` | gauge | Queries that compute at once; more wait. |
 | `inputlayer_compute_permits_in_use` | gauge | Queries computing now. |
 | `inputlayer_query_{parse,optimize,execute,total}_seconds` | histogram | Query latency by phase (see [Query Profiling](query-profiling)). |
+| `inputlayer_rule_evaluations_total`, `inputlayer_view_reads_total`, `inputlayer_view_maintenance_us_total` | counter | How reads of persistent rules were answered: by evaluating the rules, or from a view, and the microseconds spent keeping views current (see [Query Profiling](query-profiling#prometheus-metrics)). |
 
 **Durability**
 
