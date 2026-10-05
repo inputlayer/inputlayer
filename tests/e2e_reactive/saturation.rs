@@ -1,4 +1,5 @@
-//! Required pass: sessions on one knowledge graph while writers saturate it.
+//! Required pass: sessions on one knowledge graph while writers saturate it,
+//! at the scale of issue #292 (about 1,000 sessions).
 //!
 //! Every session subscribes to its own bound standing query (one family of
 //! parameterized views, as voice-agent sessions do). Writer connections
@@ -7,9 +8,11 @@
 //! continuously. A prober changes one session's result at a time. Overload
 //! may slow writes down, but never deliveries: each probe's delta reaches
 //! exactly its session, once, within [`DELTA_BOUND`] of the write's
-//! acknowledgement; no session gets a delta no probe caused; every view
-//! obeys the agent contract (contiguous `seq`, increasing `revision`, exact
-//! inserts and retracts) and ends equal to a fresh query.
+//! acknowledgement, so while the writers run; no session gets a delta no
+//! probe caused or a `subscription_error`; every view obeys the agent
+//! contract (contiguous `seq`, increasing `revision`, exact inserts and
+//! retracts) and ends equal to a fresh query. Run it pinned to few cores
+//! (`taskset`) to judge small hosts.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -23,12 +26,14 @@ use tokio::sync::mpsc;
 use crate::engine;
 
 const KG: &str = "sessions";
-/// Sessions, each with its own connection and subscription.
-const SESSIONS: usize = 96;
+/// Sessions, each with its own connection and subscription: with the
+/// writers, the prober and the auditor, within the engine's default 1,024
+/// WebSocket connections.
+const SESSIONS: usize = 960;
 /// Connections committing receipts back to back.
 const WRITERS: usize = 32;
 /// How long the writers saturate the engine.
-const LOAD: Duration = Duration::from_secs(10);
+const LOAD: Duration = Duration::from_secs(30);
 /// Pause between probes.
 const PROBE_GAP: Duration = Duration::from_millis(50);
 /// Longest a probe's delta may take after its write is acknowledged.
@@ -132,12 +137,19 @@ async fn write_receipts(
 struct Pending {
     eta: String,
     previous: String,
+    sent_at: Instant,
     acked_at: Instant,
 }
 
-/// Check `arrival` against the probe it must answer; returns its latency
-/// after the write's acknowledgement.
-fn settle(arrival: &Arrival, pending: &mut BTreeMap<usize, Pending>) -> Checked<Duration> {
+/// A probe's delta latencies: after its write was acknowledged, and after it
+/// was sent.
+struct Latency {
+    after_ack: Duration,
+    after_send: Duration,
+}
+
+/// Check `arrival` against the probe it must answer; returns its latency.
+fn settle(arrival: &Arrival, pending: &mut BTreeMap<usize, Pending>) -> Checked<Latency> {
     let session = arrival.session;
     let Some(probe) = pending.remove(&session) else {
         return Err(Violation::UnexpectedPush(format!(
@@ -149,7 +161,15 @@ fn settle(arrival: &Arrival, pending: &mut BTreeMap<usize, Pending>) -> Checked<
         &[serde_json::from_str(&speech_row(session, &probe.eta)).unwrap()],
         &[serde_json::from_str(&speech_row(session, &probe.previous)).unwrap()],
     )?;
-    Ok(arrival.delta.at.saturating_duration_since(probe.acked_at))
+    Ok(Latency {
+        after_ack: arrival.delta.at.saturating_duration_since(probe.acked_at),
+        after_send: arrival.delta.at.saturating_duration_since(probe.sent_at),
+    })
+}
+
+/// The `q` quantile of sorted `samples`.
+fn quantile(samples: &[Duration], q: f64) -> Duration {
+    samples[((samples.len() - 1) as f64 * q) as usize]
 }
 
 async fn saturated_engine() -> Checked<Engine> {
@@ -204,6 +224,7 @@ async fn saturated_sessions_get_every_delta_once_in_time_and_nothing_else() -> C
         let session = (probes * 37 + 11) % SESSIONS;
         probes += 1;
         if pending.contains_key(&session) {
+            tokio::time::sleep(PROBE_GAP).await;
             continue;
         }
         let eta = format!("e-{probes}");
@@ -219,12 +240,14 @@ async fn saturated_sessions_get_every_delta_once_in_time_and_nothing_else() -> C
             Pending {
                 eta,
                 previous,
+                sent_at: commit.sent_at,
                 acked_at: commit.acked_at,
             },
         );
         while prober.poll_push(Duration::ZERO).await?.is_some() {}
         tokio::time::sleep(PROBE_GAP).await;
     }
+    let during_load = latencies.len();
     stop_load.store(true, Ordering::SeqCst);
     for writer in writers {
         writer.await.expect("writer task")?;
@@ -266,15 +289,20 @@ async fn saturated_sessions_get_every_delta_once_in_time_and_nothing_else() -> C
         );
     }
 
-    latencies.sort();
-    let at = |q: f64| latencies[((latencies.len() - 1) as f64 * q) as usize];
+    let mut after_ack: Vec<Duration> = latencies.iter().map(|l| l.after_ack).collect();
+    let mut after_send: Vec<Duration> = latencies.iter().map(|l| l.after_send).collect();
+    after_ack.sort();
+    after_send.sort();
     eprintln!(
-        "saturated sessions: {SESSIONS} sessions, {receipts} receipts in {LOAD:?}, {} probes; \
-         ack->delta p50 {:?} p99 {:?} max {:?}",
+        "saturated sessions: {SESSIONS} sessions, {receipts} receipts in {LOAD:?}, {} probes, \
+         {during_load} delivered during the load; ack->delta p50 {:?} p99 {:?} max {:?}; \
+         send->delta p50 {:?} p99 {:?}",
         latencies.len(),
-        at(0.5),
-        at(0.99),
-        at(1.0)
+        quantile(&after_ack, 0.5),
+        quantile(&after_ack, 0.99),
+        quantile(&after_ack, 1.0),
+        quantile(&after_send, 0.5),
+        quantile(&after_send, 0.99),
     );
     assert!(
         latencies.len() >= 10,
