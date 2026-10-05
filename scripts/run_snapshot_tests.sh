@@ -53,8 +53,13 @@ DIRTY=0
 # Mode flags
 UPDATE_MODE=0
 SKIP_BUILD=0
+# Cargo profile of the server and client binaries and the target directory
+# it writes them to (--debug: target/debug, the binaries `cargo test` builds)
+PROFILE=release
+PROFILE_DIR=release
 VERBOSE=0
 FILTER=""
+AFFECTED_REF=""
 
 # Temp dir for all intermediate files
 TEMP_DIR=$(mktemp -d)
@@ -422,6 +427,39 @@ run_test_sequential() {
     fi
 }
 
+# Files changed since a ref: committed, staged and unstaged (the working tree
+# against the ref)
+changed_files() {
+    git -C "$PROJECT_DIR" diff --name-only "$1" --
+}
+
+# Map changed files to the spec categories that exercise them. Sets
+# AFFECTED (space-separated categories) and AFFECTED_ALL=1 when a change can
+# reach every category. Only leaf modules have a narrow mapping; any other
+# change to the engine's sources or build runs the whole corpus, so a module
+# missing from this list costs time rather than coverage.
+affected_categories() {
+    AFFECTED=""
+    AFFECTED_ALL=0
+    local file categories
+    for file in "$@"; do
+        categories=""
+        case "$file" in
+            src/vector_ops.rs|src/hnsw_index.rs|src/hnsw_index_tests.rs)
+                categories="16_vectors 30_quantization 31_lsh" ;;
+            src/temporal_ops.rs)
+                categories="29_temporal" ;;
+            src/*.rs|src/*/*|Cargo.toml|Cargo.lock|config.toml|ws-protocol/*|ontology-client/*|scripts/run_snapshot_tests.sh)
+                AFFECTED_ALL=1 ;;
+            examples/iql/*/*)
+                # A spec changed: run its category
+                categories=$(echo "$file" | cut -d/ -f3) ;;
+        esac
+        AFFECTED="$AFFECTED $categories"
+    done
+    AFFECTED=$(echo "$AFFECTED" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//')
+}
+
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -429,6 +467,8 @@ while [[ $# -gt 0 ]]; do
         -f|--filter)    FILTER="$2"; shift 2 ;;
         -u|--update)    UPDATE_MODE=1; shift ;;
         --skip-build)   SKIP_BUILD=1; shift ;;
+        --debug)        PROFILE=dev; PROFILE_DIR=debug; shift ;;
+        --affected)     AFFECTED_REF="$2"; shift 2 ;;
         -j|--jobs)      PARALLEL_JOBS="$2"; shift 2 ;;
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
@@ -439,6 +479,8 @@ while [[ $# -gt 0 ]]; do
             echo "  -u, --update     Update .out files with actual output (forces sequential)"
             echo "  -j, --jobs N     Parallel jobs (default: $PARALLEL_JOBS, 0 or 1 = sequential)"
             echo "  --skip-build     Skip cargo build"
+            echo "  --debug          Use the target/debug binaries cargo test builds (default: release)"
+            echo "  --affected REF   Only run the categories the changes since REF affect"
             echo "  -h, --help       Show this help message"
             exit 0
             ;;
@@ -451,15 +493,53 @@ if [[ "$UPDATE_MODE" == "1" ]] || [[ "$VERBOSE" == "1" ]]; then
     PARALLEL_JOBS=0
 fi
 
-# Build
 cd "$PROJECT_DIR"
+
+# --affected: turn the changes since the ref into a category filter, or stop
+# here when no spec depends on them
+if [[ -n "$AFFECTED_REF" ]]; then
+    if [[ -n "$FILTER" ]]; then
+        echo -e "${RED}--affected and --filter cannot be combined${NC}"
+        exit 1
+    fi
+    if ! CHANGED=$(changed_files "$AFFECTED_REF"); then
+        echo -e "${RED}Cannot diff against $AFFECTED_REF${NC}"
+        exit 1
+    fi
+    affected_categories $CHANGED
+    # Keep only categories that still hold a runnable spec (a deleted category,
+    # or one with only _ helpers and _pending_ specs, has nothing to run)
+    RUNNABLE=""
+    for category in $AFFECTED; do
+        if [[ -d "$EXAMPLES_DIR/$category" ]] && [[ -n "$(find "$EXAMPLES_DIR/$category" -name "*.iql" -type f ! -name "_*" ! -name "*_pending_*" | head -1)" ]]; then
+            RUNNABLE="$RUNNABLE $category"
+        fi
+    done
+    AFFECTED="${RUNNABLE# }"
+    if [[ "$AFFECTED_ALL" == "1" ]]; then
+        echo "Changes since $AFFECTED_REF affect every category - running all snapshot tests."
+    elif [[ -z "$AFFECTED" ]]; then
+        echo "No runnable specs affected by the changes since $AFFECTED_REF."
+        exit 0
+    else
+        echo "Changes since $AFFECTED_REF affect these categories:"
+        for category in $AFFECTED; do
+            echo "  - $category"
+        done
+        # Anchored at the category directory; basic grep, so alternation is \|
+        FILTER="/\($(echo "$AFFECTED" | sed 's/ /\\|/g')\)/"
+    fi
+    echo ""
+fi
+
+# Build
 if [[ "$SKIP_BUILD" == "1" ]]; then
     echo "Skipping build (--skip-build)..."
 else
     echo "Building project..."
-    if ! cargo build --bin inputlayer-client --bin inputlayer-server --release --quiet 2>/dev/null; then
+    if ! cargo build --bin inputlayer-client --bin inputlayer-server --profile "$PROFILE" --quiet 2>/dev/null; then
         echo -e "${RED}Build failed!${NC}"
-        cargo build --bin inputlayer-client --bin inputlayer-server --release 2>&1 | grep -v "^warning" || true
+        cargo build --bin inputlayer-client --bin inputlayer-server --profile "$PROFILE" 2>&1 | grep -v "^warning" || true
         echo -e "${RED}Aborting tests due to build failure.${NC}"
         exit 1
     fi
@@ -472,8 +552,8 @@ if [[ -z "$TARGET_DIR" ]]; then
     TARGET_DIR="$PROJECT_DIR/target"
 fi
 
-CLIENT_BIN="$TARGET_DIR/release/inputlayer-client"
-SERVER_BIN="$TARGET_DIR/release/inputlayer-server"
+CLIENT_BIN="$TARGET_DIR/$PROFILE_DIR/inputlayer-client"
+SERVER_BIN="$TARGET_DIR/$PROFILE_DIR/inputlayer-server"
 
 if [[ ! -x "$CLIENT_BIN" ]] || [[ ! -x "$SERVER_BIN" ]]; then
     echo -e "${RED}Binaries not found after build!${NC}"
@@ -543,6 +623,13 @@ if [[ -z "$TEST_FILES" ]]; then
     TEST_TOTAL=0
 else
     TEST_TOTAL=$(echo "$TEST_FILES" | wc -l | tr -d ' ')
+fi
+
+# A filter that matches nothing would pass vacuously (a renamed spec drops
+# out of its gate), so fail it
+if [[ -n "$FILTER" ]] && [[ "$TEST_TOTAL" == "0" ]]; then
+    echo -e "${RED}No tests match filter: $FILTER${NC}"
+    exit 1
 fi
 
 PENDING_COUNT=$(find "$EXAMPLES_DIR" -name "*_pending_*.iql" -type f | wc -l | tr -d ' ')

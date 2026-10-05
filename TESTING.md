@@ -98,10 +98,15 @@ make e2e-update                            # Regenerate all .dl.out files
 Options:
 | Flag | Description |
 |------|-------------|
-| `-f PATTERN` | Filter tests by grep pattern (e.g., `recursion`, `06_joins\|08_negation`) |
+| `-f PATTERN` | Filter tests by grep pattern (e.g., `recursion`, `06_joins\|08_negation`); a pattern matching no spec fails the run |
 | `-j N` | Parallel jobs (default: 4, use 1 for sequential) |
 | `-v` | Verbose mode with full diffs (forces sequential) |
 | `-u` | Update mode  - regenerate `.iql.out` files |
+| `--skip-build` | Use the binaries already built instead of running `cargo build` |
+| `--debug` | Build and run the `target/debug` binaries `cargo test` builds (default: release) |
+| `--affected REF` | Run only the categories the changes since `REF` affect (see [Affected-Only Tests](#affected-only-tests)) |
+
+The PR gate runs `./scripts/run_snapshot_tests.sh --debug --skip-build --affected <base>` right after `make unit-test`, against the binaries that build left in `target/debug`; pushes to `main` run every spec the same way (`.github/workflows/main.yml`).
 
 Environment variables:
 | Variable | Default | Description |
@@ -285,20 +290,21 @@ Optional:
 
 ### Affected-Only Tests
 
-`make test-affected` maps changed source files to relevant test categories and runs only those. Useful for fast feedback during development.
+`make test-affected` maps changed files to the spec categories they affect and runs only those (`run_snapshot_tests.sh --affected REF`; the PR gate uses the same map). Changes are the working tree against `REF`, so uncommitted edits count.
 
 ```bash
 ./scripts/test-affected.sh          # Changes since HEAD (uncommitted)
 ./scripts/test-affected.sh HEAD~3   # Changes in last 3 commits
 ./scripts/test-affected.sh main     # Changes since main branch
+./scripts/run_snapshot_tests.sh --debug --affected main   # The same, on debug binaries
 ```
 
-Source-to-category mapping:
-- `src/join_planning/`, `src/sip_rewriting/` → `06_joins`, `80_sip`
-- `src/ir_builder/` → `06_joins`, `07_filters`, `08_negation`, `14_aggregations`, `10_edge_cases`
-- `src/code_generator/` → `09_recursion`, `18_advanced_patterns`
-- `src/parser/`, `src/statement/` → `12_errors`, `17_rule_commands`, `28_docs_coverage`, `33_meta`, `39_meta_complete`
-- `src/value/`, `src/ir/`, `src/lib.rs`, `src/config.rs` → runs all tests
+File-to-category mapping:
+- `src/vector_ops.rs`, `src/hnsw_index.rs`, `src/hnsw_index_tests.rs` → `16_vectors`, `30_quantization`, `31_lsh`
+- `src/temporal_ops.rs` → `29_temporal`
+- `examples/iql/<category>/...` → that category
+- any other file under `src/`, `Cargo.toml`, `Cargo.lock`, `config.toml`, `ws-protocol/`, `ontology-client/`, `scripts/run_snapshot_tests.sh` → every spec (a plan or parser change can reach any category; the whole corpus takes about 1.5 min on 4 cores against debug binaries)
+- anything else (tests, docs, SDKs) → no specs
 
 ## Makefile Targets
 

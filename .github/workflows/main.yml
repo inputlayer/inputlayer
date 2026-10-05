@@ -1,0 +1,182 @@
+name: Main
+
+# Every push to main: the suites the PR gate (ci.yml) runs only in part or
+# not at all, so drift that a PR cannot see (a spec category its change did
+# not select, a live SDK suite, release-build latency) fails on the merge
+# that caused it rather than at the next release checkpoint.
+#   - the whole snapshot spec corpus and the differential oracle at 50 seeds
+#   - the JS and Python SDK live suites against a release server
+#   - the reactive agent path in release, with its latency samples
+# CONTRIBUTING describes the policy.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Every merge gets its own run, so a failure names the commit that caused it.
+concurrency:
+  group: main-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # One debug build: the oracle test builds the server and client into
+  # target/debug, which the spec corpus then runs against.
+  specs-oracle:
+    name: Spec corpus and oracle (50 seeds)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Its own key: this builds a subset of the PR gate's target/, which
+      # must not be saved under the PR gate's key. No restore-keys, for the
+      # same reason as there (an old target/ grows the cache).
+      - name: Cache cargo
+        uses: useblacksmith/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-main-specs-v1-${{ hashFiles('**/Cargo.toml') }}
+
+      - name: Differential oracle, 50 seeds
+        run: make oracle-test
+        env:
+          INPUTLAYER_ORACLE_SEEDS: 50
+
+      - name: Every snapshot spec (debug binaries)
+        run: ./scripts/run_snapshot_tests.sh --debug --skip-build
+
+  js-sdk-live:
+    name: JS SDK (live server)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: useblacksmith/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/release
+          key: ${{ runner.os }}-cargo-js-live-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-js-live-
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run the JS SDK live suites
+        run: make js-test-live
+
+      - name: Upload server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inputlayer-js-live-server-log
+          path: /tmp/il_js_live_server.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  python-sdk-live:
+    name: Python SDK (live server)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: useblacksmith/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/release
+          key: ${{ runner.os }}-cargo-py-sdk-live-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-py-sdk-live-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Run the Python SDK live suites
+        run: make python-sdk-live
+
+      - name: Run the Python integration tests against a live server
+        run: make python-test-live
+
+      - name: Upload server logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inputlayer-py-live-server-logs
+          path: |
+            /tmp/il_py_sdk_live_server.log
+            /tmp/il_python_live_server.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e-reactive:
+    name: Reactive agent path (release)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: useblacksmith/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/release
+          key: ${{ runner.os }}-cargo-e2e-reactive-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-e2e-reactive-
+
+      - name: Run the reactive agent path with latency samples
+        run: make e2e-reactive
+
+      - name: Upload latency samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-reactive-latency
+          path: target/e2e-reactive/*.jsonl
+          if-no-files-found: ignore
+          retention-days: 30

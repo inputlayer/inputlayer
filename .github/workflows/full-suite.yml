@@ -1,6 +1,6 @@
 name: Full suite
 
-# Everything the fast gate (ci.yml) leaves out, run at release checkpoints:
+# Everything the PR gate (ci.yml) leaves out, run at release checkpoints:
 #   - pushes to a release/** branch
 #   - pull requests labeled `release` (when the label is added, then on
 #     every push while it stays). A PR from a release/** branch of this repo
