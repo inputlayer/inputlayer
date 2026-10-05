@@ -10,8 +10,8 @@
 #   --dir DIR       the host's clone (default bench/inputlayer, under its home)
 #   --attach STAMP  follow a run that is already going (after a dropped
 #                   connection) and copy its results back
-#   --wait-lock S   wait up to S seconds for another benchmark's lock to
-#                   clear instead of refusing at once
+#   --wait-lock S   wait up to S seconds for another benchmark (its lock, or
+#                   its running servers) to clear instead of refusing at once
 #   --bench sessions -- ARGS
 #                   run scripts/bench-sessions.sh ARGS (the session-scale
 #                   benchmark) instead of the gate, under the same rules
@@ -129,11 +129,19 @@ if ! flock -n 9; then
         echo "perf-gate-remote: lock still held"; finish 4
     fi
 fi
-if pgrep -x inputlayer-serv > /dev/null; then
-    echo "perf-gate-remote: an inputlayer-server is already running here:"
-    pgrep -a -x inputlayer-serv
-    finish 4
-fi
+# A benchmark that does not take the lock still runs servers: wait for them
+# too, within the same budget.
+waited=0
+while pgrep -x inputlayer-serv > /dev/null; do
+    if [ "$waited" -ge "$WAIT_LOCK" ]; then
+        echo "perf-gate-remote: an inputlayer-server is already running here:"
+        pgrep -a -x inputlayer-serv
+        finish 4
+    fi
+    [ "$waited" = 0 ] && echo "perf-gate-remote: an inputlayer-server is running; waiting up to ${WAIT_LOCK}s"
+    sleep 10
+    waited=$((waited + 10))
+done
 # Never leave a server running: the gate stops its own, this catches any
 # left behind by a crash. Nothing else may run here meanwhile (the checks above).
 trap 'pkill -x inputlayer-serv 2> /dev/null || true' EXIT
