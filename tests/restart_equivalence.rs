@@ -127,7 +127,7 @@ fn clear_after_duplicate_inserts_survives_restart() {
         let s = open(temp.path());
         s.insert_tuples_into(KG, "p_a", vec![t(1), t(2)]).unwrap();
         s.insert_tuples_into(KG, "p_a", vec![t(1)]).unwrap();
-        let cleared = s.clear_relations_by_prefix_in(KG, "p_").unwrap();
+        let (cleared, _) = s.clear_relations_by_prefix_in(KG, "p_").unwrap();
         assert_eq!(cleared, vec![("p_a".to_string(), 2)]);
     }
     assert!(rows(&open(temp.path()), "p_a").is_empty());
