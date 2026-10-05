@@ -400,12 +400,68 @@ impl Partitions {
 }
 
 /// One evaluation of a family's lifted query, at one revision.
+///
+/// A round starts pending and takes its snapshot only when it starts
+/// evaluating, after the family's previous round finished. A view that needs
+/// a newer revision than the round evaluating joins the pending round, so
+/// however many revisions views ask for, a family evaluates one round at a
+/// time and at most one more waits.
+#[derive(Default)]
 struct Round {
-    revision: u64,
-    /// The snapshot to evaluate, until its evaluation takes it: the latest
-    /// round of an idle family must not keep old data alive.
-    snapshot: ArcSwapOption<KnowledgeGraphSnapshot>,
+    state: Mutex<RoundState>,
     outcome: OnceCell<Result<Arc<Partitions>, String>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RoundState {
+    /// Not evaluating yet: its snapshot will be no older than `needs`, the
+    /// newest revision a view that joined it holds.
+    Pending { needs: u64 },
+    /// Evaluating, or evaluated, the snapshot at `revision`.
+    Started { revision: u64 },
+}
+
+impl Default for RoundState {
+    fn default() -> Self {
+        Self::Pending { needs: 0 }
+    }
+}
+
+impl Round {
+    /// Whether a view holding a snapshot at `revision` may read this round:
+    /// it is pending (joining it, the view makes it see `revision`) or
+    /// evaluates `revision` or later.
+    fn serves(&self, revision: u64) -> bool {
+        let mut state = self.state.lock();
+        match &mut *state {
+            RoundState::Pending { needs } => {
+                *needs = (*needs).max(revision);
+                true
+            }
+            RoundState::Started {
+                revision: evaluated,
+            } => *evaluated >= revision,
+        }
+    }
+
+    /// Start evaluating: the snapshot `current` returns, which is no older
+    /// than any view that joined the round holds, since each joined after
+    /// taking its own.
+    fn start(
+        &self,
+        current: impl FnOnce() -> Result<Arc<KnowledgeGraphSnapshot>, String>,
+    ) -> Result<Arc<KnowledgeGraphSnapshot>, String> {
+        let mut state = self.state.lock();
+        let snapshot = current()?;
+        debug_assert!(
+            !matches!(*state, RoundState::Pending { needs } if needs > snapshot.revision),
+            "a round's snapshot is older than a view that joined it"
+        );
+        *state = RoundState::Started {
+            revision: snapshot.revision,
+        };
+        Ok(snapshot)
+    }
 }
 
 /// The views sharing one lifted query.
@@ -417,13 +473,19 @@ pub struct Family {
     /// Views per binding; changes only when views come and go.
     members: Mutex<HashMap<Binding, usize>>,
     bindings: AtomicUsize,
+    /// The newest round, evaluating, evaluated or pending.
     latest: ArcSwapOption<Round>,
+    /// Held by the round evaluating: one at a time.
+    evaluating: tokio::sync::Mutex<()>,
     sharing: AtomicBool,
     /// Whether a probe is evaluating.
     probing: AtomicBool,
     /// Held by a test to keep a probe from evaluating.
     #[cfg(test)]
     probe_gate: tokio::sync::RwLock<()>,
+    /// Held by a test to keep a started round from evaluating.
+    #[cfg(test)]
+    round_gate: tokio::sync::RwLock<()>,
     /// Own evaluations since sharing stopped.
     own_since_stop: AtomicU64,
     /// Times sharing stopped since a round last kept it.
@@ -525,19 +587,17 @@ impl Family {
         verdict
     }
 
-    /// The round to read for a view that must see `snapshot`: the latest
-    /// round when it is at least as new, else a new round at `snapshot`.
-    fn round_for(&self, snapshot: Arc<KnowledgeGraphSnapshot>) -> Arc<Round> {
-        let fresh = Arc::new(Round {
-            revision: snapshot.revision,
-            snapshot: ArcSwapOption::from(Some(snapshot)),
-            outcome: OnceCell::new(),
-        });
+    /// The round to read for a view holding a snapshot at `revision`: the
+    /// latest round when it [serves](Round::serves) it, else a new pending
+    /// round, which starts once the latest one has finished.
+    fn round_for(&self, revision: u64) -> Arc<Round> {
         let mut current = self.latest.load_full();
         loop {
-            if let Some(round) = current.as_ref().filter(|r| r.revision >= fresh.revision) {
+            if let Some(round) = current.as_ref().filter(|r| r.serves(revision)) {
                 return Arc::clone(round);
             }
+            let fresh = Arc::new(Round::default());
+            fresh.serves(revision);
             let previous = self
                 .latest
                 .compare_and_swap(&current, Some(Arc::clone(&fresh)));
@@ -561,16 +621,18 @@ impl Family {
         let outcome = round
             .outcome
             .get_or_init(|| async {
-                // An evaluation cancelled after taking the snapshot leaves
-                // none: a newer one serves the round's readers as well.
-                let snapshot = match round.snapshot.swap(None) {
-                    Some(snapshot) => snapshot,
-                    None => self
-                        .handler
+                let _turn = self.evaluating.lock().await;
+                // An evaluation cancelled after it started is started again
+                // by another reader, on a newer snapshot: it serves the
+                // round's readers as well.
+                let snapshot = round.start(|| {
+                    self.handler
                         .get_storage()
                         .get_snapshot_for(&self.knowledge_graph)
-                        .map_err(|e| format!("Knowledge graph '{}': {e}", self.knowledge_graph))?,
-                };
+                        .map_err(|e| format!("Knowledge graph '{}': {e}", self.knowledge_graph))
+                })?;
+                #[cfg(test)]
+                let _gate = self.round_gate.read().await;
                 self.evaluate(snapshot, probe).await
             })
             .await
@@ -757,7 +819,7 @@ impl Family {
         if family.probing.swap(true, Ordering::Relaxed) {
             return;
         }
-        let round = family.round_for(snapshot);
+        let round = family.round_for(snapshot.revision);
         let family = Arc::clone(family);
         tokio::spawn(async move {
             #[cfg(test)]
@@ -808,10 +870,13 @@ impl Families {
                         members: Mutex::default(),
                         bindings: AtomicUsize::new(0),
                         latest: ArcSwapOption::empty(),
+                        evaluating: tokio::sync::Mutex::new(()),
                         sharing: AtomicBool::new(false),
                         probing: AtomicBool::new(false),
                         #[cfg(test)]
                         probe_gate: tokio::sync::RwLock::default(),
+                        #[cfg(test)]
+                        round_gate: tokio::sync::RwLock::default(),
                         own_since_stop: AtomicU64::new(0),
                         stops: AtomicU64::new(0),
                         own_cost_us: AtomicU64::new(0),
@@ -860,7 +925,7 @@ impl MemberQuery {
             .as_ref()
             .is_some_and(|rules| Arc::ptr_eq(rules, snapshot.persistent_rules()));
         if validated && self.family.shares() && !self.family.takes_sample() {
-            let round = self.family.round_for(snapshot);
+            let round = self.family.round_for(snapshot.revision);
             if let Ok(partitions) = self.family.outcome(&round, false).await {
                 if let Some(evaluated) = self.read(&partitions) {
                     return Ok(self.own.adopt(evaluated));
