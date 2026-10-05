@@ -19,6 +19,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -30,6 +31,7 @@ use tokio::time::Sleep;
 use tracing::warn;
 
 use crate::auth::{CredentialEnded, Principal};
+use crate::protocol::metrics::ServerMetrics;
 use crate::protocol::MAX_MESSAGE_SIZE;
 
 /// Why a frame was not sent.
@@ -51,6 +53,8 @@ pub(super) struct Outbound<S = SplitSink<WebSocket, Message>> {
     send_timeout: Option<Duration>,
     /// Set once the socket failed or stalled: nothing more is written.
     failed: Option<SendError>,
+    /// Where notices, error replies and send timeouts are counted.
+    metrics: Option<Arc<ServerMetrics>>,
 }
 
 impl<S: Sink<Message> + Unpin> Outbound<S> {
@@ -60,7 +64,14 @@ impl<S: Sink<Message> + Unpin> Outbound<S> {
             principal: None,
             send_timeout: None,
             failed: None,
+            metrics: None,
         }
+    }
+
+    /// Count notices, error replies and send timeouts in `metrics`.
+    pub(super) fn with_metrics(mut self, metrics: Arc<ServerMetrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 
     /// Fail a frame the socket has not taken within `timeout` (zero: never).
@@ -76,6 +87,9 @@ impl<S: Sink<Message> + Unpin> Outbound<S> {
 
     /// Send `message`; data frames only while the credential is live.
     pub(super) async fn send(&mut self, message: Message) -> Result<(), SendError> {
+        if let (Some(metrics), Message::Text(text)) = (&self.metrics, &message) {
+            record_error_reply(metrics, text);
+        }
         self.transmit(message, true).await
     }
 
@@ -113,6 +127,9 @@ impl<S: Sink<Message> + Unpin> Outbound<S> {
             Err(error @ (SendError::Closed | SendError::TimedOut)) => {
                 if error == SendError::TimedOut {
                     warn!(timeout = ?self.send_timeout, "ws_send_timeout");
+                    if let Some(metrics) = &self.metrics {
+                        metrics.record_ws_send_timeout();
+                    }
                 }
                 self.failed = Some(error);
                 Err(error)
@@ -130,6 +147,9 @@ impl<S: Sink<Message> + Unpin> Outbound<S> {
 
     /// Send a `notice`; `false` if the connection is dead.
     pub(super) async fn send_notice(&mut self, code: NoticeCode, message: String) -> bool {
+        if let Some(metrics) = &self.metrics {
+            metrics.record_ws_notice(code);
+        }
         self.send_frame(&ServerFrame::Notice { code, message })
             .await
     }
@@ -147,6 +167,9 @@ impl<S: Sink<Message> + Unpin> Outbound<S> {
                 "Credential expired; reconnect with valid credentials",
             ),
         };
+        if let Some(metrics) = &self.metrics {
+            metrics.record_ws_notice(code);
+        }
         let notice = ServerFrame::Notice {
             code,
             message: message.to_string(),
@@ -203,6 +226,23 @@ impl Deadline {
                 timer.as_mut().poll(cx).map(|()| Err(SendError::TimedOut))
             }
         }
+    }
+}
+
+/// Count `json` in `metrics` if it is an `error` frame. [`encode`] writes
+/// the `type` tag first, so other frames are told apart by their prefix.
+fn record_error_reply(metrics: &ServerMetrics, json: &str) {
+    #[derive(serde::Deserialize)]
+    struct Probe {
+        #[serde(default)]
+        code: Option<ErrorCode>,
+    }
+    let Some(rest) = json.strip_prefix(r#"{"type":"error""#) else {
+        return;
+    };
+    if rest.starts_with([',', '}']) {
+        let code = serde_json::from_str::<Probe>(json).map_or(None, |probe| probe.code);
+        metrics.record_ws_error(code);
     }
 }
 

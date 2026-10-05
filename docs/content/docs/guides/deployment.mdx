@@ -120,6 +120,146 @@ Example health check:
 curl -sf http://localhost:8080/health
 ```
 
+## Monitoring
+
+The server exports Prometheus metrics at `/metrics/prometheus` (also
+`/v1/metrics/prometheus`) and the same headline numbers as JSON at `/metrics`.
+
+### Authentication
+
+Both endpoints need an **admin API key**: an unscoped key of a user with the
+`admin` role. The metrics count every knowledge graph on the server, so keys
+of editors and viewers, and keys scoped to one knowledge graph (even an
+admin's), get `403 Forbidden`. A missing or invalid key gets `401`.
+
+Give the scraper its own admin user and key, so you can revoke its access
+without touching anyone else's:
+
+```iql
+.user create monitoring <a-password-of-12-or-more-characters> admin
+```
+
+Log in as `monitoring`, then create the key and store it where only
+Prometheus can read it:
+
+```iql
+.apikey create prometheus-scrape
+```
+
+### Scrape Configuration
+
+```yaml
+scrape_configs:
+  - job_name: inputlayer
+    metrics_path: /metrics/prometheus
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/inputlayer-api-key
+    static_configs:
+      - targets: ["inputlayer.internal:8080"]
+```
+
+A scrape reads every knowledge graph's counts without loading any from disk.
+It gives up with a `500` after `http.stats_timeout_secs` (default 5), for
+example while a long write holds the storage lock. Counters start at zero
+when the server starts.
+
+### Metrics
+
+Metrics without labels are one value for the whole server. `kg` labels carry
+knowledge graph names.
+
+**Server and data**
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `inputlayer_uptime_seconds` | gauge | Seconds since the server started. |
+| `inputlayer_queries_total` | counter | Programs executed. |
+| `inputlayer_knowledge_graphs` | gauge | Knowledge graphs. |
+| `inputlayer_knowledge_graphs_loaded` | gauge | Knowledge graphs held in memory. |
+| `inputlayer_knowledge_graph_loads_total` / `_unloads_total` | counter | Knowledge graphs loaded from disk on use / unloaded when idle. |
+| `inputlayer_relations_total`, `inputlayer_views_total`, `inputlayer_tuples_total` | gauge | Base relations, rules and stored facts over all knowledge graphs. |
+| `inputlayer_kg_relations{kg}`, `inputlayer_kg_views{kg}`, `inputlayer_kg_tuples{kg}` | gauge | The same, per knowledge graph. |
+| `inputlayer_kg_loaded{kg}` | gauge | 1 while the knowledge graph is in memory. |
+| `inputlayer_kg_sessions{kg}` | gauge | Open sessions bound to the knowledge graph. |
+| `inputlayer_sessions_total`, `_clean`, `_dirty` | gauge | Open sessions; dirty ones hold session facts or rules. |
+| `inputlayer_ephemeral_facts`, `inputlayer_ephemeral_rules` | gauge | Session facts and rules over all sessions. |
+
+**Memory and compute**
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `inputlayer_memory_usage_bytes` | gauge | Resident memory (RSS) of the server process. Linux only. |
+| `inputlayer_memory_limit_bytes` | gauge | The memory limit of the server's cgroup (container or systemd `MemoryMax=`). Absent without one. |
+| `inputlayer_query_memory_bytes` | gauge | Memory the queries running now hold. |
+| `inputlayer_query_memory_budget_bytes` | gauge | `max_total_query_memory_bytes` in effect (0: no limit). |
+| `inputlayer_compute_permits` | gauge | Queries that compute at once; more wait. |
+| `inputlayer_compute_permits_in_use` | gauge | Queries computing now. |
+| `inputlayer_query_{parse,optimize,execute,total}_seconds` | histogram | Query latency by phase (see [Query Profiling](query-profiling)). |
+
+**Durability**
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `inputlayer_wal_size_bytes` | gauge | Size of the write-ahead log. |
+| `inputlayer_wal_size_limit_bytes` | gauge | `max_wal_size_bytes`: past it, the next commit flushes every shard (0: no limit). |
+| `inputlayer_persist_dirty_shards` | gauge | Relations with committed changes not yet flushed to batch files. |
+| `inputlayer_persist_buffered_updates` | gauge | Committed changes not yet flushed. They are durable in the WAL; restart replays them. |
+| `inputlayer_persist_oldest_unflushed_seconds` | gauge | Age of the oldest unflushed change. A relation flushes when `buffer_size` changes collect or the WAL reaches its limit, so a quiet relation stays unflushed for a long time; this is normal. |
+| `inputlayer_persist_flushes_total` | counter | Flushes to batch files. |
+| `inputlayer_persist_flush_failures_total` | counter | Failed flushes. The changes stay in the WAL and the flush is retried. |
+| `inputlayer_store_read_only` | gauge | 1 once a failed WAL write or fsync made the store refuse writes until restart (writes fail with `store_read_only`). |
+
+**Subscriptions**
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `inputlayer_subscriptions_active` | gauge | Subscriptions open over all connections. |
+| `inputlayer_subscription_views` | gauge | Shared standing-query views evaluated. Subscriptions to the same query share one. |
+| `inputlayer_subscription_evaluations_total` | counter | View evaluations: initial snapshots and re-evaluations after writes. |
+| `inputlayer_subscription_shared_evaluations_total` | counter | Evaluations that served a whole family of parameterized views at once. |
+
+**Connections, errors and rejections**
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `inputlayer_http_responses_total{code}` | counter | HTTP responses by status code, rejections included. GUI static files are not counted. |
+| `inputlayer_http_requests_in_flight` | gauge | HTTP requests being served. |
+| `inputlayer_http_requests_in_flight_limit` | gauge | `rate_limit.max_connections` (0: no limit). |
+| `inputlayer_ws_connections` | gauge | Open WebSocket connections. |
+| `inputlayer_ws_connections_unauthenticated` | gauge | Open WebSocket connections not yet authenticated. |
+| `inputlayer_ws_connections_limit` | gauge | `rate_limit.max_ws_connections` (0: no limit). |
+| `inputlayer_ws_errors_total{code}` | counter | WebSocket requests answered with an `error` frame, by [error code](websocket-api) (`none`: no code, such as permission refusals). |
+| `inputlayer_ws_notices_total{code}` | counter | WebSocket notices by code: `slow_consumer`, `idle_timeout`, `lifetime_exceeded`, `auth_timeout`, `credential_revoked`, `credential_expired` and `server_shutdown` close the connection; `notifications_missed` and `replay_gap` do not. |
+| `inputlayer_ws_send_timeouts_total` | counter | Connections closed because the client left a frame unread for `http.ws_send_timeout_ms`. |
+| `inputlayer_auth_failures_total{method}` | counter | Failed authentications: `password` (login) or `api_key` (WebSocket `authenticate` and REST Bearer keys). |
+| `inputlayer_rejections_total{reason}` | counter | Requests refused before they ran, by `reason`: `http_connection_limit` (503), `http_rate_limit` (429, `per_ip_max_rps`), `http_unauthorized` (401), `http_forbidden` (403), `ws_connection_limit` (503), `ws_preauth_limit` (429, `ws_max_preauth_per_ip`), `ws_rate_limit` (`ws_max_messages_per_sec`), `login_throttled` (repeated failed logins), `login_busy` (login queue full). |
+
+### Recommended Alerts
+
+Starting points; tune the thresholds to your traffic.
+
+| Alert | Expression | For | Severity |
+|---|---|---|---|
+| Server down | `up{job="inputlayer"} == 0` | 2m | page |
+| Store read-only | `inputlayer_store_read_only == 1` | 0m | page |
+| Engine faults | `sum(rate(inputlayer_ws_errors_total{code=~"internal\|outcome_unknown\|store_read_only"}[5m])) > 0` | 5m | page |
+| Flushes failing | `increase(inputlayer_persist_flush_failures_total[15m]) > 0` | 0m | ticket |
+| WAL not draining | `inputlayer_wal_size_limit_bytes > 0 and inputlayer_wal_size_bytes > 2 * inputlayer_wal_size_limit_bytes` | 15m | ticket |
+| Memory near limit | `inputlayer_memory_usage_bytes / inputlayer_memory_limit_bytes > 0.85` | 10m | ticket (page above 0.95) |
+| Query memory saturated | `inputlayer_query_memory_budget_bytes > 0 and inputlayer_query_memory_bytes / inputlayer_query_memory_budget_bytes > 0.9` | 5m | ticket |
+| Queries refused for memory | `rate(inputlayer_ws_errors_total{code="resource_exhausted"}[5m]) > 0` | 15m | ticket |
+| Compute saturated | `inputlayer_compute_permits_in_use >= inputlayer_compute_permits` | 10m | ticket |
+| Deadlines missed | `rate(inputlayer_ws_errors_total{code="deadline_exceeded"}[5m]) / rate(inputlayer_queries_total[5m]) > 0.01` | 10m | ticket |
+| Connections near limit | `inputlayer_ws_connections_limit > 0 and inputlayer_ws_connections / inputlayer_ws_connections_limit > 0.8` | 10m | ticket |
+| Connections refused | `sum(rate(inputlayer_rejections_total{reason=~"http_connection_limit\|ws_connection_limit"}[5m])) > 0` | 5m | ticket |
+| Authentication attack or broken client | `sum(rate(inputlayer_auth_failures_total[5m])) > 1` or `increase(inputlayer_rejections_total{reason="login_throttled"}[15m]) > 10` | 10m | ticket |
+| Slow consumers | `increase(inputlayer_ws_notices_total{code="slow_consumer"}[15m]) + increase(inputlayer_ws_send_timeouts_total[15m]) > 0` | 0m | info |
+| Server errors | `sum(rate(inputlayer_http_responses_total{code=~"5.."}[5m])) > 0` | 10m | ticket |
+| Restarted | `inputlayer_uptime_seconds < 600` | 0m | info |
+
 ## Docker
 
 InputLayer provides a multi-stage Dockerfile that produces a minimal Debian-based image.

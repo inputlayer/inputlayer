@@ -721,6 +721,15 @@ impl SessionManager {
         }
     }
 
+    /// Open sessions per knowledge graph.
+    pub fn sessions_by_knowledge_graph(&self) -> HashMap<String, usize> {
+        let mut counts = HashMap::new();
+        for session in self.sessions.read().values() {
+            *counts.entry(session.knowledge_graph.clone()).or_insert(0) += 1;
+        }
+        counts
+    }
+
     /// List all session IDs (sorted for deterministic output)
     pub fn list_sessions(&self) -> Vec<SessionId> {
         let mut ids: Vec<SessionId> = self.sessions.read().keys().cloned().collect();

@@ -29,6 +29,7 @@
 
 pub mod error;
 pub mod handler;
+pub mod metrics;
 pub mod notification_log;
 pub mod replication;
 pub mod rest;

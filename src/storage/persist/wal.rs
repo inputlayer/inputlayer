@@ -22,6 +22,11 @@ use crate::storage::{StorageError, StorageResult};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+/// Name of the WAL file in the WAL directory.
+pub(crate) const CURRENT_FILE: &str = "current.wal";
 
 /// How to bring the file back to a committed state after a failed write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,7 +68,9 @@ pub struct PersistWal {
     file_id: Option<FileId>,
     /// A failed write left bytes that could not be cut off; repair before the next write
     repair: Option<Repair>,
-    read_only: bool,
+    /// Set once writes are refused until restart; shared so it can be read
+    /// without the WAL lock.
+    read_only: Arc<AtomicBool>,
     #[cfg(test)]
     faults: Vec<WalFault>,
     /// Rewrites made by [`Self::retain_ops`].
@@ -85,13 +92,13 @@ impl PersistWal {
     pub fn open(wal_dir: PathBuf) -> StorageResult<(Self, Vec<Transaction>)> {
         super::create_directory(&wal_dir)?;
         let mut wal = PersistWal {
-            current_file: wal_dir.join("current.wal"),
+            current_file: wal_dir.join(CURRENT_FILE),
             wal_dir,
             writer: None,
             len: 0,
             file_id: None,
             repair: None,
-            read_only: false,
+            read_only: Arc::default(),
             #[cfg(test)]
             faults: Vec::new(),
             #[cfg(test)]
@@ -239,7 +246,7 @@ impl PersistWal {
         self.discard_writer(Repair::ToLength(len));
         if self.repair.is_some() {
             if let Err(undo) = self.save_cut(len) {
-                self.read_only = true;
+                self.read_only.store(true, Ordering::Release);
                 return Err(StorageError::OutcomeUnknown {
                     write: write.to_string(),
                     undo: undo.to_string(),
@@ -276,7 +283,7 @@ impl PersistWal {
             |_| "is a different file".to_string(),
         );
         self.writer = None;
-        self.read_only = true;
+        self.read_only.store(true, Ordering::Release);
         tracing::error!(
             file = %self.current_file.display(),
             now = %now,
@@ -513,11 +520,16 @@ impl PersistWal {
     }
 
     pub(crate) fn check_writable(&self) -> StorageResult<()> {
-        if self.read_only {
+        if self.read_only.load(Ordering::Acquire) {
             Err(StorageError::StoreReadOnly)
         } else {
             Ok(())
         }
+    }
+
+    /// Whether writes are refused until restart, readable without the WAL lock.
+    pub fn read_only_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.read_only)
     }
 
     /// Get WAL file size

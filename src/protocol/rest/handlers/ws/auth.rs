@@ -58,6 +58,9 @@ pub(super) async fn authenticate(
         };
 
         if !rate.allow() {
+            handler
+                .server_metrics()
+                .record_rejection(crate::protocol::metrics::Rejection::WsRateLimit);
             warn!(%peer, "ws_auth_rate_limited");
             let message = format!("Rate limit exceeded ({} msgs/sec)", rate.max_per_sec());
             auth_error(sender, probe_request_id(&text), message).await;

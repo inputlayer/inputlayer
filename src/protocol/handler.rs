@@ -212,6 +212,8 @@ pub struct Handler {
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
     /// Standing-query counters (evaluations, active subscriptions, views).
     subscription_metrics: Arc<super::subscription::SubscriptionMetrics>,
+    /// HTTP, connection, rejection and authentication counters.
+    server_metrics: Arc<super::metrics::ServerMetrics>,
     /// The worker owning the shared standing-query views, started by the
     /// first subscription.
     subscription_hub: std::sync::OnceLock<super::subscription::SubscriptionHub>,
@@ -627,6 +629,9 @@ struct QueryJob {
     /// same (for queries evaluated again and again: standing queries), and
     /// note here how the run went.
     cache_plan: Option<Arc<std::sync::OnceLock<crate::storage_engine::CachedRun>>>,
+    /// For a caller without the full server view, how many knowledge graphs
+    /// it can see: `.status` reports only that, and no server-wide totals.
+    visible_kgs: Option<usize>,
 }
 
 impl QueryJob {
@@ -1046,6 +1051,7 @@ impl Handler {
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
+            server_metrics: Arc::default(),
             subscription_hub: std::sync::OnceLock::new(),
             login_throttle: Arc::default(),
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
@@ -1101,6 +1107,7 @@ impl Handler {
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
+            server_metrics: Arc::default(),
             subscription_hub: std::sync::OnceLock::new(),
             login_throttle: Arc::default(),
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
@@ -1123,6 +1130,7 @@ impl Handler {
             timing_histograms: Arc::clone(&self.timing_histograms),
             pinned: None,
             cache_plan: None,
+            visible_kgs: None,
         }
     }
 
@@ -1167,6 +1175,18 @@ impl Handler {
         self.compute_permits
     }
 
+    /// Compute permits held by queries running now.
+    pub fn compute_permits_in_use(&self) -> usize {
+        self.compute_permits
+            .saturating_sub(self.query_semaphore.available_permits())
+    }
+
+    /// Bytes the computations in flight hold, and the server's budget for
+    /// them (0: no limit).
+    pub fn query_memory_usage(&self) -> (i64, u64) {
+        (self.query_memory.held(), self.query_memory.budget())
+    }
+
     /// Every compute permit, held until the result drops.
     #[cfg(test)]
     pub(crate) fn hold_compute_permits(&self) -> tokio::sync::OwnedSemaphorePermit {
@@ -1201,6 +1221,11 @@ impl Handler {
     /// Standing-query counters.
     pub fn subscription_metrics(&self) -> &super::subscription::SubscriptionMetrics {
         &self.subscription_metrics
+    }
+
+    /// HTTP, connection, rejection and authentication counters.
+    pub fn server_metrics(&self) -> &Arc<super::metrics::ServerMetrics> {
+        &self.server_metrics
     }
 
     /// The worker owning the shared standing-query views, started on the
@@ -1646,12 +1671,16 @@ impl Handler {
         peer: std::net::IpAddr,
     ) -> Result<crate::auth::Principal, String> {
         let attempt = self.login_throttle.begin(peer, username).map_err(|wait| {
+            self.server_metrics
+                .record_rejection(super::metrics::Rejection::LoginThrottled);
             let retry_secs = wait.as_secs().max(1);
             warn!(username, %peer, retry_secs, "audit_auth_login_throttled");
             format!("Too many failed login attempts; retry in {retry_secs}s")
         })?;
         let Ok(queued) = Arc::clone(&self.login_queue).try_acquire_owned() else {
             self.login_throttle.abort(&attempt);
+            self.server_metrics
+                .record_rejection(super::metrics::Rejection::LoginBusy);
             warn!(username, %peer, "audit_auth_login_busy");
             return Err("Authentication service busy; retry later".to_string());
         };
@@ -1680,6 +1709,9 @@ impl Handler {
                 }
                 Err(_) => {
                     handler.login_throttle.fail(&attempt);
+                    handler
+                        .server_metrics
+                        .record_auth_failure(super::metrics::AuthMethod::Password);
                     warn!(username = %user, %peer, "audit_auth_login_failed");
                 }
             }
@@ -1704,6 +1736,8 @@ impl Handler {
                 Ok(principal)
             }
             Err(rejected) => {
+                self.server_metrics
+                    .record_auth_failure(super::metrics::AuthMethod::ApiKey);
                 tracing::warn!(reason = %rejected, "audit_auth_apikey_rejected");
                 Err(rejected.to_string())
             }
@@ -2412,22 +2446,27 @@ impl Handler {
         program: String,
     ) -> Result<QueryResult, String> {
         let control = self.request_control(None);
-        self.run_program(knowledge_graph, program, None, &control)
+        self.run_program(knowledge_graph, program, None, None, &control)
             .await
             .map_err(|e| e.message)
     }
 
     /// `query_program` with `statements` already parsed by `parse_program`,
-    /// under the request's deadline and cancellation.
+    /// under the request's deadline and cancellation, for a caller that can
+    /// see `visible_kgs` knowledge graphs (`None`: the full server view).
     async fn run_program(
         &self,
         knowledge_graph: Option<String>,
         program: String,
         statements: Option<Vec<statement::Statement>>,
+        visible_kgs: Option<usize>,
         control: &Arc<RequestControl>,
     ) -> Result<QueryResult, ProgramError> {
         self.run_job(
-            self.make_query_job(),
+            QueryJob {
+                visible_kgs,
+                ..self.make_query_job()
+            },
             knowledge_graph,
             program,
             statements,
@@ -3057,9 +3096,7 @@ impl QueryJob {
 
                                     // === System commands ===
                                     MetaCommand::Status => {
-                                        let kgs = storage.list_knowledge_graphs();
                                         let uptime = self.uptime_seconds();
-                                        let queries = self.total_queries();
                                         messages.push("Server Status".to_string());
                                         messages.push("  Health: healthy".to_string());
                                         messages.push(format!(
@@ -3067,8 +3104,16 @@ impl QueryJob {
                                             env!("CARGO_PKG_VERSION")
                                         ));
                                         messages.push(format!("  Uptime: {uptime} seconds"));
-                                        messages.push(format!("  Total queries: {queries}"));
-                                        messages.push(format!("  Knowledge graphs: {}", kgs.len()));
+                                        let kgs = match self.visible_kgs {
+                                            Some(visible) => visible,
+                                            None => {
+                                                let queries = self.total_queries();
+                                                messages
+                                                    .push(format!("  Total queries: {queries}"));
+                                                storage.list_knowledge_graphs().len()
+                                            }
+                                        };
+                                        messages.push(format!("  Knowledge graphs: {kgs}"));
                                     }
                                     MetaCommand::Compact => {
                                         // Release storage read lock BEFORE heavy I/O.
@@ -3747,20 +3792,21 @@ impl Handler {
         program: String,
     ) -> Result<QueryResult, String> {
         let control = self.request_control(None);
-        self.run_program_with_session(session_id, None, program, None, &control)
+        self.run_program_with_session(session_id, None, program, None, None, &control)
             .await
             .map_err(|e| e.message)
     }
 
     /// `query_program_with_session` on `kg` instead of the session's binding,
     /// including when the session is gone, under the request's deadline and
-    /// cancellation.
+    /// cancellation, for a caller that can see `visible_kgs` knowledge graphs.
     async fn run_program_with_session(
         &self,
         session_id: &SessionId,
         kg: Option<String>,
         program: String,
         statements: Option<Vec<statement::Statement>>,
+        visible_kgs: Option<usize>,
         control: &Arc<RequestControl>,
     ) -> Result<QueryResult, ProgramError> {
         // Input size validation (same as query_program)
@@ -3778,7 +3824,9 @@ impl Handler {
         // If session was reaped (e.g., WS reconnect), fall back to non-session query.
         if self.sessions.touch_session(session_id).is_err() {
             tracing::debug!(session_id = %session_id, "session_gone_fallback_to_query_program");
-            return self.run_program(kg, program, statements, control).await;
+            return self
+                .run_program(kg, program, statements, visible_kgs, control)
+                .await;
         }
 
         // Check if session is clean → fast path
@@ -3791,7 +3839,7 @@ impl Handler {
         if is_clean {
             // Fast path: no ephemeral state, use global snapshot directly
             return self
-                .run_program(Some(kg), program, statements, control)
+                .run_program(Some(kg), program, statements, visible_kgs, control)
                 .await;
         }
 
@@ -4317,6 +4365,22 @@ impl Handler {
         let statements = parse_bound_program(&program, params)?;
         let stmts = statements.as_deref().unwrap_or_default();
         self.authorize_program(effective_auth, current_kg, stmts)?;
+        let visible_kgs = effective_auth
+            .filter(|identity| identity.role != crate::auth::Role::Admin)
+            .filter(|_| {
+                stmts
+                    .iter()
+                    .any(|stmt| matches!(stmt, statement::Statement::Meta(MetaCommand::Status)))
+            })
+            .map(|identity| {
+                let kgs = self.get_storage().list_knowledge_graphs();
+                kgs.iter()
+                    .filter(|kg| {
+                        kg.as_str() != crate::auth::INTERNAL_KG
+                            && self.kg_access(kg, identity).is_some()
+                    })
+                    .count()
+            });
         if control.precondition().is_some()
             && statements.is_some()
             && !program_boundary::is_transactional(stmts)
@@ -4564,11 +4628,18 @@ impl Handler {
         }
         let mut result = match session_id {
             Some(sid) if is_query => {
-                self.run_program_with_session(sid, exec_kg, program, statements, control)
-                    .await?
+                self.run_program_with_session(
+                    sid,
+                    exec_kg,
+                    program,
+                    statements,
+                    visible_kgs,
+                    control,
+                )
+                .await?
             }
             _ => {
-                self.run_program(exec_kg, program, statements, control)
+                self.run_program(exec_kg, program, statements, visible_kgs, control)
                     .await?
             }
         };

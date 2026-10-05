@@ -91,7 +91,11 @@ Returns HTTP 200 if the server can handle requests (storage accessible). Returns
 
 ```http
 GET /metrics
+Authorization: Bearer <admin-api-key>
 ```
+
+Needs an admin API key: an unscoped key of a user with the `admin` role. The
+statistics cover every knowledge graph, so other keys get `403 Forbidden`.
 
 **Response:**
 ```json
@@ -101,7 +105,7 @@ GET /metrics
     "knowledge_graphs": 3,
     "relations": 10,
     "views": 5,
-    "memory_usage_bytes": 262144,
+    "memory_usage_bytes": 262144000,
     "query_count": 15000,
     "uptime_secs": 3600,
     "sessions": {
@@ -117,13 +121,18 @@ GET /metrics
 
 `views` counts persistent rules (derived relations) across knowledge graphs. Their rows are not stored; each is evaluated when a query reads it.
 
+`memory_usage_bytes` is the server process's resident memory (0 on platforms
+that do not report it).
+
 ### Prometheus Metrics
 
 ```http
 GET /metrics/prometheus
+Authorization: Bearer <admin-api-key>
 ```
 
-Returns metrics in Prometheus text exposition format:
+Needs an admin API key, like `/metrics`. Returns metrics in Prometheus text
+exposition format:
 
 ```
 # HELP inputlayer_uptime_seconds Server uptime in seconds.
@@ -132,46 +141,20 @@ inputlayer_uptime_seconds 3600
 # HELP inputlayer_queries_total Total queries executed.
 # TYPE inputlayer_queries_total counter
 inputlayer_queries_total 15000
-# HELP inputlayer_knowledge_graphs Number of knowledge graphs.
-# TYPE inputlayer_knowledge_graphs gauge
-inputlayer_knowledge_graphs 3
-# HELP inputlayer_knowledge_graphs_loaded Knowledge graphs held in memory.
-# TYPE inputlayer_knowledge_graphs_loaded gauge
-inputlayer_knowledge_graphs_loaded 2
-# HELP inputlayer_knowledge_graph_loads_total Knowledge graphs loaded from disk on use.
-# TYPE inputlayer_knowledge_graph_loads_total counter
-inputlayer_knowledge_graph_loads_total 4
-# HELP inputlayer_knowledge_graph_unloads_total Knowledge graphs unloaded from memory.
-# TYPE inputlayer_knowledge_graph_unloads_total counter
-inputlayer_knowledge_graph_unloads_total 2
-# HELP inputlayer_relations_total Total base relations.
-# TYPE inputlayer_relations_total gauge
-inputlayer_relations_total 10
-# HELP inputlayer_views_total Total derived views (rules).
-# TYPE inputlayer_views_total gauge
-inputlayer_views_total 5
-# HELP inputlayer_sessions_total Active sessions.
-# TYPE inputlayer_sessions_total gauge
-inputlayer_sessions_total 5
-# HELP inputlayer_sessions_clean Clean (idle) sessions.
-# TYPE inputlayer_sessions_clean gauge
-inputlayer_sessions_clean 3
-# HELP inputlayer_sessions_dirty Dirty (active) sessions.
-# TYPE inputlayer_sessions_dirty gauge
-inputlayer_sessions_dirty 2
-# HELP inputlayer_tuples_total Total stored tuples.
-# TYPE inputlayer_tuples_total gauge
-inputlayer_tuples_total 50000
-# HELP inputlayer_memory_usage_bytes Estimated memory usage.
-# TYPE inputlayer_memory_usage_bytes gauge
-inputlayer_memory_usage_bytes 104857600
-# HELP inputlayer_ephemeral_facts Ephemeral facts across sessions.
-# TYPE inputlayer_ephemeral_facts gauge
-inputlayer_ephemeral_facts 10
-# HELP inputlayer_ephemeral_rules Ephemeral rules across sessions.
-# TYPE inputlayer_ephemeral_rules gauge
-inputlayer_ephemeral_rules 2
+# HELP inputlayer_kg_tuples Stored tuples, per knowledge graph.
+# TYPE inputlayer_kg_tuples gauge
+inputlayer_kg_tuples{kg="default"} 50000
+# HELP inputlayer_store_read_only 1 once the store refuses writes until restart after a failed WAL write or fsync, else 0.
+# TYPE inputlayer_store_read_only gauge
+inputlayer_store_read_only 0
+# HELP inputlayer_rejections_total Requests and connections refused before they ran, by reason.
+# TYPE inputlayer_rejections_total counter
+inputlayer_rejections_total{reason="http_rate_limit"} 0
+...
 ```
+
+See [Monitoring](deployment#monitoring) for every metric, a scrape
+configuration and recommended alerts.
 
 ---
 
@@ -223,6 +206,9 @@ REST endpoints (except health/live/ready) require an API key in the Authorizatio
 Authorization: Bearer <api-key>
 ```
 
+`/metrics` and `/metrics/prometheus` need an admin API key and answer other
+keys with `403 Forbidden`.
+
 API keys are managed via meta commands in the WebSocket session:
 
 ```iql
@@ -269,17 +255,17 @@ All errors use a consistent format:
 # Check server health
 curl http://localhost:8080/health
 
-# Get server stats
-curl http://localhost:8080/metrics
+# Get server stats (admin API key)
+curl -H "Authorization: Bearer $ADMIN_API_KEY" http://localhost:8080/metrics
 
-# Get Prometheus metrics
-curl http://localhost:8080/metrics/prometheus
+# Get Prometheus metrics (admin API key)
+curl -H "Authorization: Bearer $ADMIN_API_KEY" http://localhost:8080/metrics/prometheus
 ```
 
 ### cURL - With Authentication
 
 ```bash
-# Authenticated request
+# Authenticated request (metrics need an admin API key)
 curl -H "Authorization: Bearer your-api-key" http://localhost:8080/metrics
 ```
 

@@ -403,12 +403,18 @@ Show system status.
 
 **Output:**
 ```
-Knowledge graph: mykg
-Relations: 5
-Rules: 3
-Session rules: 2
-Data directory: ./data
+Server Status
+  Health: healthy
+  Version: 0.1.0
+  Uptime: 3600 seconds
+  Total queries: 1234
+  Knowledge graphs: 3
 ```
+
+An unscoped admin sees the full server view. For any other caller (a non-admin
+user, or a key scoped to particular knowledge graphs), `Knowledge graphs` counts
+only the knowledge graphs that caller can see, and `Total queries` is omitted.
+Server-wide metrics are on the admin-only [monitoring endpoints](/docs/guides/deployment#monitoring).
 
 ### `.clear prefix <prefix>`
 

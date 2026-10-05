@@ -45,6 +45,8 @@ pub struct StatsDto {
     pub knowledge_graphs: usize,
     pub relations: usize,
     pub views: usize,
+    /// Resident set size of the server process; 0 where the platform does
+    /// not report it.
     pub memory_usage_bytes: u64,
     pub query_count: u64,
     pub uptime_secs: u64,
