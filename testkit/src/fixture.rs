@@ -69,10 +69,21 @@ impl Fixture {
             .await?;
         admin.close().await;
         let mut writer = WsClient::connect(engine, &self.knowledge_graph).await?;
-        for program in self.programs() {
-            writer.commit(&program).await.map_err(|e| {
-                Violation::Rejected(format!("fixture '{}' statement failed: {e}", self.name))
-            })?;
+        for (index, program) in self.programs().iter().enumerate() {
+            let failed = |cause: String| {
+                Violation::Rejected(format!(
+                    "fixture '{}' program {index} ({} bytes) failed: {cause}",
+                    self.name,
+                    program.len()
+                ))
+            };
+            let result = writer
+                .execute(program)
+                .await
+                .map_err(|e| failed(e.to_string()))?;
+            if !result.errors.is_empty() {
+                return Err(failed(format!("{:?}", result.errors)));
+            }
         }
         writer.close().await;
         Ok(())
