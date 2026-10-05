@@ -1,7 +1,8 @@
 //! Supplied bootstrap secrets at server startup: a blank one counts as unset
 //! (the server generates and saves one, as on a first boot with none), a
 //! too-short one refuses first-boot startup with an error naming its source,
-//! and once the admin exists a too-short one is ignored with a warning.
+//! once the admin exists a too-short one is ignored with a warning, and a
+//! config password overridden by the environment is never checked.
 
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
@@ -139,4 +140,33 @@ fn short_supplied_secret_is_ignored_with_a_warning_once_admin_exists() {
             "{var}: {stderr}"
         );
     }
+}
+
+#[test]
+fn config_password_overridden_by_env_is_ignored_on_first_boot() {
+    const ENV_PASSWORD: &str = "a-strong-enough-secret";
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(
+        tmp.path().join("config.toml"),
+        "[http.auth]\nbootstrap_admin_password = \"admin\"\n",
+    )
+    .unwrap();
+    let stderr = boot(
+        tmp.path(),
+        &[
+            ("INPUTLAYER_ADMIN_PASSWORD", ENV_PASSWORD),
+            ("INPUTLAYER_BOOTSTRAP_API_KEY", ""),
+        ],
+    );
+    assert!(
+        stderr.contains("bootstrap_admin_password is ignored"),
+        "{stderr}"
+    );
+
+    let mut config = inputlayer::Config::default();
+    config.storage.data_dir = tmp.path().join("data");
+    let handler = inputlayer::protocol::Handler::from_config(config).unwrap();
+    handler.bootstrap_auth().unwrap();
+    assert!(handler.authenticate_user("admin", ENV_PASSWORD).is_ok());
+    assert!(handler.authenticate_user("admin", "admin").is_err());
 }

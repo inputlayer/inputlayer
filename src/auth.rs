@@ -112,9 +112,10 @@ fn supplied_secret(source: &'static str, value: Option<String>) -> Option<(&'sta
 /// `http.auth.bootstrap_admin_password`) and `INPUTLAYER_BOOTSTRAP_API_KEY`.
 /// `bootstrap` is `None` when the admin user already exists, else whether
 /// bootstrap issues an API key. Blank values count as unset. `Err` naming
-/// the setting when a supplied admin password on first boot, or a key
-/// bootstrap would store, is shorter than [`MIN_PASSWORD_CHARS`]; a short
-/// value it ignores only draws a warning.
+/// the setting when the admin password or key bootstrap would store is
+/// shorter than [`MIN_PASSWORD_CHARS`]; a short value it ignores only draws
+/// a warning, and a config password overridden by the environment on first
+/// boot is ignored whatever its length.
 pub fn bootstrap_secrets(
     configured: Option<&str>,
     bootstrap: Option<bool>,
@@ -123,10 +124,16 @@ pub fn bootstrap_secrets(
         "INPUTLAYER_ADMIN_PASSWORD",
         std::env::var("INPUTLAYER_ADMIN_PASSWORD").ok(),
     );
-    let config_password = supplied_secret(
+    let mut config_password = supplied_secret(
         "http.auth.bootstrap_admin_password",
         configured.map(str::to_string),
     );
+    if bootstrap.is_some() && env_password.is_some() && config_password.take().is_some() {
+        eprintln!(
+            "NOTE: http.auth.bootstrap_admin_password is ignored because \
+             INPUTLAYER_ADMIN_PASSWORD is set."
+        );
+    }
     let api_key = supplied_secret(
         "INPUTLAYER_BOOTSTRAP_API_KEY",
         std::env::var("INPUTLAYER_BOOTSTRAP_API_KEY").ok(),
