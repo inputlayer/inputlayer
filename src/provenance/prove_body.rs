@@ -4,24 +4,159 @@
 //! `enumerate_derived_candidates` (forward candidate generation for derived relations).
 
 use crate::ast::BodyPredicate;
+use crate::ast::{Atom, ComparisonOp, Term};
 use crate::provenance::backward_chaining::{build_node, ProofContext};
 use crate::provenance::proof_tree::{
     Conclusion, NegationInfo, NodeId, NodeKind, ProofNode, ProofTreeBuilder, VectorSearchInfo,
 };
 use crate::provenance::unification::{
-    evaluate_comparison, find_matching_tuples, format_bound_terms, substitute_atom, Bindings,
-    BoundTerm,
+    evaluate_comparison, find_matching_tuples, format_bound_terms, resolvable, resolve_value,
+    substitute_atom, values_equal, Bindings, BoundTerm,
 };
-use crate::value::Value;
+use crate::value::{Tuple, Value};
 use std::collections::HashSet;
 
 /// Maximum number of candidates that `enumerate_derived_candidates` will produce
 /// per relation. Prevents exponential blowup with deeply nested derived relations.
 pub const MAX_DERIVED_CANDIDATES: usize = 1000;
 
-/// Prove all body predicates, propagating bindings left-to-right.
+/// The order to evaluate `body` in once `bound` variables are bound: each
+/// predicate as soon as it can be evaluated, earlier ones first.
 ///
-/// Returns all valid combinations of (final_bindings, child_node_ids).
+/// A positive atom can always be evaluated. A comparison waits until both
+/// sides can be evaluated, or until one side can when the other is the
+/// variable an equality assigns. A negated atom waits until no other
+/// predicate left can bind its variables; those still unbound then are
+/// existential, like `_`. Predicates that never become ready (a comparison
+/// on a variable nothing binds, say) come last, in source order, and fail
+/// when evaluated.
+pub fn evaluation_order(body: &[BodyPredicate], bound: &HashSet<String>) -> Vec<usize> {
+    let mut bound = bound.clone();
+    let mut done = vec![false; body.len()];
+    let mut order = Vec::with_capacity(body.len());
+    while let Some(next) = (0..body.len()).find(|&i| !done[i] && ready(body, &done, i, &bound)) {
+        done[next] = true;
+        order.push(next);
+        bound.extend(binds(&body[next], &bound));
+    }
+    order.extend((0..body.len()).filter(|&i| !done[i]));
+    order
+}
+
+/// Whether `body[i]` can be evaluated with `bound` variables bound, when the
+/// predicates marked `done` have been.
+fn ready(body: &[BodyPredicate], done: &[bool], i: usize, bound: &HashSet<String>) -> bool {
+    match &body[i] {
+        BodyPredicate::Positive(_) | BodyPredicate::HnswNearest { .. } => true,
+        BodyPredicate::Comparison(lhs, op, rhs) => {
+            (resolvable(lhs, bound) && resolvable(rhs, bound))
+                || assignment(lhs, op, rhs, bound).is_some()
+        }
+        BodyPredicate::Negated(atom) => atom_variables(atom)
+            .filter(|var| !bound.contains(*var))
+            .all(|var| {
+                body.iter()
+                    .enumerate()
+                    .filter(|&(j, _)| j != i && !done[j])
+                    .all(|(_, pred)| !binds(pred, bound).contains(var))
+            }),
+    }
+}
+
+/// The variables evaluating `pred` binds, given `bound` ones are bound.
+fn binds(pred: &BodyPredicate, bound: &HashSet<String>) -> HashSet<String> {
+    match pred {
+        BodyPredicate::Positive(atom) => atom_variables(atom).cloned().collect(),
+        BodyPredicate::Comparison(lhs, op, rhs) => {
+            let mut vars: HashSet<String> = HashSet::new();
+            for (var, value) in [(lhs, rhs), (rhs, lhs)] {
+                if let (Term::Variable(name), ComparisonOp::Equal) = (var, op) {
+                    if !bound.contains(name) && value.variables().iter().all(|v| v != name) {
+                        vars.insert(name.clone());
+                    }
+                }
+            }
+            vars
+        }
+        BodyPredicate::HnswNearest {
+            id_var,
+            distance_var,
+            ..
+        } => [id_var.clone(), distance_var.clone()].into(),
+        BodyPredicate::Negated(_) => HashSet::new(),
+    }
+}
+
+/// The named variables among an atom's arguments.
+fn atom_variables(atom: &Atom) -> impl Iterator<Item = &String> {
+    atom.args.iter().filter_map(|term| match term {
+        Term::Variable(name) => Some(name),
+        _ => None,
+    })
+}
+
+/// For an equality that assigns a variable `bound` does not hold from a side
+/// that can be evaluated: the variable and that side.
+pub fn assignment<'t>(
+    lhs: &'t Term,
+    op: &ComparisonOp,
+    rhs: &'t Term,
+    bound: &HashSet<String>,
+) -> Option<(&'t str, &'t Term)> {
+    if *op != ComparisonOp::Equal {
+        return None;
+    }
+    [(lhs, rhs), (rhs, lhs)]
+        .into_iter()
+        .find_map(|(var, value)| match var {
+            Term::Variable(name) if !bound.contains(name) && resolvable(value, bound) => {
+                Some((name.as_str(), value))
+            }
+            _ => None,
+        })
+}
+
+/// A comparison under `bindings`: `Ok(Some(extended))` when it holds,
+/// binding the variable an equality assigns; `Ok(None)` when it fails;
+/// `Err` when it cannot be evaluated.
+pub fn apply_comparison(
+    lhs: &Term,
+    op: &ComparisonOp,
+    rhs: &Term,
+    bindings: &Bindings,
+) -> Result<Option<Bindings>, String> {
+    let bound: HashSet<String> = bindings.keys().cloned().collect();
+    if let Some((var, value)) = assignment(lhs, op, rhs, &bound) {
+        let value = resolve_value(value, bindings)
+            .ok_or_else(|| format!("Cannot evaluate {value} to assign {var}"))?;
+        let mut extended = bindings.clone();
+        extended.insert(var.to_string(), value);
+        return Ok(Some(extended));
+    }
+    Ok(evaluate_comparison(lhs, op, rhs, bindings)?.then(|| bindings.clone()))
+}
+
+/// A tuple matching `bound` in the base facts or the derived relations, if
+/// any: what makes a negated atom fail.
+pub fn negation_witness(
+    relation: &str,
+    bound: &[BoundTerm],
+    ctx: &ProofContext<'_>,
+) -> Option<Tuple> {
+    let found = |relations: &crate::provenance::proof_relations::ProofRelations<'_>| {
+        find_matching_tuples(relation, bound, relations)
+            .into_iter()
+            .next()
+            .map(|(tuple, _)| tuple)
+    };
+    found(&ctx.base_data).or_else(|| ctx.derived_data.as_ref().and_then(found))
+}
+
+/// Prove all body predicates, propagating bindings in
+/// [`evaluation_order`].
+///
+/// Returns all valid combinations of (final_bindings, child_node_ids), the
+/// children in source order.
 pub fn prove_body(
     body: &[BodyPredicate],
     initial_bindings: Bindings,
@@ -30,9 +165,11 @@ pub fn prove_body(
     visited: &mut HashSet<(String, Vec<Value>)>,
     depth: usize,
 ) -> Result<Vec<(Bindings, Vec<NodeId>)>, String> {
-    let mut states: Vec<(Bindings, Vec<NodeId>)> = vec![(initial_bindings, Vec::new())];
+    let bound: HashSet<String> = initial_bindings.keys().cloned().collect();
+    let mut states: Vec<(Bindings, Vec<(usize, NodeId)>)> = vec![(initial_bindings, Vec::new())];
 
-    for (pred_idx, pred) in body.iter().enumerate() {
+    for pred_idx in evaluation_order(body, &bound) {
+        let pred = &body[pred_idx];
         let mut next_states = Vec::new();
         for (bindings, children_so_far) in &states {
             match pred {
@@ -76,15 +213,14 @@ pub fn prove_body(
 
                         if let Some(node_id) = sub_ids.into_iter().next() {
                             let mut new_children = children_so_far.clone();
-                            new_children.push(node_id);
+                            new_children.push((pred_idx, node_id));
                             next_states.push((extended, new_children));
                         }
                     }
                 }
                 BodyPredicate::Negated(atom) => {
                     let bound = substitute_atom(atom, bindings);
-                    let matches = find_matching_tuples(&atom.relation, &bound, &ctx.base_data);
-                    if matches.is_empty() {
+                    if negation_witness(&atom.relation, &bound, ctx).is_none() {
                         let pattern_str = format_bound_terms(&bound);
                         let node_id = builder.insert_unique(ProofNode {
                             kind: NodeKind::Negation,
@@ -111,17 +247,13 @@ pub fn prove_body(
                             children: vec![],
                         });
                         let mut new_children = children_so_far.clone();
-                        new_children.push(node_id);
+                        new_children.push((pred_idx, node_id));
                         next_states.push((bindings.clone(), new_children));
                     }
                 }
                 BodyPredicate::Comparison(lhs, op, rhs) => {
-                    match evaluate_comparison(lhs, op, rhs, bindings) {
-                        Ok(true) => {
-                            next_states.push((bindings.clone(), children_so_far.clone()));
-                        }
-                        Ok(false) => {}
-                        Err(_) => {}
+                    if let Ok(Some(extended)) = apply_comparison(lhs, op, rhs, bindings) {
+                        next_states.push((extended, children_so_far.clone()));
                     }
                 }
                 BodyPredicate::HnswNearest {
@@ -191,7 +323,7 @@ pub fn prove_body(
                         });
 
                         let mut new_children = children_so_far.clone();
-                        new_children.push(node_id);
+                        new_children.push((pred_idx, node_id));
                         next_states.push((bindings.clone(), new_children));
                     }
                 }
@@ -205,7 +337,13 @@ pub fn prove_body(
         }
     }
 
-    Ok(states)
+    Ok(states
+        .into_iter()
+        .map(|(bindings, mut children)| {
+            children.sort_by_key(|&(pred_idx, _)| pred_idx);
+            (bindings, children.into_iter().map(|(_, id)| id).collect())
+        })
+        .collect())
 }
 
 /// Public accessor for testing the candidate cap.
@@ -266,35 +404,19 @@ fn enumerate_derived_candidates(
                         break;
                     }
 
-                    let mut head_values = Vec::new();
-                    let mut valid = true;
-                    for arg in &rule.head.args {
-                        match arg {
-                            crate::ast::Term::Variable(name) => {
-                                if let Some(val) = final_bindings.get(name) {
-                                    head_values.push(val.clone());
-                                } else {
-                                    valid = false;
-                                    break;
-                                }
-                            }
-                            other => {
-                                if let Some(val) = super::unification::term_to_value_pub(other) {
-                                    head_values.push(val);
-                                } else {
-                                    valid = false;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if valid {
+                    let head_values: Option<Vec<Value>> = rule
+                        .head
+                        .args
+                        .iter()
+                        .map(|arg| resolve_value(arg, &final_bindings))
+                        .collect();
+                    if let Some(head_values) = head_values {
                         let tuple = crate::value::Tuple::new(head_values);
                         let mut matches_pattern = true;
                         for (i, bt) in bound_terms.iter().enumerate() {
                             if let BoundTerm::Concrete(expected) = bt {
                                 if let Some(actual) = tuple.get(i) {
-                                    if actual != expected {
+                                    if !values_equal(actual, expected) {
                                         matches_pattern = false;
                                         break;
                                     }
@@ -484,6 +606,89 @@ mod tests {
         ];
         let result = prove_body(&body, bindings, &ctx, &mut builder, &mut visited, 0);
         assert!(result.is_err(), "comparison should fail");
+    }
+
+    fn cmp(lhs: Term, op: ComparisonOp, rhs: Term) -> BodyPredicate {
+        BodyPredicate::Comparison(lhs, op, rhs)
+    }
+
+    fn var(name: &str) -> Term {
+        Term::Variable(name.into())
+    }
+
+    #[test]
+    fn test_evaluation_order_waits_for_bindings() {
+        let none = HashSet::new();
+        // A comparison waits for the atom that binds its variable.
+        let body = vec![
+            cmp(var("S"), ComparisonOp::GreaterThan, Term::Constant(100)),
+            pos("item", vec!["X", "S"]),
+        ];
+        assert_eq!(evaluation_order(&body, &none), [1, 0]);
+
+        // A negation waits for every predicate that can bind its variables.
+        let body = vec![neg("danger", vec!["X"]), pos("node", vec!["X"])];
+        assert_eq!(evaluation_order(&body, &none), [1, 0]);
+
+        // An assignment binds the variable a later-listed filter reads.
+        let double = Term::Arithmetic(crate::ast::ArithExpr::Binary {
+            op: crate::ast::ArithOp::Mul,
+            left: Box::new(crate::ast::ArithExpr::Variable("N".into())),
+            right: Box::new(crate::ast::ArithExpr::Constant(2)),
+        });
+        let body = vec![
+            pos("item", vec!["X", "N"]),
+            cmp(var("D"), ComparisonOp::GreaterThan, Term::Constant(10)),
+            cmp(var("D"), ComparisonOp::Equal, double),
+        ];
+        assert_eq!(evaluation_order(&body, &none), [0, 2, 1]);
+
+        // A comparison on a variable nothing binds comes last.
+        let body = vec![
+            cmp(var("Q"), ComparisonOp::Equal, var("R")),
+            pos("node", vec!["X"]),
+        ];
+        assert_eq!(evaluation_order(&body, &none), [1, 0]);
+    }
+
+    #[test]
+    fn test_comparison_before_its_atom_proves_in_source_order() {
+        let data = base_data(vec![("item", vec![vec![int(1), int(200)]])]);
+        let ctx = ProofContext::new(&[], &data, ProofConfig::default());
+        let mut builder = ProofTreeBuilder::new();
+        let mut visited = HashSet::new();
+        let body = vec![
+            cmp(var("S"), ComparisonOp::GreaterThan, Term::Constant(100)),
+            pos("item", vec!["X", "S"]),
+            neg("danger", vec!["X"]),
+        ];
+        let results = prove_body(&body, Bindings::new(), &ctx, &mut builder, &mut visited, 0)
+            .expect("comparison should pass once S is bound");
+        assert_eq!(results.len(), 1);
+        let graph = builder.finish(vec![]);
+        let kinds: Vec<&NodeKind> = results[0]
+            .1
+            .iter()
+            .map(|id| &graph.nodes[id].kind)
+            .collect();
+        assert_eq!(kinds, [&NodeKind::Fact, &NodeKind::Negation]);
+    }
+
+    #[test]
+    fn test_negation_reads_derived_relations() {
+        let data = base_data(vec![("node", vec![vec![int(1)]])]);
+        let derived: RelationMap = [(
+            "danger".to_string(),
+            Relation::from(vec![Tuple::new(vec![int(1)])]),
+        )]
+        .into_iter()
+        .collect();
+        let ctx = ProofContext::new(&[], &data, ProofConfig::default()).with_derived_data(&derived);
+        let mut builder = ProofTreeBuilder::new();
+        let mut visited = HashSet::new();
+        let body = vec![pos("node", vec!["X"]), neg("danger", vec!["X"])];
+        let result = prove_body(&body, Bindings::new(), &ctx, &mut builder, &mut visited, 0);
+        assert!(result.is_err(), "danger(1) is derived, so !danger(1) fails");
     }
 
     #[test]

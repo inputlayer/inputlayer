@@ -9,7 +9,9 @@ use crate::provenance::proof_tree::{
     AggregateInfo, Conclusion, FactSource, NodeId, NodeKind, ProofNode, ProofTree,
     ProofTreeBuilder, TruncatedInfo,
 };
-use crate::provenance::unification::unify_head;
+use crate::provenance::unification::{
+    check_computed_head, unify_head, ComputedHead, PLACEHOLDER_PREFIX,
+};
 use crate::provenance::ProofConfig;
 use crate::value::{RelationMap, Tuple, Value};
 use std::collections::{HashMap, HashSet};
@@ -282,9 +284,14 @@ pub(crate) fn build_node(
                     if result_ids.len() >= ctx.config.max_proofs_per_tuple {
                         break;
                     }
+                    if check_computed_head(tuple, &rule.head, &final_bindings)
+                        != ComputedHead::Matches
+                    {
+                        continue;
+                    }
                     let binding_map: HashMap<String, Value> = final_bindings
                         .into_iter()
-                        .filter(|(name, _)| !name.starts_with("_placeholder_"))
+                        .filter(|(name, _)| !name.starts_with(PLACEHOLDER_PREFIX))
                         .collect();
 
                     let id = builder.insert(ProofNode {

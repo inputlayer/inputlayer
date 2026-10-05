@@ -136,6 +136,12 @@ pub enum Blocker {
         k: usize,
         reason: String,
     },
+
+    /// The explainer cannot say which premise fails: a predicate it cannot
+    /// evaluate, or a search that hit its limit. Never a claim that the
+    /// premise fails.
+    #[serde(rename = "not_explained")]
+    NotExplained { reason: String },
 }
 
 impl fmt::Display for Blocker {
@@ -172,6 +178,7 @@ impl fmt::Display for Blocker {
                 k,
                 reason,
             } => write!(f, "Not in top-{k} results of index {index_name}: {reason}"),
+            Blocker::NotExplained { reason } => write!(f, "Not explained: {reason}"),
         }
     }
 }
