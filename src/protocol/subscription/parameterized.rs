@@ -554,9 +554,11 @@ impl Family {
     }
 
     /// The outcome of `round`, evaluating it, as a `probe` or for views
-    /// waiting on it, unless another caller did or is doing so.
-    async fn outcome(&self, round: &Round, probe: bool) -> Result<Arc<Partitions>, String> {
-        round
+    /// waiting on it, unless another caller did or is doing so. A round the
+    /// family does not share once judged, too slow or failed, is let go: no
+    /// view reads it, so its rows must not stay around until the next probe.
+    async fn outcome(&self, round: &Arc<Round>, probe: bool) -> Result<Arc<Partitions>, String> {
+        let outcome = round
             .outcome
             .get_or_init(|| async {
                 // An evaluation cancelled after taking the snapshot leaves
@@ -572,7 +574,11 @@ impl Family {
                 self.evaluate(snapshot, probe).await
             })
             .await
-            .clone()
+            .clone();
+        if !self.sharing.load(Ordering::Relaxed) {
+            let _ = self.latest.compare_and_swap(&Some(Arc::clone(round)), None);
+        }
+        outcome
     }
 
     /// Evaluate a round at `snapshot`, as a `probe` or for views waiting on
@@ -759,13 +765,6 @@ impl Family {
             let _ = family.outcome(&round, true).await;
             #[cfg(test)]
             drop(gate);
-            if !family.sharing.load(Ordering::Relaxed) {
-                // Judged too slow, or failed: no view reads the round, so
-                // its rows must not stay around until the next probe.
-                let _ = family
-                    .latest
-                    .compare_and_swap(&Some(Arc::clone(&round)), None);
-            }
             family.probing.store(false, Ordering::Relaxed);
         });
     }

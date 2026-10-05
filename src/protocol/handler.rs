@@ -1130,6 +1130,7 @@ impl Handler {
     /// outnumber the compute permits, whatever their rounds cost: they still
     /// probe, and still stop sharing on a failed round. For tests and
     /// benchmarks that need sharing to happen whatever the host's timing.
+    #[cfg(feature = "test-support")]
     pub fn with_sharing_regardless_of_cost(mut self) -> Self {
         self.share_regardless_of_cost = true;
         self

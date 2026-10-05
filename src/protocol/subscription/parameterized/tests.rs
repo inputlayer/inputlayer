@@ -400,6 +400,10 @@ mod rounds {
             "the round compiled its plan"
         );
         assert!(!one.family.shares(), "and was still judged too slow");
+        assert!(
+            one.family.latest.load().is_none(),
+            "the round judged too slow is let go"
+        );
     }
 
     /// A chain of `n` edges, reachable as `reach`: a bound reach is short
