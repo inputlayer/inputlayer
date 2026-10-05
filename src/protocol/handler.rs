@@ -584,6 +584,9 @@ mod proof_snapshot_tests;
 mod pinned_proof_tests;
 
 #[cfg(test)]
+mod why_not_tests;
+
+#[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod expect_revision_tests;
 
@@ -886,11 +889,35 @@ impl ProofSnapshot {
         let start = std::time::Instant::now();
         let (relation, tuple) = parse_why_not_target(input)?;
         let query_start = std::time::Instant::now();
+        // Evaluate the whole relation, uncapped: whether the target is
+        // derived, and every premise the explanation reads, must come from
+        // its derived relations, not only the base facts.
+        let arity = self
+            .snapshot
+            .rules
+            .iter()
+            .find(|rule| rule.head.relation == relation)
+            .map(|rule| rule.head.args.len());
+        let derived_data = match arity {
+            Some(arity) => {
+                let columns: Vec<String> = (0..arity).map(|i| format!("V{i}")).collect();
+                let query =
+                    transform_query_shorthand(&format!("?{relation}({})", columns.join(", ")))?
+                        .query;
+                crate::without_result_cap(|| {
+                    self.snapshot.execute_with_rules_tuples_and_derived(&query)
+                })
+                .map_err(|e| format!("Query execution failed: {e}"))?
+                .1
+            }
+            None => crate::value::RelationMap::new(),
+        };
         let ctx = ProofContext::new(
             &self.snapshot.rules,
             &self.snapshot.input_tuples,
             ProofConfig::default(),
-        );
+        )
+        .with_derived_data(&derived_data);
         let query_us = query_start.elapsed().as_micros() as u64;
 
         let explain_start = std::time::Instant::now();

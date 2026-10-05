@@ -72,7 +72,10 @@ For aggregations with many contributing tuples, use `.why full` to enumerate all
 
 ## Negative Explanations with `.why_not`
 
-When an expected fact is missing, `.why_not` explains which rule condition failed:
+When an expected fact is missing, `.why_not` explains which rule condition failed.
+It first evaluates the relation: if the fact is derived after all, it says so and
+returns the fact's proof, as `.why` does. A fact is reported as NOT derived only
+when `?relation(values)` returns no row.
 
 ```iql
 +edge[(1, 2), (3, 4)]
@@ -91,12 +94,21 @@ path(1, 99) was NOT derived:
     Blocker: Body predicate 1 (edge(2, 99)) failed: No matching tuples in edge
 ```
 
-The blocker identifies the exact body predicate that prevented derivation:
+For each rule that could produce the fact, `.why_not` tries every way the rule's
+body can match, reading base facts and derived relations alike, and reports the
+attempt that got furthest: the premises that held, and the one that failed for
+those bindings. The blocker is one of:
 - **Body atom failed** - no matching tuples in the referenced relation
 - **Comparison failed** - a filter condition evaluated to false
 - **Negation succeeded** - a tuple exists that should be absent
-- **Head unification failed** - the rule head pattern doesn't match the target
-- **HNSW not in top-k** - the target wasn't in the nearest neighbor results
+- **Head unification failed** - the rule head doesn't match the target: a
+  different number of values, a constant in the head that differs
+  (`column 1: rule head has "refund", target has "close"`), or a computed
+  column that evaluates to another value (`column 1: N+1 is 4, target has 5`,
+  `column 1: count<X> over this group is 2, target has 5`)
+- **Not explained** - a premise `.why_not` cannot evaluate (a function call, a
+  nearest-neighbour search) or a search that hit its limit; never a claim that
+  the premise fails
 
 ## Proofs of a Guarded Write
 
