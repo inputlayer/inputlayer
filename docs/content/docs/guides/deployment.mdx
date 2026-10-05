@@ -232,7 +232,7 @@ knowledge graph names.
 | `inputlayer_ws_connections` | gauge | Open WebSocket connections. |
 | `inputlayer_ws_connections_unauthenticated` | gauge | Open WebSocket connections not yet authenticated. |
 | `inputlayer_ws_connections_limit` | gauge | `rate_limit.max_ws_connections` (0: no limit). |
-| `inputlayer_ws_errors_total{code}` | counter | WebSocket requests answered with an `error` frame, by [error code](websocket-api) (`none`: no code, such as permission refusals). |
+| `inputlayer_ws_errors_total{code}` | counter | WebSocket requests answered with an `error` frame, by [error code](websocket-api) (`none`: no code). |
 | `inputlayer_ws_notices_total{code}` | counter | WebSocket notices by code: `slow_consumer`, `idle_timeout`, `lifetime_exceeded`, `auth_timeout`, `credential_revoked`, `credential_expired` and `server_shutdown` close the connection; `notifications_missed` and `replay_gap` do not. |
 | `inputlayer_ws_send_timeouts_total` | counter | Connections closed because the client left a frame unread for `http.ws_send_timeout_ms`. |
 | `inputlayer_auth_failures_total{method}` | counter | Failed authentications: `password` (login) or `api_key` (WebSocket `authenticate` and REST Bearer keys). |
