@@ -4,7 +4,8 @@
 //! Followers ack the newest LSN they applied after their WAL fsync. The
 //! highest ack from any follower is the *confirmed* LSN: every event up to it
 //! survives the loss of the primary. In `sync` mode a request that appended
-//! events waits until the confirmed LSN reaches its newest one (see
+//! events waits until the confirmed LSN reaches its newest one, and a durable
+//! write until it reaches the log's head as the request finished (see
 //! [`writes`](crate::replication::writes)), for at most `sync_timeout_ms`.
 //! Then `on_follower_loss` decides:
 //!
