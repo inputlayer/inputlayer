@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use crate::harness::{admin, rows, start_server, Client, Server, KG, TIMEOUT};
 
-const MALLORY_PASSWORD: &str = "pw12345678";
+const MALLORY_PASSWORD: &str = "pw1234567890";
 
 /// A server with `+a(1)` and a viewer `mallory` granted read access.
 async fn server_with_mallory() -> Server {
@@ -181,9 +181,9 @@ async fn the_view_goes_with_its_last_subscriber() {
 async fn a_demoted_admin_stops_receiving_rows_at_once() {
     let server = start_server(64).await;
     server.write("+a(1)").await;
-    admin(&server, ".user create boss pw-boss-123 admin").await;
+    admin(&server, ".user create boss pw-boss-12345 admin").await;
     let mut owner = Client::connect(&server).await;
-    let mut boss = Client::connect_as(&server, KG, "boss", "pw-boss-123").await;
+    let mut boss = Client::connect_as(&server, KG, "boss", "pw-boss-12345").await;
     owner.subscribe("o", "?a(X)").await;
     boss.subscribe("b", "?a(X)").await;
     server.write("+a(2)").await;

@@ -16,6 +16,7 @@ import {
   ConnectionError,
   ConnectionLostError,
   type ConnectionOptions,
+  type NamedQuery,
   type NotificationEvent,
   type SubscriptionPushMessage,
 } from '../src/index';
@@ -32,6 +33,8 @@ interface Connected {
 class MockServer {
   readonly connections: Connected[] = [];
   epoch = 'e1';
+  /** `protocol_version` sent in `authenticated`. */
+  static protocolVersion = 5;
   refuseAuth = false;
   /** Answer authentication with a closing notice and close, as on `auth_timeout`. */
   closeOnAuth = false;
@@ -78,7 +81,7 @@ class MockServer {
                     knowledge_graph: kg,
                     version: 'test',
                     role: 'admin',
-                    protocol_version: 3,
+                    protocol_version: MockServer.protocolVersion,
                     stream_epoch: this.epoch,
                   },
             ),
@@ -148,16 +151,31 @@ function executes(c: Connected): Frame[] {
   return c.received.filter((f) => f.type === 'execute');
 }
 
+/** Requests of any kind: `execute`, `read` and `subscribe` frames. */
+function requests(c: Connected): Frame[] {
+  return c.received.filter((f) => f.type === 'execute' || f.type === 'read' || f.type === 'subscribe');
+}
+
 // ── Fixtures ────────────────────────────────────────────────────────
+
+/** A program, a snapshot read, or a subscription group. */
+type FixtureCall = string | { read: NamedQuery[] } | { subscribe: { subscription: string; queries: NamedQuery[] } };
 
 interface Fixture {
   name: string;
   about: string;
   options?: { maxInFlight?: number; timeoutMs?: number; timeoutGraceMs?: number };
-  calls: string[];
+  calls: FixtureCall[];
   server: Frame[];
   expect: {
-    calls: Array<{ rows?: unknown[][]; error?: string; code?: string; mayHaveCommitted?: boolean }>;
+    calls: Array<{
+      rows?: unknown[][];
+      revision?: number;
+      results?: Record<string, unknown[][]>;
+      error?: string;
+      code?: string;
+      mayHaveCommitted?: boolean;
+    }>;
     notifications?: number[];
     lastSeq?: number;
     events?: string[];
@@ -172,13 +190,20 @@ const fixtures: Fixture[] = readdirSync(FIXTURES)
   .filter((f) => f.endsWith('.json'))
   .map((f) => JSON.parse(readFileSync(join(FIXTURES, f), 'utf8')));
 
+/** Whether `frame` is a request of `call`. */
+function isRequestOf(frame: Frame, call: FixtureCall): boolean {
+  if (typeof call === 'string') return frame.type === 'execute' && frame.program === call;
+  if ('read' in call) return frame.type === 'read' && JSON.stringify(frame.queries) === JSON.stringify(call.read);
+  return frame.type === 'subscribe' && frame.subscription === call.subscribe.subscription;
+}
+
 /** Replace `$r<i>` / `$c<i>` with the ids the client used for call `i`. */
-function resolveIds(value: unknown, calls: string[], c: Connected): unknown {
+function resolveIds(value: unknown, calls: FixtureCall[], c: Connected): unknown {
   if (typeof value === 'string') {
     const m = /^\$([rc])(\d+)$/.exec(value);
     if (!m) return value;
-    const requests = executes(c).filter((f) => f.program === calls[Number(m[2])]);
-    const request = requests[requests.length - 1];
+    const sent = requests(c).filter((f) => isRequestOf(f, calls[Number(m[2])]));
+    const request = sent[sent.length - 1];
     if (m[1] === 'r') return request?.id;
     return c.received.find((f) => f.type === 'cancel' && f.target === request?.id)?.id;
   }
@@ -197,7 +222,7 @@ async function play(fixture: Fixture, srv: MockServer): Promise<void> {
     if (step.await) {
       const target = step.await as { executes?: number; cancel?: number };
       if (target.executes !== undefined) {
-        await srv.until(() => executes(c).length >= target.executes!);
+        await srv.until(() => requests(c).length >= target.executes!);
       } else {
         await srv.until(() => resolveIds(`$c${target.cancel}`, fixture.calls, c) !== undefined);
       }
@@ -206,7 +231,7 @@ async function play(fixture: Fixture, srv: MockServer): Promise<void> {
     } else if (step.raw !== undefined) {
       c.socket.send(String(step.raw));
     } else if (step.assert) {
-      expect(executes(c).length).toBe((step.assert as { executes: number }).executes);
+      expect(requests(c).length).toBe((step.assert as { executes: number }).executes);
     } else if (step.sleep !== undefined) {
       await new Promise((resolve) => setTimeout(resolve, Number(step.sleep)));
     } else if (step.close) {
@@ -227,6 +252,7 @@ describe('connection fixtures', () => {
         'deadline_cancel',
         'deadline_cancel_wins',
         'duplicate_id_rejection',
+        'group_subscribe_streamed',
         'in_flight_bound',
         'interleaved_streams',
         'missing_chunk',
@@ -235,6 +261,12 @@ describe('connection fixtures', () => {
         'queued_call_deadline',
         'silent_server_query',
         'silent_server_write',
+        'snapshot_chunk_out_of_order',
+        'snapshot_error_mid_stream',
+        'snapshot_for_other_queries',
+        'snapshot_read_deadline_cancel',
+        'snapshot_rows_do_not_add_up',
+        'snapshot_streams_interleaved',
       ]),
     );
   });
@@ -254,9 +286,18 @@ describe('connection fixtures', () => {
       c.events.addEventListener(type, () => events.push(type));
     }
 
-    const outcomes = fixture.calls.map((program) =>
-      c.execute(program).then(
-        (result) => ({ rows: result.rows }) as Record<string, unknown>,
+    const outcomes = fixture.calls.map((call) =>
+      (typeof call === 'string'
+        ? c.execute(call).then((result) => ({ rows: result.rows }) as Record<string, unknown>)
+        : ('read' in call
+            ? c.read(call.read)
+            : c.subscribeGroup(call.subscribe.subscription, call.subscribe.queries)
+          ).then((snapshot) => ({
+            revision: snapshot.revision,
+            results: Object.fromEntries(snapshot.results.map((r) => [r.name, r.rows])),
+          }) as Record<string, unknown>)
+      ).then(
+        (outcome) => outcome,
         (error: Error & { code?: string; mayHaveCommitted?: boolean }) => ({
           error: error.name,
           code: error.code,
@@ -272,6 +313,10 @@ describe('connection fixtures', () => {
       const got = settled[i];
       if (want.rows) {
         expect(got, `call ${i}`).toEqual({ rows: want.rows });
+        return;
+      }
+      if (want.results) {
+        expect(got, `call ${i}`).toEqual({ revision: want.revision, results: want.results });
         return;
       }
       expect(got.error, `call ${i}`).toBe(want.error);
@@ -296,7 +341,7 @@ describe('connection fixtures', () => {
       }
     }
     if (fixture.expect.sentTimeoutMs !== undefined) {
-      for (const frame of executes(server!.connections[0])) {
+      for (const frame of requests(server!.connections[0]).filter((f) => f.type !== 'subscribe')) {
         expect(frame.timeout_ms).toBe(fixture.expect.sentTimeoutMs);
       }
     }
@@ -304,6 +349,50 @@ describe('connection fixtures', () => {
 });
 
 // ── Routing ─────────────────────────────────────────────────────────
+
+describe('params', () => {
+  it('sends values beside the program, and omits empty params', async () => {
+    const c = await open();
+    const call = c.execute('+eta($s, $d)', { params: { s: 'S-77"), +x(1', d: { int: '9007199254740993' } } });
+    const bare = c.execute('?eta(S, D)', { params: {} });
+    await server!.until(() => executes(server!.last).length === 2);
+    const [sent, plain] = executes(server!.last);
+    expect(sent.program).toBe('+eta($s, $d)');
+    expect(sent.params).toEqual({ s: 'S-77"), +x(1', d: { int: '9007199254740993' } });
+    expect('params' in plain).toBe(false);
+    for (const frame of [sent, plain]) {
+      server!.last.socket.send(
+        JSON.stringify({ type: 'result', id: frame.id, columns: [], rows: [], row_count: 0, total_count: 0,
+          truncated: false, execution_time_ms: 0, errors: [] }),
+      );
+    }
+    await Promise.all([call, bare]);
+  });
+
+  it('refuses params on an engine older than protocol 4, sending nothing', async () => {
+    MockServer.protocolVersion = 3;
+    try {
+      const c = await open();
+      await expect(c.execute('+eta($s)', { params: { s: 'S-77' } })).rejects.toThrow(/protocol 3; parameters need version 4/);
+      expect(executes(server!.last)).toEqual([]);
+    } finally {
+      MockServer.protocolVersion = 5;
+    }
+  });
+
+  it('refuses reads and subscription groups on an engine older than protocol 5, sending nothing', async () => {
+    MockServer.protocolVersion = 4;
+    try {
+      const c = await open();
+      const queries = [{ name: 'a', query: '?a(X)' }];
+      await expect(c.read(queries)).rejects.toThrow(/protocol 4; reads and subscription groups need version 5/);
+      await expect(c.subscribeGroup('g', queries)).rejects.toThrow(/need version 5/);
+      expect(requests(server!.last)).toEqual([]);
+    } finally {
+      MockServer.protocolVersion = 5;
+    }
+  });
+});
 
 describe('routing', () => {
   it('every request carries a distinct id', async () => {

@@ -11,19 +11,30 @@ from inputlayer._protocol import (
     ErrorResponse,
     ExecuteMessage,
     LoginMessage,
+    NamedQuery,
     NoticeResponse,
     NotificationResponse,
     PingMessage,
     PongResponse,
+    ReadMessage,
     ResultChunkResponse,
     ResultEndResponse,
     ResultResponse,
     ResultStartResponse,
+    SnapshotChunkResponse,
+    SnapshotEndResponse,
+    SnapshotResponse,
+    SnapshotStartResponse,
+    SubscribeMessage,
     SubscriptionDeltaChunkResponse,
     SubscriptionDeltaEndResponse,
     SubscriptionDeltaResponse,
     SubscriptionDeltaStartResponse,
     SubscriptionErrorResponse,
+    SubscriptionGroupDeltaChunkResponse,
+    SubscriptionGroupDeltaEndResponse,
+    SubscriptionGroupDeltaResponse,
+    SubscriptionGroupDeltaStartResponse,
     SubscriptionResetResponse,
     deserialize_message,
     serialize_message,
@@ -401,3 +412,103 @@ class TestDeserializePushes:
         assert start.subscribed is not None
         assert (start.subscribed.subscription, start.subscribed.generation) == ("live", 4)
 
+
+
+# ── Snapshot reads and subscription groups (protocol 4) ──────────────
+
+
+class TestSnapshotFrames:
+    QUERIES = (NamedQuery("orders", "?order(S, O)"), NamedQuery("eta", "?eta(O, T)"))
+
+    def test_read_and_subscribe_serialize_like_the_rust_frames(self):
+        read = json.loads(ReadMessage(self.QUERIES, id="r1", timeout_ms=500).to_json())
+        assert read == {
+            "type": "read",
+            "queries": [
+                {"name": "orders", "query": "?order(S, O)"},
+                {"name": "eta", "query": "?eta(O, T)"},
+            ],
+            "timeout_ms": 500,
+            "id": "r1",
+        }
+        assert "timeout_ms" not in json.loads(ReadMessage(self.QUERIES).to_json())
+        subscribe = json.loads(serialize_message(SubscribeMessage("win", self.QUERIES, id="s1")))
+        assert subscribe == {
+            "type": "subscribe",
+            "subscription": "win",
+            "queries": read["queries"],
+            "id": "s1",
+        }
+
+    def test_snapshot(self):
+        frame = deserialize_message(json.dumps({
+            "type": "snapshot", "id": "s1", "knowledge_graph": "default", "revision": 5,
+            "results": [
+                {"name": "orders", "columns": ["S", "O"], "rows": [[1, 2]],
+                 "total_count": 1, "truncated": False},
+                {"name": "eta", "columns": ["O", "T"], "rows": [], "total_count": 0,
+                 "truncated": True},
+            ],
+            "execution_time_ms": 2,
+            "subscribed": {"subscription": "win", "generation": 1, "revision": 5},
+        }))
+        assert isinstance(frame, SnapshotResponse)
+        assert (frame.id, frame.revision, frame.knowledge_graph) == ("s1", 5, "default")
+        assert [(r.name, r.columns, r.rows, r.truncated) for r in frame.results] == [
+            ("orders", ["S", "O"], [[1, 2]], False),
+            ("eta", ["O", "T"], [], True),
+        ]
+        assert frame.subscribed is not None and frame.subscribed.generation == 1
+
+    def test_streamed_snapshot(self):
+        start = deserialize_message(json.dumps({
+            "type": "snapshot_start", "id": "r", "knowledge_graph": "kg", "revision": 9,
+            "results": [{"name": "a", "columns": ["X"], "row_count": 3, "total_count": 3,
+                         "truncated": False}],
+            "execution_time_ms": 1,
+        }))
+        assert isinstance(start, SnapshotStartResponse) and start.subscribed is None
+        assert start.results[0].row_count == 3
+        chunk = deserialize_message(json.dumps({
+            "type": "snapshot_chunk", "id": "r", "result": 0, "chunk_index": 0, "rows": [[1]],
+        }))
+        assert chunk == SnapshotChunkResponse(result=0, chunk_index=0, rows=[[1]], id="r")
+        end = deserialize_message(json.dumps({"type": "snapshot_end", "id": "r", "chunk_count": 1}))
+        assert end == SnapshotEndResponse(chunk_count=1, id="r")
+
+    def test_group_delta_frames(self):
+        base = {"subscription": "win", "generation": 1, "seq": 1}
+        delta = deserialize_message(json.dumps({
+            **base, "type": "subscription_group_delta", "knowledge_graph": "default",
+            "revision": 6,
+            "members": [
+                {"name": "orders", "unchanged": False, "columns": ["S", "O"],
+                 "inserted": [[1, 9]], "retracted": []},
+                {"name": "eta", "unchanged": True, "columns": ["O", "T"],
+                 "inserted": [], "retracted": []},
+            ],
+        }))
+        assert isinstance(delta, SubscriptionGroupDeltaResponse)
+        assert [(m.name, m.unchanged, m.inserted) for m in delta.members] == [
+            ("orders", False, [[1, 9]]),
+            ("eta", True, []),
+        ]
+        start = deserialize_message(json.dumps({
+            **base, "type": "subscription_group_delta_start", "knowledge_graph": "default",
+            "revision": 6,
+            "members": [{"name": "orders", "unchanged": False, "columns": ["S", "O"],
+                         "inserted_count": 2, "retracted_count": 1}],
+        }))
+        assert isinstance(start, SubscriptionGroupDeltaStartResponse)
+        assert start.members[0].inserted_count == 2
+        chunk = deserialize_message(json.dumps({
+            **base, "type": "subscription_group_delta_chunk", "chunk_index": 0, "member": 0,
+            "inserted": [[1, 1]], "retracted": [[2, 2]],
+        }))
+        assert isinstance(chunk, SubscriptionGroupDeltaChunkResponse) and chunk.member == 0
+        end = deserialize_message(json.dumps({
+            **base, "type": "subscription_group_delta_end", "chunk_count": 1,
+        }))
+        assert end == SubscriptionGroupDeltaEndResponse(
+            subscription="win", generation=1, seq=1, chunk_count=1
+        )

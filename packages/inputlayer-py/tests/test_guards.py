@@ -448,10 +448,18 @@ class _Conn:
 
     def __init__(self, *replies: ResultResponse | Exception) -> None:
         self.sent: list[str] = []
+        self.params: list[dict[str, Any] | None] = []
         self._replies = list(replies)
 
-    async def execute(self, iql: str, *, timeout: float | None = None) -> ResultResponse:
+    async def execute(
+        self,
+        iql: str,
+        *,
+        timeout: float | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> ResultResponse:
         self.sent.append(iql)
+        self.params.append(params)
         reply = self._replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
@@ -568,4 +576,5 @@ class TestCommit:
         conn = _Conn(_rows("Conditional delete: 2 fact(s) deleted from 'eta'."))
         r = await _kg(conn).retract(Eta, shipment="S-77")
         assert r.count == 2
-        assert conn.sent == ['-eta("S-77", Due) <- eta("S-77", Due)']
+        assert conn.sent == ["-eta($p0, Due) <- eta($p0, Due)"]
+        assert conn.params == [{"p0": "S-77"}]

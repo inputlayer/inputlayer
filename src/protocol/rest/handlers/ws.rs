@@ -155,10 +155,26 @@ fn default_kg() -> String {
 /// ```
 /// `.unsubscribe <name>` removes one; disconnecting or switching KG removes all.
 ///
+/// **Coherent reads**: `read` answers several named queries from one pinned
+/// snapshot, and `subscribe` registers them as one subscription group; both
+/// reply with a `snapshot` whose results are all exact at its `revision`:
+/// ```json
+/// {"type": "subscribe", "id": "3", "subscription": "w",
+///  "queries": [{"name": "a", "query": "?a(X)"}, {"name": "b", "query": "?b(X)"}]}
+/// {"type": "snapshot", "id": "3", "knowledge_graph": "default", "revision": 17,
+///  "results": [{"name": "a", "columns": ["X"], "rows": [[1]], "total_count": 1,
+///  "truncated": false}, {"name": "b", "...": "..."}], "execution_time_ms": 1,
+///  "subscribed": {"subscription": "w", "generation": 2, "revision": 17}}
+/// ```
+/// A group then gets one `subscription_group_delta` per refresh that changed
+/// any member, listing every member (unchanged ones marked), all exact at its
+/// `revision`.
+///
 /// A result, snapshot or delta too large for one frame is streamed as one
 /// logical payload that applies only at its end frame (`result_start` /
-/// `result_chunk` / `result_end`, `subscription_delta_start` /
-/// `subscription_delta_chunk` / `subscription_delta_end`). What cannot be
+/// `result_chunk` / `result_end`, `snapshot_start` / `snapshot_chunk` /
+/// `snapshot_end`, `subscription_delta_start` / `subscription_delta_chunk` /
+/// `subscription_delta_end`, and the `subscription_group_delta_*` frames). What cannot be
 /// delivered whole is reported instead of any part of it: an `error` for a
 /// reply, or a `subscription_reset` that ends the subscription. A client that
 /// leaves a frame unread for `http.ws_send_timeout_ms` is disconnected.
@@ -633,8 +649,36 @@ fn admit(
         requests.admit(access, (request, span));
         return;
     }
+    if let Job::Execute {
+        precondition: Some(expectation),
+        ..
+    } = &request.job
+    {
+        let epoch = handler.notifications().epoch();
+        if expectation.epoch.as_deref().is_some_and(|e| e != epoch) {
+            let rejected = ServerFrame::error(
+                request.id.clone(),
+                Some(ErrorCode::PreconditionFailed),
+                format!(
+                    "Precondition failed: expect_epoch is not this engine run's stream \
+                     epoch ({epoch}); revisions restart with the engine. Nothing was applied."
+                ),
+            );
+            let (access, request) = Request::immediate(rejected);
+            requests.admit(access, (request, span));
+            return;
+        }
+    }
     let control = match &request.job {
-        Job::Execute { timeout_ms, .. } => Some(handler.request_control(*timeout_ms)),
+        Job::Execute {
+            timeout_ms,
+            precondition,
+            ..
+        } => Some(handler.request_control_expecting(
+            *timeout_ms,
+            precondition.as_ref().map(|e| e.precondition.clone()),
+        )),
+        Job::Read { timeout_ms, .. } => Some(handler.request_control(*timeout_ms)),
         _ => None,
     };
     let id = request.id.clone();
@@ -665,7 +709,9 @@ fn start_requests(
             Job::Immediate(frame) => {
                 requests.complete(ticket, Reply::Frames(vec![encode(&frame)]));
             }
-            Job::Execute { program, .. } => {
+            Job::Execute {
+                program, params, ..
+            } => {
                 let control = match in_flight.control(ticket) {
                     Some(control) => Arc::clone(control),
                     None => handler.request_control(None),
@@ -685,6 +731,22 @@ fn start_requests(
                     session_id.to_string(),
                     id,
                     program,
+                    params,
+                    principal.clone(),
+                    control,
+                );
+                requests.run(ticket, work.map(Reply::Frames).in_current_span());
+            }
+            Job::Read { queries, .. } => {
+                let control = match in_flight.control(ticket) {
+                    Some(control) => Arc::clone(control),
+                    None => handler.request_control(None),
+                };
+                let work = execute::read(
+                    Arc::clone(handler),
+                    session_id.to_string(),
+                    id,
+                    queries,
                     principal.clone(),
                     control,
                 );
@@ -694,16 +756,31 @@ fn start_requests(
                 // Handled on arrival by `admit`; never queued.
                 requests.complete(ticket, Reply::Frames(Vec::new()));
             }
-            Job::Subscribe { name, query } => {
+            Job::Subscribe { .. } | Job::SubscribeGroup { .. } => {
                 let started = std::time::Instant::now();
-                let opening = handler
+                let kg = handler
                     .session_manager()
-                    .session_kg(&session_id.to_string())
-                    .and_then(|kg| subscriptions.begin_subscribe(&kg, &name, &query));
+                    .session_kg(&session_id.to_string());
+                let (name, members, opening) = match job {
+                    Job::Subscribe { name, query } => {
+                        let opening =
+                            kg.and_then(|kg| subscriptions.begin_subscribe(&kg, &name, &query));
+                        (name, None, opening)
+                    }
+                    Job::SubscribeGroup { name, queries } => {
+                        let opening = kg.and_then(|kg| {
+                            subscriptions.begin_subscribe_group(&kg, &name, &queries)
+                        });
+                        let members = queries.into_iter().map(|q| q.name).collect();
+                        (name, Some(members), opening)
+                    }
+                    _ => unreachable!("matched a subscribe job above"),
+                };
                 match opening {
                     Ok(opening) => {
                         let work = opening.run().map(move |opened| Reply::Subscribed {
                             name,
+                            members,
                             opened,
                             started,
                         });
@@ -749,34 +826,53 @@ fn release_reply(
         Some(Reply::Frames(frames)) => frames,
         Some(Reply::Subscribed {
             name: subscription,
+            members,
             opened,
             started,
-        }) => match subscriptions.finish_subscribe(opened, readable) {
-            Ok((snapshot, generation)) => {
-                let reply = execute::subscription_reply(
-                    id.clone(),
-                    snapshot.columns,
-                    snapshot.rows,
-                    Some(Subscribed {
+        }) => {
+            let knowledge_graph = opened.knowledge_graph().to_string();
+            match subscriptions.finish_subscribe(opened, readable) {
+                Ok((snapshot, generation)) => {
+                    let subscribed = Subscribed {
                         subscription: subscription.clone(),
                         generation,
                         revision: snapshot.revision,
-                    }),
-                    started,
-                );
-                stream::result_frames(reply).unwrap_or_else(|reason| {
-                    // A snapshot that cannot be delivered whole registers
-                    // nothing; no push for it was sent yet.
-                    subscriptions.reset(&subscription, generation);
-                    vec![encode(&ServerFrame::error(
-                        id,
-                        Some(ErrorCode::Internal),
-                        reason,
-                    ))]
-                })
+                    };
+                    let frames = match members {
+                        None => {
+                            let result = snapshot.results.into_iter().next().unwrap_or_default();
+                            let reply = execute::subscription_reply(
+                                id.clone(),
+                                result.columns,
+                                result.rows,
+                                Some(subscribed),
+                                started,
+                            );
+                            stream::result_frames(reply)
+                        }
+                        Some(members) => stream::snapshot_frames(execute::group_snapshot(
+                            id.clone(),
+                            knowledge_graph,
+                            members,
+                            snapshot,
+                            subscribed,
+                            started,
+                        )),
+                    };
+                    frames.unwrap_or_else(|reason| {
+                        // A snapshot that cannot be delivered whole registers
+                        // nothing; no push for it was sent yet.
+                        subscriptions.reset(&subscription, generation);
+                        vec![encode(&ServerFrame::error(
+                            id,
+                            Some(ErrorCode::Internal),
+                            reason,
+                        ))]
+                    })
+                }
+                Err(message) => vec![encode(&ServerFrame::error(id, None, message))],
             }
-            Err(message) => vec![encode(&ServerFrame::error(id, None, message))],
-        },
+        }
         None => vec![encode(&ServerFrame::error(
             id,
             Some(ErrorCode::Internal),

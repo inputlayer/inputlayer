@@ -47,8 +47,8 @@ mod wal_record;
 
 pub use batch::{Batch, BatchRef, ShardInfo, ShardMeta, Update};
 pub use consolidate::{
-    consolidate, consolidate_to_current, filter_since, set_semantics_corrections, to_tuples,
-    to_tuples_with_multiplicity,
+    consolidate, consolidate_to_current, filter_since, into_tuples, set_semantics_corrections,
+    to_tuples, to_tuples_with_multiplicity,
 };
 pub use export_writer::ExportWriter;
 pub use transaction::{CatalogEntry, CatalogRecord, Transaction, TxnOp};
@@ -58,6 +58,7 @@ use crate::storage::{StorageError, StorageResult};
 use crate::value::record_batch_to_tuples;
 use catalog_log::CatalogLog;
 use parking_lot::{Mutex, RwLock};
+use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
@@ -196,22 +197,10 @@ impl FilePersist {
         // Crash-safe WAL drain: if we replayed any entries, flush them to batch
         // files and clear the WAL immediately. This makes replay idempotent -
         // on a second crash, there are no stale WAL entries to double-apply.
+        // Records replay skipped as already flushed are retired too, so the
+        // WAL is rewritten once however many shards it held.
         if replayed > 0 {
-            let shard_names: Vec<String> = {
-                let shards = persist.shards.read();
-                shards
-                    .iter()
-                    .filter(|(_, state)| !state.buffer.is_empty())
-                    .map(|(name, _)| name.clone())
-                    .collect()
-            };
-            for shard_name in &shard_names {
-                persist.flush(shard_name)?;
-            }
-            // Records replay skipped as already flushed stay until retired here.
-            let mut wal = persist.wal.lock();
-            let shards = persist.shards.read();
-            retire_flushed(&mut wal, &shards, &mut persist.catalog.lock())?;
+            persist.flush_dirty(true)?;
         }
 
         // Clean up stale .archived and .new WAL files from previous runs
@@ -223,7 +212,8 @@ impl FilePersist {
         Ok(persist)
     }
 
-    /// Load shard metadata from disk
+    /// Load shard metadata from disk. The files are read and checked in
+    /// parallel: startup reads one per shard.
     fn load_shards(&mut self) -> StorageResult<()> {
         let shards_dir = self.config.path.join("shards");
         if !shards_dir.exists() {
@@ -231,78 +221,44 @@ impl FilePersist {
         }
 
         let batches_dir = self.config.path.join("batches");
-        let mut shards = self.shards.write();
-
+        let mut paths = Vec::new();
         for entry in fs::read_dir(&shards_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-
+            let path = entry?.path();
             if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                let mut meta = read_shard_meta(&path)?;
-
-                if meta.version != batch::SHARD_META_VERSION {
-                    return Err(StorageError::Other(format!(
-                        "Shard '{}' has format version {} but this server reads version {}. \
-                         Please upgrade the server or downgrade the data.",
-                        meta.name,
-                        meta.version,
-                        batch::SHARD_META_VERSION
-                    )));
-                }
-
-                // A meta under a foreign filename means two shards may share a file.
-                // Refuse to start rather than let orphan cleanup delete their batches.
-                let expected = shard_meta_path(&shards_dir, &meta.name);
-                if path != expected || shards.contains_key(&meta.name) {
-                    return Err(StorageError::Other(format!(
-                        "Shard metadata '{}' holds shard '{}' whose metadata belongs at '{}'; \
-                         refusing to load to avoid deleting batch files",
-                        path.display(),
-                        meta.name,
-                        expected.display()
-                    )));
-                }
-                rebase_batch_paths(&mut meta, &batches_dir);
-
-                // Update next_batch_id if needed
-                for batch in &meta.batches {
-                    if let Ok(id) = batch.id.parse::<u64>() {
-                        let current = self.next_batch_id.load(Ordering::Relaxed);
-                        if id >= current {
-                            self.next_batch_id.store(id + 1, Ordering::Relaxed);
-                        }
-                    }
-                }
-
-                // Validate batch files exist and are readable (#6)
-                let mut valid_batches = Vec::new();
-                let mut removed_count = 0usize;
-                for batch_ref in &meta.batches {
-                    if batch_ref.path.exists() {
-                        valid_batches.push(batch_ref.clone());
-                    } else {
-                        tracing::warn!(
-                            shard = %meta.name,
-                            batch_id = %batch_ref.id,
-                            path = %batch_ref.path.display(),
-                            "Batch file missing - removing stale reference"
-                        );
-                        removed_count += 1;
-                    }
-                }
-                if removed_count > 0 {
-                    meta.batches = valid_batches;
-                    meta.total_updates = meta.batches.iter().map(|b| b.len).sum();
-                }
-
-                shards.insert(
-                    meta.name.clone(),
-                    ShardState {
-                        meta,
-                        buffer: Vec::new(),
-                    },
-                );
+                paths.push(path);
             }
+        }
+        let metas: Vec<StorageResult<ShardMeta>> = paths
+            .par_iter()
+            .map(|path| load_shard_meta(path, &shards_dir, &batches_dir))
+            .collect();
+
+        let mut shards = self.shards.write();
+        for (path, meta) in paths.iter().zip(metas) {
+            let meta = meta?;
+            // A meta under a foreign filename means two shards may share a file.
+            // Refuse to start rather than let orphan cleanup delete their batches.
+            if shards.contains_key(&meta.name) {
+                return Err(foreign_shard_meta(path, &shards_dir, &meta.name));
+            }
+
+            // Update next_batch_id if needed
+            for batch in &meta.batches {
+                if let Ok(id) = batch.id.parse::<u64>() {
+                    let current = self.next_batch_id.load(Ordering::Relaxed);
+                    if id >= current {
+                        self.next_batch_id.store(id + 1, Ordering::Relaxed);
+                    }
+                }
+            }
+
+            shards.insert(
+                meta.name.clone(),
+                ShardState {
+                    meta,
+                    buffer: Vec::new(),
+                },
+            );
         }
 
         Ok(())
@@ -458,24 +414,79 @@ impl FilePersist {
         let Some(state) = shards.get_mut(shard) else {
             return Ok(false);
         };
-
         if state.buffer.is_empty() {
             return Ok(true);
         }
-
-        let batch = Batch::new(std::mem::take(&mut state.buffer));
-        match self.save_batch(&state.meta, &batch) {
-            Ok(meta) => state.meta = meta,
-            Err(e) => {
-                state.buffer = batch.updates;
-                return Err(e);
-            }
-        }
+        self.flush_state(state)?;
 
         // Remove WAL entries LAST (safe - metadata already points to the batch),
         // with any catalog changes the catalog files already reflect.
         retire_flushed(&mut wal, &shards, &mut self.catalog.lock())?;
         Ok(true)
+    }
+
+    /// Flush every shard with buffered updates, each to one batch, then retire
+    /// the flushed WAL records with one WAL rewrite: flushing shard by shard
+    /// would rewrite the WAL once per shard. With `retire_always`, the WAL is
+    /// rewritten even when no buffer held updates.
+    ///
+    /// Batches are written in parallel. A shard whose batch fails keeps its
+    /// buffer; the batches that were saved still retire their records, and the
+    /// first error is returned. Nothing is retired when no batch was saved and
+    /// one failed.
+    fn flush_dirty(&self, retire_always: bool) -> StorageResult<()> {
+        let mut wal = self.wal.lock();
+        wal.check_writable()?;
+        let mut shards = self.shards.write();
+        let mut dirty: Vec<&mut ShardState> = shards
+            .values_mut()
+            .filter(|state| !state.buffer.is_empty())
+            .collect();
+        let results: Vec<StorageResult<()>> = if dirty.len() > 1 {
+            dirty
+                .par_iter_mut()
+                .map(|state| self.flush_state(state))
+                .collect()
+        } else {
+            dirty
+                .iter_mut()
+                .map(|state| self.flush_state(state))
+                .collect()
+        };
+        let saved = results.iter().any(Result::is_ok);
+        let error = results.into_iter().find_map(Result::err);
+        if saved || (retire_always && error.is_none()) {
+            retire_flushed(&mut wal, &shards, &mut self.catalog.lock())?;
+        }
+        error.map_or(Ok(()), Err)
+    }
+
+    /// Write `state`'s buffer to a new batch and point its metadata at it. On
+    /// error the state is unchanged.
+    fn flush_state(&self, state: &mut ShardState) -> StorageResult<()> {
+        let batch = Batch::new(std::mem::take(&mut state.buffer));
+        match self.save_batch(&state.meta, &batch) {
+            Ok(meta) => {
+                state.meta = meta;
+                Ok(())
+            }
+            Err(e) => {
+                state.buffer = batch.updates;
+                Err(e)
+            }
+        }
+    }
+
+    /// Whether `shard` still references `batch_ref`'s file. A deleted shard
+    /// references none.
+    fn holds_batch(&self, shard: &str, batch_ref: &BatchRef) -> bool {
+        self.shards.read().get(shard).is_some_and(|state| {
+            state
+                .meta
+                .batches
+                .iter()
+                .any(|held| held.path == batch_ref.path)
+        })
     }
 
     /// Write `batch` to a batch file and save `meta` with it added, returning that
@@ -510,20 +521,7 @@ impl FilePersist {
     /// Flush all dirty shards (shards with non-empty buffers).
     /// Used when WAL size exceeds the configured limit.
     fn flush_all(&self) -> StorageResult<()> {
-        let dirty_shards: Vec<String> = {
-            let shards = self.shards.read();
-            shards
-                .iter()
-                .filter(|(_, state)| !state.buffer.is_empty())
-                .map(|(name, _)| name.clone())
-                .collect()
-        };
-
-        for shard_name in &dirty_shards {
-            self.flush_existing(shard_name)?;
-        }
-
-        Ok(())
+        self.flush_dirty(false)
     }
 
     /// Fail unless every shard `txn` changes has flushed only earlier revisions.
@@ -564,6 +562,22 @@ impl FilePersist {
             }
         }
         Ok(())
+    }
+
+    /// Whether `shard` exists.
+    pub fn has_shard(&self, shard: &str) -> bool {
+        self.shards.read().contains_key(shard)
+    }
+
+    /// The highest write frontier of any shard: every committed fact change
+    /// has a lower revision.
+    pub fn max_upper(&self) -> u64 {
+        self.shards
+            .read()
+            .values()
+            .map(|state| state.meta.upper)
+            .max()
+            .unwrap_or(0)
     }
 
     pub fn check_writable(&self) -> StorageResult<()> {
@@ -655,27 +669,56 @@ impl PersistBackend for FilePersist {
         Ok(())
     }
 
+    /// Batch files are read without holding the shard map, which every commit
+    /// takes: a large shard must not stall commits to other shards. Batch files
+    /// never change once written, and only compaction and shard deletion remove
+    /// them, so a file found missing means the shard changed during the read,
+    /// and the read starts over from its new metadata.
     fn read(&self, shard: &str, since: u64) -> StorageResult<Vec<Update>> {
-        let shards = self.shards.read();
+        loop {
+            let (batches, buffered) = {
+                let shards = self.shards.read();
+                let state = shards
+                    .get(shard)
+                    .ok_or_else(|| StorageError::Other(format!("Shard not found: {shard}")))?;
+                let batches: Vec<BatchRef> = state
+                    .meta
+                    .batches
+                    .iter()
+                    .filter(|batch_ref| batch_ref.upper > since)
+                    .cloned()
+                    .collect();
+                let buffered: Vec<Update> = state
+                    .buffer
+                    .iter()
+                    .filter(|u| u.time >= since)
+                    .cloned()
+                    .collect();
+                (batches, buffered)
+            };
 
-        let state = shards
-            .get(shard)
-            .ok_or_else(|| StorageError::Other(format!("Shard not found: {shard}")))?;
-
-        let mut updates = Vec::new();
-
-        // Read from batch files
-        for batch_ref in &state.meta.batches {
-            if batch_ref.upper > since {
-                let batch_updates = self.read_batch(batch_ref)?;
-                updates.extend(batch_updates.into_iter().filter(|u| u.time >= since));
+            let mut updates = Vec::new();
+            let mut moved = false;
+            for batch_ref in &batches {
+                match self.read_batch(batch_ref) {
+                    Ok(batch_updates) => {
+                        updates.extend(batch_updates.into_iter().filter(|u| u.time >= since));
+                    }
+                    Err(StorageError::Io(e))
+                        if e.kind() == std::io::ErrorKind::NotFound
+                            && !self.holds_batch(shard, batch_ref) =>
+                    {
+                        moved = true;
+                        break;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            if !moved {
+                updates.extend(buffered);
+                return Ok(updates);
             }
         }
-
-        // Add buffered updates
-        updates.extend(state.buffer.iter().filter(|u| u.time >= since).cloned());
-
-        Ok(updates)
     }
 
     fn compact(&self, shard: &str, new_since: u64) -> StorageResult<()> {
@@ -905,6 +948,61 @@ fn read_shard_meta(path: &Path) -> StorageResult<ShardMeta> {
             path.display()
         ))
     })
+}
+
+/// Read the shard metadata file at `path` for [`FilePersist::load_shards`]:
+/// check its version and filename, point its batches at `batches_dir`, and drop
+/// references to batch files that are gone.
+fn load_shard_meta(path: &Path, shards_dir: &Path, batches_dir: &Path) -> StorageResult<ShardMeta> {
+    let mut meta = read_shard_meta(path)?;
+
+    if meta.version != batch::SHARD_META_VERSION {
+        return Err(StorageError::Other(format!(
+            "Shard '{}' has format version {} but this server reads version {}. \
+             Please upgrade the server or downgrade the data.",
+            meta.name,
+            meta.version,
+            batch::SHARD_META_VERSION
+        )));
+    }
+
+    if path != shard_meta_path(shards_dir, &meta.name) {
+        return Err(foreign_shard_meta(path, shards_dir, &meta.name));
+    }
+    rebase_batch_paths(&mut meta, batches_dir);
+
+    // Validate batch files exist and are readable (#6)
+    let mut valid_batches = Vec::new();
+    let mut removed_count = 0usize;
+    for batch_ref in &meta.batches {
+        if batch_ref.path.exists() {
+            valid_batches.push(batch_ref.clone());
+        } else {
+            tracing::warn!(
+                shard = %meta.name,
+                batch_id = %batch_ref.id,
+                path = %batch_ref.path.display(),
+                "Batch file missing - removing stale reference"
+            );
+            removed_count += 1;
+        }
+    }
+    if removed_count > 0 {
+        meta.batches = valid_batches;
+        meta.total_updates = meta.batches.iter().map(|b| b.len).sum();
+    }
+    Ok(meta)
+}
+
+/// The error for shard metadata at `path` that holds shard `name`, whose
+/// metadata belongs elsewhere or was already loaded.
+fn foreign_shard_meta(path: &Path, shards_dir: &Path, name: &str) -> StorageError {
+    StorageError::Other(format!(
+        "Shard metadata '{}' holds shard '{name}' whose metadata belongs at '{}'; \
+         refusing to load to avoid deleting batch files",
+        path.display(),
+        shard_meta_path(shards_dir, name).display()
+    ))
 }
 
 /// Point batch refs at `batches_dir`, so a data dir stays valid after it moves.
@@ -1184,7 +1282,7 @@ fn create_directory(path: &Path) -> std::io::Result<()> {
 /// On POSIX systems, file deletion and rename are only guaranteed durable
 /// after the parent directory inode is fsynced. Without this, a crash can
 /// "resurrect" deleted files or roll back renames.
-fn sync_directory(dir: &Path) -> std::io::Result<()> {
+pub(crate) fn sync_directory(dir: &Path) -> std::io::Result<()> {
     #[cfg(test)]
     check_sync_fault(dir)?;
     fs::File::open(dir)?.sync_all()

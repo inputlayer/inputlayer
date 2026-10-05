@@ -114,6 +114,7 @@ impl IncrementalEngine {
 
         let worker_handle = std::thread::Builder::new()
             .name("incremental-worker".to_string())
+            .stack_size(crate::ENGINE_THREAD_STACK_BYTES)
             .spawn(move || {
                 Self::worker_loop(relations, command_rx);
             })

@@ -45,7 +45,7 @@ fn handler(configure: impl FnOnce(&mut Config)) -> (Arc<Handler>, TempDir) {
     config.http.ws_auth_timeout_ms = 60_000;
     configure(&mut config);
     let handler = Arc::new(Handler::from_config(config).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     (handler, tmp)
 }
 
@@ -350,7 +350,7 @@ fn persisted_credentials_are_reused_after_data_wipe() {
         config.storage.data_dir = tmp.path().join(data);
         config.http.auth.credentials_file = Some(creds_path.clone());
         let handler = Handler::from_config(config).unwrap();
-        handler.bootstrap_auth();
+        handler.bootstrap_auth().unwrap();
         handler
     };
     boot("first");
@@ -370,4 +370,75 @@ fn unsaved_generated_api_key_still_creates_admin() {
         c.http.auth.credentials_file = Some(blocker.join("credentials.toml"));
     });
     assert!(handler.authenticate_user("admin", PASSWORD).is_ok());
+}
+
+#[test]
+fn blank_configured_password_is_generated_and_saved() {
+    for blank in ["", "   "] {
+        let (handler, _tmp) =
+            handler(|c| c.http.auth.bootstrap_admin_password = Some(blank.to_string()));
+        let path = handler.config().storage.data_dir.join("credentials.toml");
+        let creds = read_credentials(&path);
+        let password = creds["admin_password"].as_str().unwrap();
+        assert_eq!(password.len(), 64, "{blank:?}");
+        assert!(handler.authenticate_user("admin", password).is_ok());
+        assert!(handler.authenticate_user("admin", blank).is_err());
+    }
+}
+
+#[test]
+fn short_configured_password_refuses_first_boot_bootstrap() {
+    let tmp = TempDir::new().unwrap();
+    let mut config = Config::default();
+    config.storage.data_dir = tmp.path().join("data");
+    config.http.auth.bootstrap_admin_password = Some("eleven-char".to_string());
+    let handler = Handler::from_config(config).unwrap();
+    let err = handler.bootstrap_auth().unwrap_err();
+    assert!(
+        err.contains("http.auth.bootstrap_admin_password") && err.contains("12 characters"),
+        "{err}"
+    );
+    assert!(!tmp.path().join("data").join("credentials.toml").exists());
+    assert!(handler.authenticate_user("admin", "eleven-char").is_err());
+}
+
+#[test]
+fn short_configured_password_is_ignored_once_admin_exists() {
+    let tmp = TempDir::new().unwrap();
+    let mut config = Config::default();
+    config.storage.data_dir = tmp.path().join("data");
+    config.storage.persist.durability_mode = inputlayer::config::DurabilityMode::Immediate;
+    config.http.auth.bootstrap_admin_password = Some(PASSWORD.to_string());
+    let first = Handler::from_config(config.clone()).unwrap();
+    first.bootstrap_auth().unwrap();
+    first.shutdown();
+    drop(first);
+
+    config.http.auth.bootstrap_admin_password = Some("eleven-char".to_string());
+    let reopened = Handler::from_config(config).unwrap();
+    reopened.bootstrap_auth().unwrap();
+    assert!(reopened.authenticate_user("admin", PASSWORD).is_ok());
+    assert!(reopened.authenticate_user("admin", "eleven-char").is_err());
+}
+
+#[test]
+fn user_passwords_need_twelve_characters() {
+    let (handler, _tmp) = handler(|_| {});
+    let err = handler
+        .handle_user_create("bob", "eleven-char", "viewer")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("12 characters"), "{err}");
+    assert!(handler.authenticate_user("bob", "eleven-char").is_err());
+
+    handler
+        .handle_user_create("bob", "twelve-chars", "viewer")
+        .unwrap();
+    let err = handler
+        .handle_user_password("bob", "short")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("12 characters"), "{err}");
+    assert!(handler.authenticate_user("bob", "twelve-chars").is_ok());
+    assert!(handler.authenticate_user("bob", "short").is_err());
 }

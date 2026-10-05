@@ -7,6 +7,7 @@
 use crate::ast::dependencies::DependencyClosure;
 use crate::ast::Rule;
 use crate::statement::QueryGoal;
+use crate::storage_engine::ChangeLog;
 
 use super::ChangeSet;
 
@@ -31,6 +32,28 @@ impl Dependencies {
     /// Relations in the closure, sorted.
     pub fn relations(&self) -> impl Iterator<Item = &str> {
         self.closure.relations()
+    }
+
+    /// Whether `relation` is one of them.
+    pub fn contains(&self, relation: &str) -> bool {
+        self.closure.contains(relation)
+    }
+
+    /// Add `other`'s relations: what can alter either result can alter both.
+    pub fn merge(&mut self, other: &Dependencies) {
+        self.closure.merge(&other.closure);
+    }
+
+    /// Whether the result reads state no relation name tracks (HNSW indexes).
+    pub fn reads_untracked_state(&self) -> bool {
+        self.closure.reads_untracked_state()
+    }
+
+    /// Whether a result with these dependencies, exact at `revision`, may
+    /// differ at the snapshot whose change log is `changes`.
+    pub fn changed_after(&self, revision: u64, changes: &ChangeLog) -> bool {
+        self.closure.reads_untracked_state()
+            || changes.changed_after(revision, self.closure.relations())
     }
 
     /// Whether `change` can alter a result with these dependencies.
@@ -90,6 +113,23 @@ mod tests {
             deps("pair(X, Y), label(X, L), X < 3", &[]),
             vec!["label", "pair"]
         );
+    }
+
+    #[test]
+    fn test_merged_dependencies_are_affected_by_either() {
+        let rules = rules(&["+reach(X) <- a(X)"]);
+        let mut merged = Dependencies::for_query(&parse_query("reach(X)").unwrap(), &rules);
+        merged.merge(&Dependencies::for_query(
+            &parse_query("b(X)").unwrap(),
+            &rules,
+        ));
+        assert_eq!(
+            merged.relations().collect::<Vec<_>>(),
+            vec!["a", "b", "reach"]
+        );
+        assert!(merged.is_affected_by(&ChangeSet::relation("a")));
+        assert!(merged.is_affected_by(&ChangeSet::relation("b")));
+        assert!(!merged.is_affected_by(&ChangeSet::relation("other")));
     }
 
     #[test]

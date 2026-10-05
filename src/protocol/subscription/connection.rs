@@ -1,11 +1,12 @@
 //! A WebSocket connection's subscriptions.
 //!
-//! Each `.subscribe` is authorized for the connection's principal, then
-//! attaches to the shared view of its query through the server's
-//! [`SubscriptionHub`]; identical queries on one knowledge graph share one
-//! evaluation, whoever subscribes. The connection keeps what is its own: the
-//! subscription names and generations, the delta numbering, and each
-//! subscriber's last delivered result. Its WS loop awaits
+//! Each `.subscribe` (one query) or `subscribe` (a group of queries) is
+//! authorized for the connection's principal, then attaches to the shared
+//! view of its queries through the server's [`SubscriptionHub`]; identical
+//! queries on one knowledge graph share one evaluation, whoever subscribes.
+//! The connection keeps what is its own: the subscription names and
+//! generations, a group's member names, the delta numbering, and each
+//! subscriber's last delivered results. Its WS loop awaits
 //! [`ConnectionSubscriptions::next_delivery`] and turns each wake-up into a
 //! push with [`ConnectionSubscriptions::deliver`]. Dropping this value
 //! (disconnect) detaches every subscriber.
@@ -24,21 +25,24 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::debug;
 
-use inputlayer_ws_protocol::SubscriptionPush;
+use inputlayer_ws_protocol::{NamedQuery, SubscriptionPush};
 
 use crate::auth::Principal;
 use crate::protocol::Handler;
+use crate::storage_engine::KnowledgeGraphSnapshot;
 
 use super::publication::{Doorbell, SubscriberId};
 use super::views::{Attachment, ViewKey};
-use super::{ReevaluatingQuery, Snapshot, StandingQuery, Subscriber, SubscriptionHub};
+use super::{GroupQuery, ReevaluatingQuery, Snapshot, StandingQuery, Subscriber, SubscriptionHub};
 
 /// Subscriptions owned by one WebSocket connection.
 pub struct ConnectionSubscriptions {
     handler: Arc<Handler>,
     auth: Option<Principal>,
-    /// Maximum subscriptions (0 = unlimited).
+    /// Maximum queries subscribed, a group counting each (0 = unlimited).
     limit: usize,
+    /// Queries subscribed, a group counting each.
+    weight: usize,
     next_generation: u64,
     names: BTreeMap<String, SubscriberId>,
     subscribers: HashMap<SubscriberId, Subscriber>,
@@ -55,6 +59,7 @@ impl ConnectionSubscriptions {
             handler,
             auth,
             limit,
+            weight: 0,
             next_generation: 0,
             names: BTreeMap::new(),
             subscribers: HashMap::new(),
@@ -82,27 +87,83 @@ impl ConnectionSubscriptions {
         id: &str,
         query: &str,
     ) -> Result<Opening, String> {
-        self.check_can_add(id)?;
-        let view = ReevaluatingQuery::new(Arc::clone(&self.handler), knowledge_graph, query)?;
-        self.handler
-            .authorize_query(self.auth.as_ref(), knowledge_graph, view.goal())?;
+        self.check_can_add(id, 1)?;
+        self.begin(knowledge_graph, id, &[query], None)
+    }
+
+    /// Start registering `id` for the group `queries` on `knowledge_graph`,
+    /// as [`Self::begin_subscribe`] does for one query. Member names must be
+    /// unique and non-empty.
+    pub fn begin_subscribe_group(
+        &mut self,
+        knowledge_graph: &str,
+        id: &str,
+        queries: &[NamedQuery],
+    ) -> Result<Opening, String> {
+        let members = query_names(queries, "A subscription group")?;
+        self.check_can_add(id, members.len())?;
+        let texts: Vec<&str> = queries.iter().map(|q| q.query.as_str()).collect();
+        self.begin(knowledge_graph, id, &texts, Some(members))
+    }
+
+    fn begin(
+        &mut self,
+        knowledge_graph: &str,
+        id: &str,
+        queries: &[&str],
+        members: Option<Arc<[String]>>,
+    ) -> Result<Opening, String> {
+        // Checked for the `subscribe` frame; `.subscribe` parsed it already.
+        crate::statement::meta::parse_subscription_id(id)?;
         let key = ViewKey {
             knowledge_graph: knowledge_graph.to_string(),
-            query: query.trim().to_string(),
+            queries: queries.iter().map(|q| q.trim().to_string()).collect(),
         };
-        let share = self.handler.config().subscriptions.share_parameterized;
-        let view = self.hub().standing_query(view, share);
-        Ok(self.opening(key, id, view))
+        // A view not refreshed since may still be exact now, but must say so:
+        // a client may expect the revision its snapshot reports.
+        let graph = self
+            .handler
+            .get_storage()
+            .get_snapshot_for(knowledge_graph)
+            .ok();
+        let view: Box<dyn StandingQuery> = match (members.is_some(), queries) {
+            (false, [query]) => {
+                let view =
+                    ReevaluatingQuery::new(Arc::clone(&self.handler), knowledge_graph, query)?;
+                self.handler
+                    .authorize_query(self.auth.as_ref(), knowledge_graph, view.goal())?;
+                let share = self.handler.config().subscriptions.share_parameterized;
+                self.hub().standing_query(view, share)
+            }
+            _ => {
+                let group = GroupQuery::new(Arc::clone(&self.handler), knowledge_graph, queries)?;
+                for goal in group.goals() {
+                    self.handler
+                        .authorize_query(self.auth.as_ref(), knowledge_graph, goal)?;
+                }
+                Box::new(group)
+            }
+        };
+        Ok(self.opening(key, id, members, graph, view))
     }
 
     /// An [`Opening`] attaching `id` to the view of `key`, created from `view`
-    /// if there is none.
-    fn opening(&self, key: ViewKey, id: &str, view: Box<dyn StandingQuery>) -> Opening {
+    /// if there is none, with a snapshot exact at `graph`'s revision or later.
+    fn opening(
+        &self,
+        key: ViewKey,
+        id: &str,
+        members: Option<Arc<[String]>>,
+        graph: Option<Arc<KnowledgeGraphSnapshot>>,
+        view: Box<dyn StandingQuery>,
+    ) -> Opening {
         let hub = self.hub().clone();
         let doorbell = Doorbell::new(hub.next_subscriber_id(), self.mailbox.clone());
         Opening {
             id: id.to_string(),
             key,
+            members,
+            graph,
             view,
             attached: Attached {
                 hub,
@@ -123,6 +184,7 @@ impl ConnectionSubscriptions {
         let Opened {
             id,
             key,
+            members,
             attached,
             attachment,
         } = opened;
@@ -133,22 +195,29 @@ impl ConnectionSubscriptions {
                 key.knowledge_graph
             ));
         }
-        // Checked again: another `.subscribe` may have taken the name meanwhile.
-        self.check_can_add(&id)?;
+        // Checked again: another subscribe may have taken the name or the
+        // remaining capacity meanwhile.
+        self.check_can_add(&id, key.queries.len())?;
         self.next_generation += 1;
         let generation = self.next_generation;
         let snapshot = Snapshot::of(&attachment);
         let doorbell = attached.keep();
         let subscriber = doorbell.id();
+        let mut registered =
+            Subscriber::new(&id, generation, &key.knowledge_graph, doorbell, &attachment);
+        if let Some(members) = members {
+            registered = registered.grouped(members);
+        }
+        // Registered now: a wake-up rung before this was dropped as stale.
+        registered.resume();
+        self.weight += registered.weight();
         self.names.insert(id.clone(), subscriber);
-        self.subscribers.insert(
-            subscriber,
-            Subscriber::new(&id, generation, &key.knowledge_graph, doorbell, &attachment),
-        );
+        self.subscribers.insert(subscriber, registered);
         self.handler.subscription_metrics().add_active(1);
         debug!(
             subscription = id,
             kg = key.knowledge_graph,
+            queries = key.queries.len(),
             generation,
             revision = snapshot.revision,
             "subscription_added"
@@ -156,18 +225,19 @@ impl ConnectionSubscriptions {
         Ok((snapshot, generation))
     }
 
-    /// Fail if `id` is taken or the limit is reached.
-    fn check_can_add(&self, id: &str) -> Result<(), String> {
+    /// Fail if `id` is taken or `weight` more queries would pass the limit.
+    fn check_can_add(&self, id: &str, weight: usize) -> Result<(), String> {
         if self.names.contains_key(id) {
             return Err(format!(
                 "Subscription '{id}' already exists on this connection. \
                  Use .unsubscribe {id} first or pick another id."
             ));
         }
-        if self.limit > 0 && self.names.len() >= self.limit {
+        if self.limit > 0 && self.weight + weight > self.limit {
             return Err(format!(
                 "Subscription limit reached ({} per connection, see \
-                 http.rate_limit.ws_max_subscriptions). Unsubscribe from one first.",
+                 http.rate_limit.ws_max_subscriptions; a group counts each of its \
+                 queries). Unsubscribe from one first.",
                 self.limit
             ));
         }
@@ -180,7 +250,9 @@ impl ConnectionSubscriptions {
             .names
             .remove(id)
             .ok_or_else(|| format!("No subscription '{id}' on this connection."))?;
-        self.subscribers.remove(&subscriber);
+        if let Some(removed) = self.subscribers.remove(&subscriber) {
+            self.weight -= removed.weight();
+        }
         self.hub().detach(subscriber);
         self.handler.subscription_metrics().remove_active(1);
         Ok(())
@@ -223,6 +295,7 @@ impl ConnectionSubscriptions {
         for subscriber in &gone {
             if let Some(removed) = self.subscribers.remove(subscriber) {
                 self.names.remove(removed.name());
+                self.weight -= removed.weight();
             }
             hub.detach(*subscriber);
         }
@@ -247,7 +320,8 @@ impl ConnectionSubscriptions {
         subscriber: SubscriberId,
         readable: impl FnOnce(&str) -> bool,
     ) -> Option<SubscriptionPush> {
-        // A wake-up for a subscriber already removed is stale.
+        // A wake-up for a subscriber already removed is stale. So is one for
+        // a subscriber not registered yet: registering resumes its doorbell.
         self.subscribers.get_mut(&subscriber)?.deliver(readable)
     }
 
@@ -267,6 +341,8 @@ impl Drop for ConnectionSubscriptions {
 pub struct Opening {
     id: String,
     key: ViewKey,
+    members: Option<Arc<[String]>>,
+    graph: Option<Arc<KnowledgeGraphSnapshot>>,
     view: Box<dyn StandingQuery>,
     attached: Attached,
 }
@@ -275,8 +351,16 @@ pub struct Opening {
 pub struct Opened {
     id: String,
     key: ViewKey,
+    members: Option<Arc<[String]>>,
     attached: Attached,
     attachment: Result<Attachment, String>,
+}
+
+impl Opened {
+    /// The knowledge graph the subscription reads.
+    pub fn knowledge_graph(&self) -> &str {
+        &self.key.knowledge_graph
+    }
 }
 
 impl Opening {
@@ -285,20 +369,44 @@ impl Opening {
         let Opening {
             id,
             key,
+            members,
+            graph,
             view,
             attached,
         } = self;
         let attachment = attached
             .hub
-            .attach(key.clone(), Arc::clone(&attached.doorbell), view)
+            .attach(key.clone(), Arc::clone(&attached.doorbell), graph, view)
             .await;
         Opened {
             id,
             key,
+            members,
             attached,
             attachment,
         }
     }
+}
+
+/// The names of `queries`, which `what` (e.g. "A read") asks for: at least
+/// one query, each with a name no other query of the request has.
+pub fn query_names(queries: &[NamedQuery], what: &str) -> Result<Arc<[String]>, String> {
+    if queries.is_empty() {
+        return Err(format!("{what} needs at least one query."));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for query in queries {
+        if query.name.is_empty() {
+            return Err(format!("{what} needs a name for every query."));
+        }
+        if !seen.insert(query.name.as_str()) {
+            return Err(format!(
+                "{what} names two queries '{}'; names must be unique.",
+                query.name
+            ));
+        }
+    }
+    Ok(queries.iter().map(|q| q.name.clone()).collect())
 }
 
 /// A subscriber the hub may hold: detached when dropped unless kept.

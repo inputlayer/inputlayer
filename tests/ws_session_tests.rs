@@ -268,11 +268,11 @@ async fn test_query_timeout_config_is_accessible_via_handler() {
 // === #47: Query Cost Scoring Config Tests ===
 
 #[test]
-fn test_max_query_cost_default_is_unlimited() {
+fn test_max_query_cost_default_refuses_large_cross_products() {
     let config = Config::default();
     assert_eq!(
-        config.storage.performance.max_query_cost, 0,
-        "Default max_query_cost should be 0 (unlimited)"
+        config.storage.performance.max_query_cost, 100_000_000,
+        "Default max_query_cost should refuse cross products past 10,000 x 10,000"
     );
 }
 

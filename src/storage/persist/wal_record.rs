@@ -300,10 +300,10 @@ struct V1Entry {
 }
 
 fn decode_payload(json: &[u8]) -> Result<Transaction, String> {
-    let record: RecordIn = match serde_json::from_slice(json) {
+    let record: RecordIn = match crate::storage::nested_json::from_slice(json) {
         Ok(record) => record,
         Err(e) => {
-            let v1: V1Entry = serde_json::from_slice(json).map_err(|_| e.to_string())?;
+            let v1: V1Entry = serde_json::from_slice(json).map_err(|_| e)?;
             let mut txn = Transaction::new(v1.update.time);
             txn.facts(v1.shard, vec![(v1.update.data, v1.update.diff)]);
             return Ok(txn);

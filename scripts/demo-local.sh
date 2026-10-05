@@ -12,7 +12,7 @@ SEEDS_DIR="$ROOT_DIR/demo/seeds"
 PREPROCESS="$SCRIPT_DIR/preprocess-idl.py"
 API_KEY="demo-api-key"
 
-export INPUTLAYER_ADMIN_PASSWORD="demo-admin"
+export INPUTLAYER_ADMIN_PASSWORD="demo-admin-password"
 export INPUTLAYER_BOOTSTRAP_API_KEY="$API_KEY"
 
 # Start server

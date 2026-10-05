@@ -88,7 +88,10 @@ impl Notification {
 }
 
 /// A change to a standing query's result, addressed by the subscription's name
-/// and generation (see [`crate::Subscribed`]).
+/// and generation (see [`crate::Subscribed`]). A plain subscription
+/// (`.subscribe`) gets `subscription_delta`s, a subscription group (the
+/// `subscribe` frame) `subscription_group_delta`s; both get
+/// `subscription_error` and `subscription_reset`.
 ///
 /// A delta is delivered whole or not at all. One that fits a frame is a
 /// single `subscription_delta`; a larger one is streamed as
@@ -100,6 +103,10 @@ impl Notification {
 /// but other frames (replies, notifications, other subscriptions' pushes) may
 /// arrive between them. A connection that closes mid-stream delivered nothing
 /// of that delta.
+///
+/// A group delta streams the same way, as `subscription_group_delta_start`,
+/// `subscription_group_delta_chunk`s (each holding rows of one member) and
+/// `subscription_group_delta_end`.
 ///
 /// A delta the server cannot deliver whole ends its subscription with a
 /// `subscription_reset` instead: the client's rows for it are no longer
@@ -153,8 +160,53 @@ pub enum SubscriptionPush {
         inserted_count: usize,
         retracted_count: usize,
     },
+    /// The results of a subscription group changed: one push per refresh
+    /// that changed any member, listing every member in the group's order.
+    /// After applying it, every member's result is its query's exact answer
+    /// at `revision`; a member marked `unchanged` was already exact there.
+    /// The group's pushes share one gapless `seq`, as a plain subscription's
+    /// deltas do.
+    SubscriptionGroupDelta {
+        subscription: String,
+        generation: u64,
+        knowledge_graph: String,
+        seq: u64,
+        revision: u64,
+        members: Vec<GroupMemberDelta>,
+    },
+    /// Header of a group delta streamed in chunks: what
+    /// [`SubscriptionGroupDelta`](Self::SubscriptionGroupDelta) carries
+    /// besides its rows, with each member's row counts.
+    SubscriptionGroupDeltaStart {
+        subscription: String,
+        generation: u64,
+        knowledge_graph: String,
+        seq: u64,
+        revision: u64,
+        members: Vec<GroupMemberDeltaHeader>,
+    },
+    /// Rows of member `member` (its index in the group) of the streamed group
+    /// delta `seq`, in order from `chunk_index` 0 across all members.
+    SubscriptionGroupDeltaChunk {
+        subscription: String,
+        generation: u64,
+        seq: u64,
+        chunk_index: usize,
+        member: usize,
+        inserted: Vec<Row>,
+        retracted: Vec<Row>,
+    },
+    /// End of the streamed group delta `seq`. Only now does the delta apply,
+    /// once the chunks add up to every member's announced counts.
+    SubscriptionGroupDeltaEnd {
+        subscription: String,
+        generation: u64,
+        seq: u64,
+        chunk_count: usize,
+    },
     /// Re-evaluation failed; the subscription stays registered and its result
-    /// is unchanged, so the next delta applies to the last one delivered.
+    /// is unchanged, so the next delta applies to the last one delivered. For
+    /// a group, the refresh failed as a whole and every member is unchanged.
     SubscriptionError {
         subscription: String,
         generation: u64,
@@ -195,6 +247,26 @@ impl SubscriptionPush {
                 generation,
                 ..
             }
+            | Self::SubscriptionGroupDelta {
+                subscription,
+                generation,
+                ..
+            }
+            | Self::SubscriptionGroupDeltaStart {
+                subscription,
+                generation,
+                ..
+            }
+            | Self::SubscriptionGroupDeltaChunk {
+                subscription,
+                generation,
+                ..
+            }
+            | Self::SubscriptionGroupDeltaEnd {
+                subscription,
+                generation,
+                ..
+            }
             | Self::SubscriptionError {
                 subscription,
                 generation,
@@ -207,4 +279,31 @@ impl SubscriptionPush {
             } => (subscription, *generation),
         }
     }
+}
+
+/// One member of a [`SubscriptionPush::SubscriptionGroupDelta`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroupMemberDelta {
+    /// The member's name in the `subscribe` request.
+    pub name: String,
+    /// Whether the member's result did not change: `inserted` and
+    /// `retracted` are then empty, and its result is exact at the push's
+    /// revision as it is.
+    pub unchanged: bool,
+    pub columns: Vec<String>,
+    pub inserted: Vec<Row>,
+    pub retracted: Vec<Row>,
+}
+
+/// One member of a [`SubscriptionPush::SubscriptionGroupDeltaStart`]: what
+/// [`GroupMemberDelta`] carries besides its rows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupMemberDeltaHeader {
+    pub name: String,
+    pub unchanged: bool,
+    pub columns: Vec<String>,
+    /// Rows the member's chunks insert, in total.
+    pub inserted_count: usize,
+    /// Rows the member's chunks retract, in total.
+    pub retracted_count: usize,
 }

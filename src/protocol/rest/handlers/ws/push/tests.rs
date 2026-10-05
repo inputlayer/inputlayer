@@ -84,3 +84,34 @@ fn the_estimate_covers_the_serialized_rows() {
     ];
     assert!(row_width(&row) >= serde_json::to_string(&row).unwrap().len());
 }
+
+#[test]
+fn a_group_delta_is_estimated_over_every_member_row() {
+    let member = |name: &str, inserted: Vec<Row>| inputlayer_ws_protocol::GroupMemberDelta {
+        name: name.into(),
+        unchanged: inserted.is_empty(),
+        columns: vec!["n".into()],
+        inserted,
+        retracted: Vec::new(),
+    };
+    let wide = |n: usize| -> Vec<Row> {
+        (0..n)
+            .map(|i| vec![json!(i), json!("x".repeat(1_000))])
+            .collect()
+    };
+    let push = |members| SubscriptionPush::SubscriptionGroupDelta {
+        subscription: "s".into(),
+        generation: 1,
+        knowledge_graph: "kg".into(),
+        seq: 1,
+        revision: 1,
+        members,
+    };
+    let small = push(vec![member("a", wide(1)), member("b", Vec::new())]);
+    assert!(estimated_bytes(&small) > 1_000);
+    assert!(estimated_bytes(&small) <= FRAME_BUDGET);
+    // No member alone passes the budget; together they do.
+    let large = push(vec![member("a", wide(700)), member("b", wide(700))]);
+    assert!(estimated_bytes(&large) > FRAME_BUDGET);
+    assert!(stream::push_frames(large).unwrap().len() > 1);
+}

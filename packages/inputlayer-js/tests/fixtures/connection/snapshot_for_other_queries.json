@@ -1,0 +1,63 @@
+{
+  "name": "snapshot_for_other_queries",
+  "about": "A snapshot whose results do not name the read's queries in order does not answer it, so it fails typed.",
+  "calls": [
+    {
+      "read": [
+        {
+          "name": "orders",
+          "query": "?order(S, O)"
+        },
+        {
+          "name": "etas",
+          "query": "?eta(O, T)"
+        }
+      ]
+    }
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot",
+        "id": "$r0",
+        "knowledge_graph": "default",
+        "revision": 5,
+        "execution_time_ms": 0,
+        "results": [
+          {
+            "name": "etas",
+            "columns": [
+              "O",
+              "T"
+            ],
+            "rows": [],
+            "total_count": 0,
+            "truncated": false
+          },
+          {
+            "name": "orders",
+            "columns": [
+              "S",
+              "O"
+            ],
+            "rows": [],
+            "total_count": 0,
+            "truncated": false
+          }
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "InternalError"
+      }
+    ]
+  }
+}

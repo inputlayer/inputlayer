@@ -107,11 +107,11 @@ List all users and their roles.
 
 ### `.user create <username> <password> <role>`
 
-Create a new user with the given password and role.
+Create a new user with the given password and role. Passwords need at least 12 characters.
 
 ```
-.user create alice s3cret viewer
-.user create bob hunter2 admin
+.user create alice alice-s3cret-pw viewer
+.user create bob hunter2-hunter2 admin
 ```
 
 **Roles:** `admin`, `editor`, `viewer`
@@ -126,10 +126,10 @@ Delete a user.
 
 ### `.user password <username> <new_password>`
 
-Change a user's password.
+Change a user's password. The new password needs at least 12 characters.
 
 ```
-.user password alice new-s3cret
+.user password alice new-s3cret-pw
 ```
 
 ### `.user role <username> <new_role>`
@@ -448,7 +448,7 @@ Same as `.why` but in full mode - aggregation proofs enumerate all contributing 
 
 ### `.why_not <relation>(<values>)`
 
-Explain why a specific tuple was NOT derived. For each rule that could produce the relation, identifies the exact body predicate that blocked derivation.
+Explain why a specific tuple was NOT derived. For each rule that could produce the relation, identifies the exact body predicate that blocked derivation, reading base facts and derived relations. A tuple that is derived is reported as derived, with its proof.
 
 ```
 .why_not path(1, 99)
@@ -457,7 +457,7 @@ Explain why a specific tuple was NOT derived. For each rule that could produce t
 
 ### `.subscribe <id> ?<query>`
 
-Register a standing query on the current `/ws` connection. Replies with the current result, then pushes `subscription_delta` messages as the result changes. Persistent data only. See [Standing Queries](/docs/guides/websocket-api#standing-queries).
+Register a standing query on the current `/ws` connection. Replies with the current result, then pushes `subscription_delta` messages as the result changes. Persistent data only. See [Standing Queries](/docs/guides/websocket-api#standing-queries); to keep several queries current at one revision, send the `subscribe` frame instead ([Subscription Groups](/docs/guides/websocket-api#subscription-groups)).
 
 ```iql
 .subscribe late ?late(Order, Customer)
@@ -465,7 +465,7 @@ Register a standing query on the current `/ws` connection. Replies with the curr
 
 ### `.unsubscribe <id>`
 
-Remove a standing query from the current connection.
+Remove a standing query, or a subscription group, from the current connection.
 
 ```iql
 .unsubscribe late

@@ -307,7 +307,8 @@ export class ConflictError extends QueryError {
 
 /**
  * Why a subscription was refused: by the SDK before anything was sent
- * (`limit_offset`, `or_branches`, `session_view`), or by the engine
+ * (`limit_offset`, `or_branches`, `session_view`, and `rejected` for a
+ * group or read without queries or with an empty name), or by the engine
  * (`result_cap`, `access_denied`, `id_taken`, `subscription_limit`, and
  * `rejected` for any other refusal, such as an invalid query).
  */
@@ -322,9 +323,10 @@ export type SubscriptionRejectedReason =
   | 'rejected';
 
 /**
- * A subscription could not be opened, or could not be re-opened after it
- * lost its verified state. Fix or narrow the query; retrying it as it is
- * fails the same way.
+ * A subscription (or subscription group) could not be opened, or could not
+ * be re-opened after it lost its verified state; or `kg.read` refused a
+ * target that is not one query, before sending anything. Fix or narrow the
+ * query; retrying it as it is fails the same way.
  */
 export class SubscriptionRejectedError extends InputLayerError {
   constructor(

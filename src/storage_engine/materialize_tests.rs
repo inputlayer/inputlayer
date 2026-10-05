@@ -32,7 +32,7 @@ fn storage(temp: &TempDir, materialize: bool) -> StorageEngine {
     let mut storage = StorageEngine::new(config).unwrap();
     storage.use_knowledge_graph("default").unwrap();
     if materialize {
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         let mut kg = kg.write();
         kg.enable_incremental().unwrap();
         kg.set_auto_materialize(true);
@@ -59,7 +59,7 @@ fn register(storage: &StorageEngine, text: &str) {
 }
 
 fn materialized(storage: &StorageEngine) -> HashSet<String> {
-    let kg = storage.knowledge_graphs.get("default").unwrap();
+    let kg = storage.kg_handle("default").unwrap();
     let kg = kg.read();
     let manager = kg.incremental().unwrap().derived_relations();
     let names = manager.lock().get_materialized_relation_names();
@@ -141,7 +141,7 @@ fn test_auto_materialize_is_off_by_default() {
     let temp = TempDir::new().unwrap();
     let storage = storage(&temp, false);
     {
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         kg.write().enable_incremental().unwrap();
     }
     storage.insert_tuples("edge", vec![edge(1, 2)]).unwrap();
@@ -158,14 +158,14 @@ fn test_auto_materialize_off_drops_materializations() {
     // Registered before the incremental engine, so it has no invalidation edges.
     register(&storage, "path(X, Y) <- edge(X, Y)");
     {
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         let mut kg = kg.write();
         kg.enable_incremental().unwrap();
         kg.set_auto_materialize(true);
     }
     assert_eq!(materialized(&storage), HashSet::from(["path".to_string()]));
     {
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         kg.write().set_auto_materialize(false);
     }
     assert!(materialized(&storage).is_empty());

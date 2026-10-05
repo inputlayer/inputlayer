@@ -20,10 +20,11 @@ Batch file (Parquet)
 
 On startup, InputLayer:
 1. Loads shard metadata from disk
-2. Reads batch files (Parquet)
-3. Replays the WAL's committed transactions, skipping changes a shard's batch files
-   already hold
-4. Consolidates to get current state
+2. Replays the WAL's committed transactions, skipping changes a shard's batch files
+   already hold, and flushes them to batch files
+
+Startup reads no batch files. Each knowledge graph's batch files are read and
+consolidated when it is first used.
 
 ---
 

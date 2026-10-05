@@ -1,0 +1,140 @@
+{
+  "name": "snapshot_streamed",
+  "description": "A streamed snapshot is assembled per result in chunk order (a result without rows has no chunks) and checked against the header's row counts and the end's chunk count.",
+  "calls": [
+    {
+      "read": [
+        {
+          "name": "orders",
+          "query": "?order(S, O)"
+        },
+        {
+          "name": "eta",
+          "query": "?eta(O, T)"
+        }
+      ],
+      "expect": {
+        "revision": 5,
+        "results": [
+          {
+            "name": "orders",
+            "columns": [
+              "S",
+              "O"
+            ],
+            "rows": []
+          },
+          {
+            "name": "eta",
+            "columns": [
+              "O",
+              "T"
+            ],
+            "rows": [
+              [
+                1,
+                10
+              ],
+              [
+                2,
+                20
+              ],
+              [
+                3,
+                30
+              ]
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "read",
+        "queries": [
+          {
+            "name": "orders",
+            "query": "?order(S, O)"
+          },
+          {
+            "name": "eta",
+            "query": "?eta(O, T)"
+          }
+        ]
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "snapshot_start",
+        "id": "$q",
+        "knowledge_graph": "default",
+        "revision": 5,
+        "results": [
+          {
+            "name": "orders",
+            "columns": [
+              "S",
+              "O"
+            ],
+            "row_count": 0,
+            "total_count": 0,
+            "truncated": false
+          },
+          {
+            "name": "eta",
+            "columns": [
+              "O",
+              "T"
+            ],
+            "row_count": 3,
+            "total_count": 3,
+            "truncated": false
+          }
+        ],
+        "execution_time_ms": 1
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_chunk",
+        "id": "$q",
+        "result": 1,
+        "chunk_index": 0,
+        "rows": [
+          [
+            1,
+            10
+          ],
+          [
+            2,
+            20
+          ]
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_chunk",
+        "id": "$q",
+        "result": 1,
+        "chunk_index": 1,
+        "rows": [
+          [
+            3,
+            30
+          ]
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_end",
+        "id": "$q",
+        "chunk_count": 2
+      }
+    }
+  ]
+}

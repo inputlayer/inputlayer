@@ -4,7 +4,10 @@
  * differential oracle's universe, `tests/differential_oracle/generate.rs`,
  * with a fresh query as the recompute adapter), projection multiplicity,
  * streamed snapshots and deltas, a `seq` gap and a reset, a slow consumer,
- * a reconnect, an ACL revoke, and the refusals. Set INPUTLAYER_TEST_SERVER
+ * a reconnect, an ACL revoke, and the refusals; then snapshot reads and
+ * subscription groups: coherent under concurrent writes (every event and
+ * every read shows members changed together as equal), streamed, resynced
+ * after a gap, and refused. Set INPUTLAYER_TEST_SERVER
  * (and INPUTLAYER_TEST_USER / INPUTLAYER_TEST_PASSWORD) to enable; `make
  * js-test-live` starts a server and runs them.
  */
@@ -15,9 +18,12 @@ import {
   type Connection,
   count,
   from,
+  type GroupChange,
+  type GroupSubscription,
   InputLayer,
   OR,
   type KnowledgeGraph,
+  QueryError,
   relation,
   type Row,
   type Subscription,
@@ -137,7 +143,7 @@ function connectionOf(kg: KnowledgeGraph): Connection {
 }
 
 /** The generation the connection routes `sub` under. */
-function generationOf(kg: KnowledgeGraph, sub: Subscription): number {
+function generationOf(kg: KnowledgeGraph, sub: { id: string }): number {
   const routes = (connectionOf(kg) as unknown as { routes: Map<string, { generation?: number }> }).routes;
   return routes.get(sub.id)!.generation!;
 }
@@ -446,10 +452,10 @@ describe.skipIf(SKIP)('Live: subscriptions', () => {
     await kg.insert(E, { a: 1, b: 1 });
     const user = `${PREFIX}_reader`;
     await il.dropUser(user).catch(() => undefined);
-    await il.createUser(user, 'reader-pw-1', 'viewer');
+    await il.createUser(user, 'reader-password-1', 'viewer');
     await kg.grantAccess(user, 'viewer');
     // Lazy: the reader may read only this graph, so it never opens the default one.
-    const reader = client({ username: user, password: 'reader-pw-1' });
+    const reader = client({ username: user, password: 'reader-password-1' });
     try {
       const consumer = new Consumer(reader.knowledgeGraph(kg.name).subscribe(E));
       await waitFor(() => consumer.rows.size === 1);
@@ -512,5 +518,352 @@ describe.skipIf(SKIP)('Live: subscriptions', () => {
     await levels.return!();
     expect(await idle).toEqual({ value: undefined, done: true });
     await handle.close();
+  });
+});
+
+// ── Snapshot reads and subscription groups ──────────────────────────
+
+/** Order-free identity of rows keyed by column. */
+function keysOf(rows: Iterable<Row>): string[] {
+  return [...rows].map((r) => JSON.stringify(Object.values(r))).sort();
+}
+
+/**
+ * Applies a group's events to one set per member, as a consumer would,
+ * checking each event against the sets (an insert is new, a retract is
+ * held, `unchanged` means no rows) and running `check` after every
+ * verified event.
+ */
+class GroupConsumer {
+  readonly rows = new Map<string, Map<string, Row>>();
+  readonly events: GroupChange[] = [];
+  revision = -1;
+  verified = false;
+  error?: unknown;
+  private readonly running: Promise<void>;
+
+  constructor(
+    readonly sub: GroupSubscription,
+    private readonly check: (consumer: GroupConsumer, change: GroupChange) => void = () => undefined,
+  ) {
+    this.running = (async () => {
+      try {
+        for await (const change of sub) this.apply(change);
+      } catch (e) {
+        this.error = e;
+      }
+    })();
+  }
+
+  apply(change: GroupChange): void {
+    this.events.push(change);
+    if (change.kind === 'delta') expect(change.revision).toBeGreaterThan(this.revision);
+    else expect(change.revision).toBeGreaterThanOrEqual(this.revision);
+    this.revision = change.revision;
+    this.verified = change.verified;
+    for (const [name, member] of Object.entries(change.members)) {
+      const rows = this.rows.get(name) ?? new Map<string, Row>();
+      this.rows.set(name, rows);
+      expect(member.unchanged).toBe(member.inserted.length === 0 && member.retracted.length === 0);
+      if (change.kind === 'snapshot') expect(rows.size).toBe(0);
+      for (const row of member.retracted) {
+        const key = JSON.stringify(Object.values(row));
+        expect(rows.has(key), `${name}: retracted ${key}, not held`).toBe(true);
+        rows.delete(key);
+      }
+      for (const row of member.inserted) {
+        const key = JSON.stringify(Object.values(row));
+        expect(rows.has(key), `${name}: inserted ${key}, already held`).toBe(false);
+        rows.set(key, row);
+      }
+    }
+    if (change.verified) this.check(this, change);
+  }
+
+  values(name: string): string[] {
+    return [...(this.rows.get(name)?.keys() ?? [])].sort();
+  }
+
+  kinds(): string[] {
+    return this.events.map((e) => (e.kind === 'unverified' ? `unverified:${e.reason}` : e.kind));
+  }
+
+  async close(): Promise<void> {
+    await this.sub.close();
+    await this.running;
+  }
+}
+
+/** Wait until every member the consumer holds equals the engine's current answer to its query. */
+async function groupConverges(kg: KnowledgeGraph, consumer: GroupConsumer, queries: Record<string, string>): Promise<void> {
+  const expected: Record<string, string[]> = {};
+  const held = () => Object.fromEntries(Object.keys(queries).map((name) => [name, consumer.values(name)]));
+  try {
+    await waitFor(async () => {
+      for (const [name, query] of Object.entries(queries)) {
+        expected[name] = setOf((await kg.execute(query)).toTuples());
+      }
+      return consumer.verified && JSON.stringify(held()) === JSON.stringify(expected);
+    });
+  } catch {
+    expect(held(), `after ${consumer.kinds().join(', ')}`).toEqual(expected);
+  }
+}
+
+describe.skipIf(SKIP)('Live: snapshot reads and subscription groups', () => {
+  let il: InputLayer;
+  const graphs: string[] = [];
+
+  async function fresh(name: string): Promise<KnowledgeGraph> {
+    const full = `${PREFIX}_${name}`;
+    await il.dropKnowledgeGraph(full).catch(() => undefined);
+    graphs.push(full);
+    return il.knowledgeGraph(full);
+  }
+
+  beforeAll(async () => {
+    il = client();
+    await il.connect();
+  });
+
+  afterAll(async () => {
+    for (const name of graphs) await il?.dropKnowledgeGraph(name).catch(() => undefined);
+    await il?.close();
+  });
+
+  const Order = relation('Order', { id: 'int' });
+  const Eta = relation('Eta', { id: 'int' });
+  const Pair = relation('Pair', { id: 'int' });
+
+  it('atomicity: members a program changes together are equal in every event and every read', async () => {
+    const writer = await fresh('atomic');
+    await writer.define(Order, Eta);
+    await writer.execute('+pair(X) <- order(X), eta(X)');
+    // Enough rows that each query takes a while: a read that ran its queries
+    // on different states would show it.
+    const SEEDED = 500;
+    const seed = Array.from({ length: SEEDED }, (_, id) => ({ id }));
+    await writer.program().insert(Order, seed).insert(Eta, seed).commit();
+    // The group and the reader each on a connection of their own, beside the writer's.
+    const listener = client();
+    const reader = client();
+    await listener.connect();
+    await reader.connect();
+    try {
+      const watched = listener.knowledgeGraph(writer.name);
+      let checked = 0;
+      const consumer = new GroupConsumer(watched.subscribeGroup({ orders: Order, etas: Eta, pairs: Pair }), (c, change) => {
+        checked += 1;
+        expect(c.values('etas'), `etas at revision ${change.revision}`).toEqual(c.values('orders'));
+        expect(c.values('pairs'), `pairs at revision ${change.revision}`).toEqual(c.values('orders'));
+      });
+      await waitFor(() => consumer.events.length >= 1);
+
+      let writing = true;
+      const reads: number[] = [];
+      // Three reads in flight at a time, on the reader's connection.
+      const readerLoops = [0, 1, 2].map(async () => {
+        const kg = reader.knowledgeGraph(writer.name);
+        let last = 0;
+        while (writing) {
+          const { revision, results } = await kg.read({ orders: Order, etas: Eta, pairs: Pair });
+          expect(keysOf(results.etas), `read at revision ${revision}`).toEqual(keysOf(results.orders));
+          expect(keysOf(results.pairs), `read at revision ${revision}`).toEqual(keysOf(results.orders));
+          expect(revision).toBeGreaterThanOrEqual(last);
+          last = revision;
+          reads.push(revision);
+        }
+      });
+
+      // Each program inserts an id into both relations, or retracts one from both.
+      const rng = new Rng(7);
+      const live = new Set<number>(seed.map((r) => r.id));
+      let next = SEEDED;
+      const writes: Array<Promise<unknown>> = [];
+      for (let i = 0; i < 200; i++) {
+        let program = writer.program();
+        if (live.size === 0 || rng.below(3) > 0) {
+          const id = next++;
+          live.add(id);
+          program = program.insert(Order, { id }).insert(Eta, { id });
+        } else {
+          const id = rng.pick([...live].sort((a, b) => a - b));
+          live.delete(id);
+          program = program.retract(Order, { id }).retract(Eta, { id });
+        }
+        // A few programs in flight at once, so commits land between refreshes.
+        writes.push(program.commit());
+        if (writes.length === 4) await Promise.all(writes.splice(0));
+      }
+      await Promise.all(writes);
+      writing = false;
+      await Promise.all(readerLoops);
+
+      const expected = setOf([...live].map((id) => [id]));
+      await groupConverges(writer, consumer, { orders: '?order(X)', etas: '?eta(X)', pairs: '?pair(X)' });
+      expect(consumer.values('orders')).toEqual(expected);
+      expect(consumer.error).toBeUndefined();
+      expect(consumer.kinds().filter((k) => k.startsWith('unverified'))).toEqual([]);
+      expect(checked).toBeGreaterThan(1);
+      expect(new Set(reads).size).toBeGreaterThan(1);
+      const last = await reader.knowledgeGraph(writer.name).read({ orders: Order, etas: Eta, pairs: Pair });
+      expect(keysOf(last.results.orders)).toEqual(expected);
+      expect(keysOf(last.results.etas)).toEqual(expected);
+      expect(keysOf(last.results.pairs)).toEqual(expected);
+      expect(last.revision).toBeGreaterThanOrEqual(consumer.revision);
+      await consumer.close();
+    } finally {
+      await listener.close();
+      await reader.close();
+    }
+  }, 120_000);
+
+  it('a group yields every member at one revision, marks unchanged members, and converges', async () => {
+    const kg = await fresh('group');
+    const E = relation('E', { a: 'int', b: 'int' });
+    const F = relation('F', { a: 'int', c: 'int' });
+    await kg.define(E, F);
+    await kg.insert(E, [{ a: 1, b: 1 }, { a: 1, b: 2 }]);
+    const consumer = new GroupConsumer(kg.subscribeGroup({
+      es: E,
+      fs: F,
+      firsts: { select: [E.col('a').toAst()], join: [E] },
+    }));
+    await waitFor(() => consumer.events.length === 1);
+    const [snapshot] = consumer.events;
+    expect(snapshot.members.fs).toEqual({ inserted: [], retracted: [], unchanged: true });
+    expect(snapshot.members.firsts.inserted).toEqual([{ A: 1 }]);
+    await kg.insert(F, { a: 5, c: 5 });
+    await waitFor(() => consumer.events.length === 2);
+    expect(consumer.events[1].members.es.unchanged).toBe(true);
+    expect(consumer.events[1].members.firsts.unchanged).toBe(true);
+    expect(consumer.events[1].members.fs.inserted).toEqual([{ a: 5, c: 5 }]);
+    // firsts' row keeps a support: it is unchanged while es changes.
+    await kg.delete(E, { a: 1, b: 1 });
+    await waitFor(() => consumer.events.length === 3);
+    expect(consumer.events[2].members.firsts.unchanged).toBe(true);
+    expect(consumer.events[2].members.es.retracted).toEqual([{ a: 1, b: 1 }]);
+    await kg.delete(E, { a: 1, b: 2 });
+    await waitFor(() => consumer.events.length === 4);
+    expect(consumer.events[3].members.firsts.retracted).toEqual([{ A: 1 }]);
+    await groupConverges(kg, consumer, { es: '?e(A, B)', fs: '?f(A, C)' });
+    expect(consumer.kinds()).toEqual(['snapshot', 'delta', 'delta', 'delta']);
+    await consumer.close();
+  });
+
+  it('assembles a streamed read, a streamed group snapshot and streamed group deltas', async () => {
+    const kg = await fresh('group_streamed');
+    const Doc = relation('Doc', { id: 'int', body: 'string' });
+    const Small = relation('Small', { id: 'int' });
+    await kg.define(Doc, Small);
+    const body = 'x'.repeat(400);
+    for (let i = 0; i < 4000; i += 1000) {
+      await kg.insert(Doc, Array.from({ length: 1000 }, (_, k) => ({ id: i + k, body })));
+    }
+    await kg.insert(Small, [{ id: 1 }]);
+    await kg.execute('+big(I, B) <- doc(I, B)');
+    const frames: string[] = [];
+    const conn = connectionOf(kg) as unknown as { onFrame(data: string): void };
+    const onFrame = conn.onFrame.bind(conn);
+    conn.onFrame = (data: string) => {
+      frames.push(String(JSON.parse(data).type));
+      onFrame(data);
+    };
+    const read = await kg.read({ small: Small, big: { iql: '?big(I, B)' } });
+    expect(read.results.big).toHaveLength(4000);
+    expect(read.results.small).toEqual([{ id: 1 }]);
+    expect(frames).toContain('snapshot_start');
+
+    const consumer = new GroupConsumer(kg.subscribeGroup({ small: Small, big: { iql: '?big(I, B)' } }));
+    await waitFor(() => consumer.values('big').length === 4000);
+    await kg.execute('.rule drop big');
+    await waitFor(() => consumer.values('big').length === 0);
+    await kg.execute('+big(I, B) <- doc(I, B)');
+    await waitFor(() => consumer.values('big').length === 4000);
+    expect(consumer.kinds()).toEqual(['snapshot', 'delta', 'delta']);
+    expect(consumer.events[1].members.small.unchanged).toBe(true);
+    expect(frames.filter((t) => t === 'snapshot_start')).toHaveLength(2);
+    expect(frames.filter((t) => t === 'subscription_group_delta_start')).toHaveLength(2);
+    await groupConverges(kg, consumer, { small: '?small(I)', big: '?big(I, B)' });
+    await consumer.close();
+  });
+
+  it('a seq gap and a reset end in unverified, then an exact resync of every member', async () => {
+    const kg = await fresh('group_gap');
+    const E = relation('E', { a: 'int', b: 'int' });
+    await kg.define(E, Order);
+    await kg.insert(E, [{ a: 1, b: 1 }]);
+    const sub = kg.subscribeGroup({ es: E, orders: Order });
+    const consumer = new GroupConsumer(sub);
+    await waitFor(() => consumer.values('es').length === 1);
+
+    inject(kg, {
+      type: 'subscription_group_delta', subscription: sub.id, generation: generationOf(kg, sub),
+      knowledge_graph: kg.name, seq: 7, revision: 1e9, members: [],
+    });
+    await kg.insert(E, { a: 2, b: 2 });
+    await kg.insert(Order, { id: 3 });
+    await groupConverges(kg, consumer, { es: '?e(A, B)', orders: '?order(X)' });
+    expect(consumer.kinds()).toEqual(['snapshot', 'unverified:seq_gap', 'resync']);
+    expect(consumer.events[2].members.es.inserted).toEqual([{ a: 2, b: 2 }]);
+    expect(consumer.events[2].members.orders.inserted).toEqual([{ id: 3 }]);
+
+    // A real reset removes the group on the server first.
+    await kg.execute(`.unsubscribe ${sub.id}`);
+    inject(kg, {
+      type: 'subscription_reset', subscription: sub.id, generation: generationOf(kg, sub),
+      message: 'Delta 4 has a row over the message limit. The subscription was removed; subscribe again.',
+    });
+    await kg.delete(E, { a: 1, b: 1 });
+    await groupConverges(kg, consumer, { es: '?e(A, B)', orders: '?order(X)' });
+    expect(consumer.kinds().slice(3)).toEqual(['unverified:subscription_reset', 'resync']);
+    expect(consumer.events[4].members.es.retracted).toEqual([{ a: 1, b: 1 }]);
+    expect(consumer.events[4].members.orders.unchanged).toBe(true);
+    expect(sub.stats.resubscribes).toBe(2);
+    await consumer.close();
+  });
+
+  it('a read takes limit and orderBy, sees persistent data only, and fails naming the query', async () => {
+    const kg = await fresh('read');
+    const E = relation('E', { a: 'int', b: 'int' });
+    await kg.define(E);
+    await kg.insert(E, [{ a: 1, b: 3 }, { a: 2, b: 1 }, { a: 3, b: 2 }]);
+    await kg.session.insert(E, { a: 9, b: 9 });
+    await kg.session.defineRules('mine', ['a'], [from(E).select({ a: E.col('a') })]);
+    const Mine = relation('Mine', { a: 'int' });
+    // The engine would answer a session rule with nothing.
+    await expect(kg.read({ all: E, mine: Mine })).rejects.toMatchObject({ reason: 'session_view' });
+    const { revision, results, truncated } = await kg.read({
+      all: E,
+      top: { select: [E], orderBy: E.col('b').desc(), limit: 2 },
+    });
+    expect(revision).toBeGreaterThan(0);
+    expect(keysOf(results.all)).toEqual(['[1,3]', '[2,1]', '[3,2]']);
+    expect(results.top).toEqual([{ a: 1, b: 3 }, { a: 3, b: 2 }]);
+    // The limit cut top short; the session fact is not seen.
+    expect(truncated).toEqual(['top']);
+    const error = await kg.read({ ok: E, broken: { iql: '?e(A, B' } }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(QueryError);
+    expect((error as QueryError).code).toBe('validation');
+    expect((error as QueryError).message).toContain("Query 'broken'");
+  });
+
+  it('refuses a group the engine cannot track, typed', async () => {
+    const kg = await fresh('group_refused');
+    const E = relation('E', { a: 'int', b: 'int' });
+    await kg.define(E);
+    const cases: Array<[() => GroupSubscription, string]> = [
+      [() => kg.subscribeGroup({ ok: E, paged: { select: [E], limit: 1 } }), 'limit_offset'],
+      [() => kg.subscribeGroup({ ok: E, paged: { iql: '?e(A, B), limit(1)' } }), 'limit_offset'],
+      [() => kg.subscribeGroup({ ok: E, broken: { iql: '?e(A, B' } }), 'rejected'],
+    ];
+    for (const [open, reason] of cases) {
+      const error = await (async () => {
+        const sub = open();
+        await sub.next();
+      })().catch((e: unknown) => e);
+      expect(error, reason).toBeInstanceOf(SubscriptionRejectedError);
+      expect((error as SubscriptionRejectedError).reason).toBe(reason);
+    }
   });
 });

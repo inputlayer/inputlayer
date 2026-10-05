@@ -79,6 +79,19 @@ op          ::= '=' | '!=' | '<' | '<=' | '>' | '>='
 [0.1, 0.2, 0.3, 0.4]      // Embedding
 ```
 
+#### Parameters
+```iql
+$shipment                 // A value sent beside the program
+```
+
+`$name` stands where a literal may stand and binds the value sent with the request under `name` (an identifier). The value travels outside the program text and is never parsed, so it cannot change the program, whatever it holds. Use parameters for every value you did not write yourself. See [Parameters](../../docs/content/docs/guides/websocket-api.mdx#parameters) for the wire form and value types.
+
+```iql
++eta($shipment, $date)
+?order($id, Total), Total > $min
+-stock($item, N), +stock($item, M) <- stock($item, N), M = N - $qty
+```
+
 ### Comments
 
 ```iql

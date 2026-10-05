@@ -539,14 +539,24 @@ pub struct ShardMeta {
 
 ### 8.3 Recovery Sequence
 
+Startup reads metadata only, so it costs O(shards) whatever the data:
+
 ```
-1. Load shard metadata from disk
-2. Create DDComputation for each KG
-3. Replay batch files through InputSessions
-4. Replay WAL transactions since last batch
-5. Step workers until frontier advances past WAL upper
-6. DDComputation is live and ready
+1. Load shard metadata (one small file per shard, read in parallel)
+2. Replay the WAL's intact prefix into shard buffers, flush every replayed
+   shard to a batch file, and rewrite the WAL once
+3. Register every KG as dormant: its shards, and its catalog files' revision
+4. Continue revisions above the shards' frontiers, the catalog files and the
+   WAL's catalog changes; finish interrupted drops
+5. Ready
 ```
+
+A dormant KG loads on first use (`storage_engine/residency.rs`): its shards
+are read and consolidated in parallel, the WAL's catalog changes for it are
+applied, and its first snapshot is published. Concurrent first uses wait for
+one load. `storage.max_loaded_knowledge_graphs` and
+`storage.unload_idle_after_secs` unload KGs nothing uses; a reload publishes
+the same state under the same revision.
 
 ---
 

@@ -94,6 +94,26 @@ impl RelationStore {
         Self::default()
     }
 
+    /// A store of `relations`, each of distinct tuples, with their indexes
+    /// built in parallel (used when loading).
+    pub fn from_relations(relations: Vec<(String, Vec<Tuple>)>) -> Self {
+        use rayon::prelude::*;
+        let built: Vec<(String, Relation, TupleIndex)> = relations
+            .into_par_iter()
+            .map(|(name, tuples)| {
+                let tuples = Relation::from(tuples);
+                let index = TupleIndex::build(&tuples);
+                (name, tuples, index)
+            })
+            .collect();
+        let mut store = Self::new();
+        for (name, tuples, index) in built {
+            store.replace_index(&name, index);
+            store.relations.insert(name, tuples);
+        }
+        store
+    }
+
     /// All relations. Cloning the map shares tuples.
     pub fn relations(&self) -> &RelationMap {
         &self.relations
@@ -277,6 +297,19 @@ mod tests {
         store.delete("e", &[t(1, 1)]);
         assert_eq!(reader["e"].to_vec(), vec![t(1, 1)]);
         assert_eq!(store.get("e").unwrap().to_vec(), vec![t(2, 2)]);
+    }
+
+    #[test]
+    fn test_relation_store_loaded_in_parallel_counts_bytes_and_dedups() {
+        let one = stored_bytes(&t(1, 1));
+        let mut store = RelationStore::from_relations(vec![
+            ("e".to_string(), vec![t(1, 1), t(2, 2)]),
+            ("f".to_string(), vec![t(3, 3)]),
+        ]);
+        assert_eq!(store.bytes(), 3 * one);
+        assert_eq!(store.insert("e", vec![t(1, 1), t(4, 4)]).1, 1);
+        assert_eq!(store.delete("f", &[t(3, 3)]), vec![t(3, 3)]);
+        assert_eq!(store.bytes(), 3 * one);
     }
 
     #[test]

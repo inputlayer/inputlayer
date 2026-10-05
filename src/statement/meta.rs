@@ -442,7 +442,7 @@ fn parse_subscribe_command(input: &str) -> Result<MetaCommand, String> {
 }
 
 /// Validate a client-chosen subscription id: 1-128 chars of `[A-Za-z0-9_.:-]`.
-fn parse_subscription_id(id: &str) -> Result<String, String> {
+pub(crate) fn parse_subscription_id(id: &str) -> Result<String, String> {
     let valid_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':');
     if id.is_empty() || id.len() > MAX_SUBSCRIPTION_ID_LEN || !id.chars().all(valid_char) {
         return Err(format!(

@@ -193,7 +193,11 @@ impl WsClient {
         let req = ClientFrame::Execute {
             id: Some(RequestId::from(self.last_id)),
             program: program.to_string(),
+            params: inputlayer_ws_protocol::Params::new(),
             timeout_ms: None,
+            expect_revision: None,
+            expect_relations: None,
+            expect_epoch: None,
         };
         let text = serde_json::to_string(&req).map_err(|e| format!("Serialize error: {e}"))?;
         self.sender
@@ -286,6 +290,7 @@ impl WsClient {
                         timing_breakdown: start.timing_breakdown,
                         errors: start.errors,
                         statements: start.statements,
+                        revision: start.revision,
                         subscribed: None,
                     });
                 }

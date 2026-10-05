@@ -5,8 +5,10 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod groups;
 mod harness;
 mod parameterized;
+mod reads;
 mod sharing;
 
 use std::collections::BTreeSet;
@@ -55,6 +57,83 @@ async fn test_snapshot_and_deltas_name_strictly_increasing_revisions() {
         assert!(next > revision, "revision {next} after {revision}: {delta}");
         revision = next;
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_write_reply_names_the_revision_its_push_carries() {
+    let server = start_server(64).await;
+    let mut subscriber = Client::connect(&server).await;
+    let snapshot = subscriber.subscribe("n", "?n(X)").await;
+    let subscribed_at = snapshot["subscribed"]["revision"].as_u64().unwrap();
+    let mut writer = Client::connect(&server).await;
+
+    let reply = writer.execute("+n(1)\n+other(1)").await;
+    assert_eq!(reply["type"], "result", "{reply}");
+    let committed = reply["revision"].as_u64().expect("write reply revision");
+    assert!(committed > subscribed_at, "{reply}");
+    let delta = subscriber.next_push_for("n").await;
+    assert_eq!(delta["revision"].as_u64(), Some(committed), "{delta}");
+
+    // A write that changes nothing names the revision that already holds it.
+    let reply = writer.execute("+n(1)").await;
+    assert_eq!(reply["revision"].as_u64(), Some(committed), "{reply}");
+
+    // A program that writes and queries names its commit; a query alone,
+    // or a write that failed, names none.
+    let reply = writer.execute("+n(2)\n?n(X)").await;
+    let committed = reply["revision"]
+        .as_u64()
+        .expect("write and query revision");
+    assert_eq!(rows(&reply["rows"]).len(), 2, "{reply}");
+    let delta = subscriber.next_push_for("n").await;
+    assert_eq!(delta["revision"].as_u64(), Some(committed), "{delta}");
+    let reply = writer.execute("?n(X)").await;
+    assert!(reply.get("revision").is_none(), "{reply}");
+    let reply = writer.execute("+n(3)\n+n(\"three\", 4)").await;
+    assert!(!reply["errors"].as_array().unwrap().is_empty(), "{reply}");
+    assert!(reply.get("revision").is_none(), "{reply}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_relation_commands_name_the_revision_their_push_carries() {
+    let server = start_server(64).await;
+    server.write("+p_n(1)\n+gone(1)").await;
+    let mut subscriber = Client::connect(&server).await;
+    subscriber.subscribe("n", "?p_n(X)").await;
+    let mut writer = Client::connect(&server).await;
+
+    let reply = writer.execute(".clear prefix p_").await;
+    assert!(reply["errors"].as_array().unwrap().is_empty(), "{reply}");
+    let cleared = reply["revision"].as_u64().expect("clear revision");
+    let delta = subscriber.next_push_for("n").await;
+    assert_eq!(rows(&delta["retracted"]), vec![json!([1])], "{delta}");
+    assert_eq!(delta["revision"].as_u64(), Some(cleared), "{delta}");
+
+    subscriber.subscribe("g", "?gone(X)").await;
+    // A session schema is a write, so it cannot share a program with
+    // `.rel drop`: nothing runs and nothing is named.
+    let reply = writer.execute(".rel drop gone\ns(a: int)").await;
+    assert_eq!(reply["errors"][0]["index"], 0, "{reply}");
+    assert!(reply.get("revision").is_none(), "{reply}");
+    let reply = writer.execute("?gone(X)").await;
+    assert_eq!(rows(&reply["rows"]), vec![json!([1])], "{reply}");
+    let reply = writer.execute(".rel drop gone").await;
+    assert!(reply["errors"].as_array().unwrap().is_empty(), "{reply}");
+    let dropped = reply["revision"].as_u64().expect("drop revision");
+    assert!(dropped > cleared, "{reply}");
+    let delta = subscriber.next_push_for("g").await;
+    assert_eq!(delta["revision"].as_u64(), Some(dropped), "{delta}");
+
+    // Session schemas and inspection change nothing persistent.
+    let reply = writer.execute("s(a: int)").await;
+    assert!(reply["errors"].as_array().unwrap().is_empty(), "{reply}");
+    assert!(reply.get("revision").is_none(), "{reply}");
+    let reply = writer.execute(".rel").await;
+    assert!(reply.get("revision").is_none(), "{reply}");
+
+    let reply = writer.execute(".kg create fresh").await;
+    let created = reply["revision"].as_u64().expect("create revision");
+    assert!(created > dropped, "{reply}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -246,10 +325,10 @@ async fn test_limit_duplicates_and_invalid_queries_are_errors() {
 async fn test_read_access_is_checked_on_subscribe_and_every_evaluation() {
     let server = start_server(64).await;
     server.write("+a(1)").await;
-    admin(&server, ".user create mallory pw12345678 viewer").await;
+    admin(&server, ".user create mallory pw1234567890 viewer").await;
     admin(&server, &format!(".kg acl grant {KG} mallory viewer")).await;
 
-    let mut client = Client::connect_as(&server, KG, "mallory", "pw12345678").await;
+    let mut client = Client::connect_as(&server, KG, "mallory", "pw1234567890").await;
     let snapshot = client.subscribe("s", "?a(X)").await;
     assert_eq!(rows(&snapshot["rows"]), vec![json!([1])]);
 

@@ -8,7 +8,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use inputlayer_ws_protocol::{
-    ErrorCode, RequestId, ResultFrame, ServerFrame, SessionMetadata, Subscribed,
+    ErrorCode, NamedQuery, NamedResult, Params, RequestId, ResultFrame, ServerFrame,
+    SessionMetadata, SnapshotFrame, Subscribed,
 };
 use tracing::{info, warn};
 
@@ -18,6 +19,7 @@ use crate::auth::Principal;
 use crate::execution::RequestControl;
 use crate::protocol::handler::{ProgramError, ValidationError, VALIDATION_ERROR_PREFIX};
 use crate::protocol::rest::handlers::wire_value_to_json;
+use crate::protocol::subscription::Snapshot;
 use crate::protocol::{Handler, QueryResult};
 
 /// Results with more rows than this are serialized on the blocking pool, so
@@ -27,22 +29,32 @@ const INLINE_FRAME_ROWS: usize = 256;
 /// Maximum characters of a program logged as a preview.
 const LOG_PREVIEW_CHARS: usize = 80;
 
-/// Run `program` in `session_id` as `auth` for the request `id`, under
-/// `control`; returns its reply frames.
+/// Run `program` with `params` in `session_id` as `auth` for the request
+/// `id`, under `control`; returns its reply frames. The request log records
+/// how many parameters it had, not their values.
 pub(super) async fn execute(
     handler: Arc<Handler>,
     session_id: String,
     id: Option<RequestId>,
     program: String,
+    params: Params,
     auth: Principal,
     control: Arc<RequestControl>,
 ) -> Vec<String> {
     let start = Instant::now();
     let program_len = program.len();
     let program_preview = log_preview(&program);
-    info!(program_len, program_preview = %program_preview, "ws_execute_start");
+    let param_count = params.len();
+    info!(program_len, param_count, program_preview = %program_preview, "ws_execute_start");
     let result = handler
-        .execute_program_status(Some(&session_id), None, program, Some(&auth), &control)
+        .execute_program_with_params(
+            Some(&session_id),
+            None,
+            program,
+            &params,
+            Some(&auth),
+            &control,
+        )
         .await;
     let elapsed_ms = start.elapsed().as_millis() as u64;
     let slow_query_ms = handler.config().storage.performance.slow_query_log_ms;
@@ -77,6 +89,121 @@ pub(super) async fn execute(
                 })
         }
         Err(e) => vec![encode(&program_error_frame(id, e))],
+    }
+}
+
+/// Run the `read` of `queries` on the knowledge graph of `session_id` as
+/// `auth` for the request `id`, under `control`; returns its reply frames: a
+/// `snapshot`, or one `error` when any query fails.
+pub(super) async fn read(
+    handler: Arc<Handler>,
+    session_id: String,
+    id: Option<RequestId>,
+    queries: Vec<NamedQuery>,
+    auth: Principal,
+    control: Arc<RequestControl>,
+) -> Vec<String> {
+    let start = Instant::now();
+    info!(queries = queries.len(), "ws_read_start");
+    let knowledge_graph = match handler.session_manager().session_kg(&session_id) {
+        Ok(kg) => kg,
+        Err(message) => return vec![encode(&ServerFrame::error(id, None, message))],
+    };
+    let result = handler
+        .read_snapshot(&knowledge_graph, &queries, Some(&auth), &control)
+        .await;
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+    info!(elapsed_ms, ok = result.is_ok(), "ws_read_end");
+    let read = match result {
+        Ok(read) => read,
+        Err(e) => return vec![encode(&program_error_frame(id, e))],
+    };
+    let rows: usize = read.results.iter().map(|r| r.rows.len()).sum();
+    let reply_id = id.clone();
+    let frame = move || {
+        let results = queries
+            .into_iter()
+            .zip(read.results)
+            .map(|(query, result)| NamedResult {
+                name: query.name,
+                columns: result.schema.into_iter().map(|c| c.name).collect(),
+                rows: result
+                    .rows
+                    .into_iter()
+                    .map(|row| row.values.into_iter().map(wire_value_to_json).collect())
+                    .collect(),
+                total_count: result.total_count,
+                truncated: result.truncated,
+            })
+            .collect();
+        snapshot_reply_frames(SnapshotFrame {
+            id: reply_id,
+            knowledge_graph,
+            revision: read.revision,
+            results,
+            execution_time_ms: elapsed_ms,
+            subscribed: None,
+        })
+    };
+    if rows <= INLINE_FRAME_ROWS {
+        return frame();
+    }
+    tokio::task::spawn_blocking(frame)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!(error = %e, "ws_result_serialization_failed");
+            let message = "Internal server error".to_string();
+            vec![encode(&ServerFrame::error(
+                id,
+                Some(ErrorCode::Internal),
+                message,
+            ))]
+        })
+}
+
+/// Frames of the snapshot reply `frame`, or one `error` when it cannot be
+/// delivered whole: never part of it.
+fn snapshot_reply_frames(frame: SnapshotFrame) -> Vec<String> {
+    let id = frame.id.clone();
+    stream::snapshot_frames(frame).unwrap_or_else(|reason| {
+        vec![encode(&ServerFrame::error(
+            id,
+            Some(ErrorCode::Internal),
+            reason,
+        ))]
+    })
+}
+
+/// The `snapshot` replying to the group `subscribe` request `id`: one result
+/// per member, named `members`.
+pub(super) fn group_snapshot(
+    id: Option<RequestId>,
+    knowledge_graph: String,
+    members: Vec<String>,
+    snapshot: Snapshot,
+    subscribed: Subscribed,
+    started: Instant,
+) -> SnapshotFrame {
+    let results = members
+        .into_iter()
+        .zip(snapshot.results)
+        .map(|(name, result)| NamedResult {
+            name,
+            columns: result.columns,
+            total_count: result.rows.len(),
+            rows: result.rows,
+            // A subscription snapshot is complete by construction: a capped
+            // result fails the `subscribe` instead.
+            truncated: false,
+        })
+        .collect();
+    SnapshotFrame {
+        id,
+        knowledge_graph,
+        revision: snapshot.revision,
+        results,
+        execution_time_ms: started.elapsed().as_millis() as u64,
+        subscribed: Some(subscribed),
     }
 }
 
@@ -145,6 +272,7 @@ fn result_frame(id: Option<RequestId>, response: QueryResult) -> ServerFrame {
         timing_breakdown: response.timing_breakdown,
         errors: response.errors,
         statements: response.statements,
+        revision: response.revision,
         subscribed: None,
     })
 }
@@ -175,6 +303,7 @@ pub(super) fn subscription_reply(
         timing_breakdown: None,
         errors: Vec::new(),
         statements: Vec::new(),
+        revision: None,
         subscribed,
     }
 }

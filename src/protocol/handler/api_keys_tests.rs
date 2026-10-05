@@ -15,7 +15,7 @@ fn config(dir: &std::path::Path) -> Config {
 /// A bootstrapped handler on `dir`; call again on the same `dir` to restart.
 fn open(dir: &std::path::Path) -> Arc<Handler> {
     let handler = Arc::new(Handler::from_config(config(dir)).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     handler
 }
 
@@ -221,7 +221,7 @@ fn revoking_or_dropping_the_owner_deletes_key_times() {
     let tmp = tempfile::tempdir().unwrap();
     let handler = open(tmp.path());
     handler
-        .handle_user_create("carol", "carol-pw", "editor")
+        .handle_user_create("carol", "carol-password", "editor")
         .unwrap();
     handler
         .create_api_key("mine", "admin", Some(Duration::from_secs(60)))

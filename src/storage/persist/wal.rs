@@ -66,6 +66,9 @@ pub struct PersistWal {
     read_only: bool,
     #[cfg(test)]
     faults: Vec<WalFault>,
+    /// Rewrites made by [`Self::retain_ops`].
+    #[cfg(test)]
+    pub(crate) rewrites: usize,
 }
 
 impl PersistWal {
@@ -91,6 +94,8 @@ impl PersistWal {
             read_only: false,
             #[cfg(test)]
             faults: Vec::new(),
+            #[cfg(test)]
+            rewrites: 0,
         };
         let txns = wal.recover()?;
         wal.file_id = match fs::metadata(&wal.current_file) {
@@ -435,6 +440,10 @@ impl PersistWal {
         }
         if !changed {
             return self.sync_retirement();
+        }
+        #[cfg(test)]
+        {
+            self.rewrites += 1;
         }
         txns.retain(|txn| !txn.is_empty());
 

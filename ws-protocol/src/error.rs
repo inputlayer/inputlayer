@@ -28,6 +28,11 @@ pub enum ErrorCode {
     /// The client cancelled the request before it began committing; nothing
     /// it would have changed was applied.
     Cancelled,
+    /// The program's `expect_revision` precondition did not hold: state in
+    /// its scope changed after that revision, or the revision is not one of
+    /// this engine run's. Nothing was applied. Read the state again before
+    /// deciding whether to retry.
+    PreconditionFailed,
     /// The request failed after it began committing: its changes may or may
     /// not be applied. Read the state back before retrying.
     OutcomeUnknown,

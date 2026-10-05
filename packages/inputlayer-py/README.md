@@ -4,7 +4,7 @@ Python SDK for [InputLayer](https://github.com/inputlayer/inputlayer), the live 
 
 Take the rules out of your prompts: declare facts and rules as typed Python classes, and InputLayer keeps every conclusion current as facts change. Write Python, no query syntax required: the SDK compiles your classes into IQL, InputLayer's rule language, and sends it over WebSocket. A knowledge graph (`il.knowledge_graph("support")`) is the facts and rule-derived conclusions of one domain.
 
-**Today and next.** This package declares relations and rules (`Relation`, `Derived`, `From`), writes and deletes facts, and queries the derived views. It also subscribes to them: `kg.subscribe()` (the engine pushes each change to the agent), `kg.watch()` and `kg.on()`, described in the [Python SDK guide](../../docs/content/docs/guides/python-sdk.mdx#subscriptions). And it has `kg.claim()` (an agent's action is recorded only while the rules allow it), built on guarded programs (`kg.program().when()`, committed whole or not at all) and `R.any()` / `~R.any()` existence checks, described in [Guarded writes and claims](../../docs/content/docs/guides/python-sdk.mdx#guarded-writes-and-claims); these are not in a release yet. The [main README](../../README.md) shows both forms side by side.
+**Today and next.** This package declares relations and rules (`Relation`, `Derived`, `From`), writes and deletes facts, and queries the derived views. It also subscribes to them: `kg.subscribe()` (the engine pushes each change to the agent), `kg.watch()` and `kg.on()`, described in the [Python SDK guide](../../docs/content/docs/guides/python-sdk.mdx#subscriptions), and reads or subscribes to several results at one revision: `kg.read()` and `kg.subscribe_group()` ([Subscriptions](#subscriptions)). And it has `kg.claim()` (an agent's action is recorded only while the rules allow it), built on guarded programs (`kg.program().when()`, committed whole or not at all) and `R.any()` / `~R.any()` existence checks, described in [Guarded writes and claims](../../docs/content/docs/guides/python-sdk.mdx#guarded-writes-and-claims); these are not in a release yet. The [main README](../../README.md) shows both forms side by side.
 
 ## Installation
 
@@ -201,6 +201,38 @@ Subscribe to live data change events:
 def on_update(event):
     print(f"{event.count} new readings")
 ```
+
+### Subscriptions
+
+`kg.subscribe()` keeps one query's result exact on the client: a `snapshot`, then a `delta` per change, with `unverified` and `resync` around anything that broke the stream (a lost connection, a gap, a slow consumer). The [Python SDK guide](../../docs/content/docs/guides/python-sdk.mdx#subscriptions) covers it in full.
+
+```python
+async for change in kg.subscribe(Late):
+    for row in change.retracted:
+        cancel(row)
+    for row in change.inserted:
+        start(row)
+```
+
+When an agent decides on several results together, read or subscribe to them together. `kg.read()` runs several queries on one snapshot; `kg.subscribe_group()` keeps several queries current as one subscription. Both take a mapping from a name to a target: a relation class, a column, a tuple of `query()` arguments, a dict of them (`{"select": [Order.id], "where": ...}`), or raw IQL (`"?eta(O, T)"`).
+
+```python
+snap = await kg.read({"orders": Order, "eta": Eta})
+snap.revision, snap.results["orders"], snap.results["eta"]
+
+async for change in kg.subscribe_group({"orders": Order, "eta": Eta}):
+    orders, eta = change.members["orders"], change.members["eta"]
+    if eta.unchanged:
+        ...  # only orders moved
+```
+
+What they promise:
+
+- **One revision per answer.** Every result of a read is its query's exact answer at `snap.revision`, whatever commits meanwhile. After every verified group event (`snapshot`, `delta`, `resync`), every member, with all earlier events applied, is its query's exact answer at `change.revision`. A program that changes two members' results shows up in both in the same event, never in one first.
+- **Every member in every event.** A `delta` lists all members, each `unchanged` when its rows did not move (`inserted` and `retracted` empty). A refresh that changes no member's rows (only what a member's projection leaves out, say) delivers nothing. `unverified` and `resync` cover the whole group: `resync` gives each member the exact difference between the rows held and the fresh snapshot.
+- **Persistent data only.** Like a subscription, a read and a group see persistent facts and rules, not the session's: a target that reads a session rule raises `SubscriptionRejected` (`session_view`), and so does a target that is not one `?` query (an OR condition, an aggregate, a negated constant), naming the query; define a persistent rule and read or subscribe to that. A read keeps `order_by`, `limit` and `offset` (`offset` with `limit`, and not on a page of a projection) and lists the results a limit or the engine's result cap cut in `snap.truncated`; a group, like a subscription, tracks whole results.
+
+What they do not promise: commits coalesce. A group delta reflects the latest revision when the engine refreshes, so a row that appears and disappears between two refreshes is never seen, and two consecutive events can be several revisions apart. What must not be missed belongs in facts. Revisions order states of one knowledge graph within one engine run; two groups or two subscriptions do not share events.
 
 ## LangChain Integration
 
@@ -475,6 +507,8 @@ The autodetector diffs your current Python models against the last migration's s
 | `debug(*select, ...)` | Show query plan without executing (same arguments as `query`) |
 | `execute(iql)` | Execute raw IQL |
 | `subscribe(*select, ..., queue=1024)` | Async iterator of `Change` events (snapshot, then deltas) |
+| `subscribe_group({name: target}, queue=1024)` | Async iterator of `GroupChange` events: several queries kept exact at one revision per event |
+| `read({name: target}, timeout=None)` | Several queries answered on one snapshot: `ReadResult(revision, results, truncated)` (`truncated`: names of cut results) |
 | `watch(*select, ...)` | Async iterator of the whole current result (`Live`) |
 | `on(*select, callback)` | Call `callback` with every `Change`; returns a handle with `close()` |
 | `status()` | Get server status |

@@ -267,6 +267,21 @@ impl MagicSetRewriter {
 
         (Program { rules: new_rules }, magic_seeds)
     }
+
+    /// The adorned relations [`Self::rewrite_program`] introduces for
+    /// `bindings`, each with the relation it restricts: `("reach_bf",
+    /// "reach")`. An adorned relation holds the tuples of the original that
+    /// its magic seeds demand, in the original's columns.
+    pub fn adorned_relations(bindings: &[QueryBinding]) -> Vec<(String, String)> {
+        let mut adorned: Vec<(String, String)> = Vec::new();
+        for binding in bindings {
+            let name = adorned_relation_name(&binding.relation, &binding.adornment);
+            if !adorned.iter().any(|(existing, _)| *existing == name) {
+                adorned.push((name, binding.relation.clone()));
+            }
+        }
+        adorned
+    }
 }
 
 /// Compute which argument positions are invariant across recursion for each

@@ -98,34 +98,15 @@ pub async fn stats(
         std::time::Duration::from_secs(timeout_secs),
         tokio::task::spawn_blocking(move || {
             let storage = handler.get_storage();
-            let kgs = storage.list_knowledge_graphs();
-            let knowledge_graphs = kgs.len();
-
-            // Count total relations and views across all KGs
-            let mut total_relations = 0;
-            let mut total_views = 0;
-
-            // Estimate memory usage from tuple counts across all KGs.
-            // Each tuple is approximately 64 bytes (Value enum + heap allocations).
-            let mut total_tuples: u64 = 0;
-            for kg_name in &kgs {
-                if let Ok(relations) = storage.list_relations_in(kg_name) {
-                    total_relations += relations.len();
-                    for rel_name in &relations {
-                        if let Ok(Some((_schema, count))) =
-                            storage.get_relation_metadata_in(kg_name, rel_name)
-                        {
-                            total_tuples += count as u64;
-                        }
-                    }
-                }
-                if let Ok(rules) = storage.list_rules_in(kg_name) {
-                    total_views += rules.len();
-                }
-            }
-            let estimated_memory = total_tuples.saturating_mul(64);
-
+            let totals = KgTotals::of(&storage.knowledge_graph_summaries());
             drop(storage);
+            let KgTotals {
+                knowledge_graphs,
+                relations: total_relations,
+                views: total_views,
+                ..
+            } = totals;
+            let estimated_memory = totals.estimated_memory();
 
             let session_stats = handler.session_stats();
             StatsDto {
@@ -174,29 +155,17 @@ pub async fn prometheus_metrics(
         std::time::Duration::from_secs(timeout_secs),
         tokio::task::spawn_blocking(move || {
             let storage = handler.get_storage();
-            let kgs = storage.list_knowledge_graphs();
-            let knowledge_graphs = kgs.len();
-
-            let mut total_relations = 0usize;
-            let mut total_views = 0usize;
-            let mut total_tuples: u64 = 0;
-            for kg_name in &kgs {
-                if let Ok(relations) = storage.list_relations_in(kg_name) {
-                    total_relations += relations.len();
-                    for rel_name in &relations {
-                        if let Ok(Some((_schema, count))) =
-                            storage.get_relation_metadata_in(kg_name, rel_name)
-                        {
-                            total_tuples += count as u64;
-                        }
-                    }
-                }
-                if let Ok(rules) = storage.list_rules_in(kg_name) {
-                    total_views += rules.len();
-                }
-            }
-            let estimated_memory = total_tuples.saturating_mul(64);
+            let totals = KgTotals::of(&storage.knowledge_graph_summaries());
+            let (kg_loads, kg_unloads) = storage.knowledge_graph_residency_counts();
             drop(storage);
+            let KgTotals {
+                knowledge_graphs,
+                loaded_knowledge_graphs,
+                relations: total_relations,
+                views: total_views,
+                tuples: total_tuples,
+            } = totals;
+            let estimated_memory = totals.estimated_memory();
 
             let session_stats = handler.session_stats();
             let query_count = handler.total_queries();
@@ -214,6 +183,30 @@ pub async fn prometheus_metrics(
             out.push_str("# HELP inputlayer_knowledge_graphs Number of knowledge graphs.\n");
             out.push_str("# TYPE inputlayer_knowledge_graphs gauge\n");
             out.push_str(&format!("inputlayer_knowledge_graphs {knowledge_graphs}\n"));
+
+            out.push_str(
+                "# HELP inputlayer_knowledge_graphs_loaded Knowledge graphs held in memory.\n",
+            );
+            out.push_str("# TYPE inputlayer_knowledge_graphs_loaded gauge\n");
+            out.push_str(&format!(
+                "inputlayer_knowledge_graphs_loaded {loaded_knowledge_graphs}\n"
+            ));
+
+            out.push_str(
+                "# HELP inputlayer_knowledge_graph_loads_total Knowledge graphs loaded from disk on use.\n",
+            );
+            out.push_str("# TYPE inputlayer_knowledge_graph_loads_total counter\n");
+            out.push_str(&format!(
+                "inputlayer_knowledge_graph_loads_total {kg_loads}\n"
+            ));
+
+            out.push_str(
+                "# HELP inputlayer_knowledge_graph_unloads_total Knowledge graphs unloaded from memory.\n",
+            );
+            out.push_str("# TYPE inputlayer_knowledge_graph_unloads_total counter\n");
+            out.push_str(&format!(
+                "inputlayer_knowledge_graph_unloads_total {kg_unloads}\n"
+            ));
 
             out.push_str("# HELP inputlayer_relations_total Total base relations.\n");
             out.push_str("# TYPE inputlayer_relations_total gauge\n");
@@ -296,6 +289,37 @@ pub async fn prometheus_metrics(
         )],
         body,
     ))
+}
+
+/// Totals over every knowledge graph, from their summaries: stats must not
+/// load knowledge graphs that are not in memory.
+#[derive(Debug, Clone, Copy, Default)]
+struct KgTotals {
+    knowledge_graphs: usize,
+    loaded_knowledge_graphs: usize,
+    relations: usize,
+    views: usize,
+    tuples: u64,
+}
+
+impl KgTotals {
+    fn of(summaries: &[(String, crate::storage_engine::KgSummary)]) -> Self {
+        summaries
+            .iter()
+            .fold(Self::default(), |totals, (_, summary)| Self {
+                knowledge_graphs: totals.knowledge_graphs + 1,
+                loaded_knowledge_graphs: totals.loaded_knowledge_graphs
+                    + usize::from(summary.loaded),
+                relations: totals.relations + summary.relations,
+                views: totals.views + summary.rules,
+                tuples: totals.tuples + summary.tuples as u64,
+            })
+    }
+
+    /// Each tuple is approximately 64 bytes (Value enum + heap allocations).
+    fn estimated_memory(&self) -> u64 {
+        self.tuples.saturating_mul(64)
+    }
 }
 
 #[cfg(test)]

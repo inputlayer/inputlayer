@@ -2,11 +2,11 @@
  * KnowledgeGraph - the primary workspace for data, queries, and rules.
  */
 
-import type { Connection, ExecuteOptions } from './connection.js';
+import type { Connection, ExecuteOptions, ReadOptions } from './connection.js';
 import type { ResultResponse } from './protocol.js';
 import { rowKey } from './protocol.js';
 import type { Expr, BoolExpr, OrderedColumn } from './ast.js';
-import { compileValue, type ColumnTypes, type RelationDef, type RowOf } from './relation.js';
+import { compileValue, withParams, type ColumnTypes, type RelationDef, type RowOf } from './relation.js';
 import type { Fact } from './types.js';
 import type { ColumnProxy, RelationRef } from './proxy.js';
 import type { AclEntry } from './auth.js';
@@ -45,11 +45,14 @@ import { ResultSet } from './result.js';
 import { Session } from './session.js';
 import { meta, ruleClauses, ruleList } from './meta.js';
 import {
+  GroupSubscription,
   Subscription,
   runCallback,
+  snapshotRead,
   watchChanges,
   type Change,
   type Live,
+  type ReadResult,
   type Row,
   type SubscribeOptions,
   type SubscriptionHandle,
@@ -278,14 +281,11 @@ export class KnowledgeGraph {
     const factList = Array.isArray(facts) ? facts : [facts];
     if (factList.length === 0) return { count: 0 };
 
-    let iql: string;
-    if (factList.length === 1) {
-      iql = compileInsert(rel, factList[0]);
-    } else {
-      iql = compileBulkInsert(rel, factList);
-    }
-
-    const result = await this.conn.execute(iql);
+    // Values travel as parameters: the engine binds them without parsing.
+    const { result: iql, params } = withParams(() =>
+      factList.length === 1 ? compileInsert(rel, factList[0]) : compileBulkInsert(rel, factList),
+    );
+    const result = await this.conn.execute(iql, { params });
     return { count: insertedCount(result) };
   }
 
@@ -304,15 +304,15 @@ export class KnowledgeGraph {
       factsOrCondition !== null &&
       '_tag' in factsOrCondition
     ) {
-      const iql = compileConditionalDelete(rel, factsOrCondition as BoolExpr);
-      const result = await this.conn.execute(iql);
+      const { result: iql, params } = withParams(() => compileConditionalDelete(rel, factsOrCondition as BoolExpr));
+      const result = await this.conn.execute(iql, { params });
       return { count: result.rows.length };
     }
 
     const facts = Array.isArray(factsOrCondition) ? factsOrCondition : [factsOrCondition];
     for (const fact of facts) {
-      const iql = compileDelete(rel, fact as Fact);
-      await this.conn.execute(iql);
+      const { result: iql, params } = withParams(() => compileDelete(rel, fact as Fact));
+      await this.conn.execute(iql, { params });
     }
     return { count: facts.length };
   }
@@ -344,11 +344,11 @@ export class KnowledgeGraph {
 
   private async commitProgram(program: Program, strict: boolean): Promise<ProgramResult> {
     if (program.guarded) await this.ensureGuardRelations();
-    const compiled = program.compile(strict);
+    const { result: compiled, params } = withParams(() => program.compile(strict));
     const { iql } = compiled;
     let result: ResultResponse;
     try {
-      result = await this.conn.execute(iql);
+      result = await this.conn.execute(iql, { params });
     } catch (e) {
       if (
         e instanceof StatementFailedError &&
@@ -369,7 +369,7 @@ export class KnowledgeGraph {
     }
     const applied = compiled.tokenIndex === undefined || parseWriteMessage(message(compiled.tokenIndex)).inserted === 1;
     if (strict && !applied) throw new PreconditionFailed(iql, result);
-    return { applied, inserted, deleted, iql };
+    return { applied, inserted, deleted, iql, params };
   }
 
   /**
@@ -390,10 +390,13 @@ export class KnowledgeGraph {
     opts: ClaimOptions<keyof T & string> = {},
   ): Promise<Claim<RowOf<RelationDef<T>>>> {
     const fact = row as unknown as Fact;
-    const { iql } = compileClaim(rel, fact, opts);
+    const {
+      result: { iql },
+      params,
+    } = withParams(() => compileClaim(rel, fact, opts));
     let result: ResultResponse;
     try {
-      result = await this.conn.execute(iql);
+      result = await this.conn.execute(iql, { params });
     } catch (e) {
       throw asConflict(e, iql);
     }
@@ -546,6 +549,52 @@ export class KnowledgeGraph {
   }
 
   /**
+   * Subscribe to several targets kept current together, as one
+   * subscription: an async iterator of `GroupChange` events with every
+   * member's change by name (`unchanged` when it has none). After every
+   * verified event, all members are exact at the event's one `revision`;
+   * `unverified` and `resync` cover the whole group. Members go to the
+   * engine in the record's order. A group counts once per member against the
+   * server's subscription limit.
+   *
+   * Refused with `SubscriptionRejectedError` as `subscribe` refuses a target
+   * (the message names the member), and for an empty record or name.
+   *
+   * @example
+   * for await (const change of kg.subscribeGroup({ orders: Order, etas: Eta })) {
+   *   apply(change.members.orders);
+   *   apply(change.members.etas);
+   *   // Both are at change.revision: never one ahead of the other.
+   * }
+   */
+  subscribeGroup(members: Record<string, SubscriptionTarget>, opts?: SubscribeOptions): GroupSubscription {
+    return new GroupSubscription(this.conn, members, opts, () => this._session.listRules());
+  }
+
+  /**
+   * Run several targets on one snapshot: every result is the exact answer
+   * at the returned `revision`, whatever commits meanwhile. Reads see
+   * persistent data only (no session facts or session rules), as
+   * subscriptions do, so a read and a subscription of the same targets agree
+   * at the same revision. A target may carry `limit`, `offset` (with a
+   * limit) and `orderBy`; rows are shaped as `kg.query` shapes them.
+   *
+   * Refused with `SubscriptionRejectedError` for a target that is not one
+   * query (an OR condition, an aggregate, a NOT(any()) of constants only),
+   * before anything is sent, and for a target reading a session rule (the
+   * session's rules are listed beside the read, when a target names
+   * relations). The engine fails the read as a whole, naming
+   * the failing query (`Query 'etas': ...`). `timeoutMs` and `signal` bound
+   * and cancel the whole read, as for `execute`.
+   *
+   * @example
+   * const { revision, results } = await kg.read({ orders: Order, etas: Eta });
+   */
+  read(queries: Record<string, SubscriptionTarget>, opts?: ReadOptions): Promise<ReadResult> {
+    return snapshotRead(this.conn, queries, opts, () => this._session.listRules());
+  }
+
+  /**
    * The whole current result of `target` each time it changes, with its
    * revision. `verified` is false from a lost connection (or any other
    * `unverified` event) until the fresh result arrives: act on nothing new
@@ -643,8 +692,8 @@ export class KnowledgeGraph {
     clauses: RuleClause[],
   ): Promise<void> {
     for (const clause of clauses) {
-      const iql = compileRule(headName, headColumns, clause, true);
-      await this.conn.execute(iql);
+      const { result: iql, params } = withParams(() => compileRule(headName, headColumns, clause, true));
+      await this.conn.execute(iql, { params });
     }
   }
 
@@ -678,8 +727,8 @@ export class KnowledgeGraph {
     clause: RuleClause,
   ): Promise<void> {
     await this.dropRuleClause(name, index);
-    const iql = compileRule(name, headColumns, clause, true);
-    await this.conn.execute(iql);
+    const { result: iql, params } = withParams(() => compileRule(name, headColumns, clause, true));
+    await this.conn.execute(iql, { params });
   }
 
   /** Clear a rule's materialized data. */
@@ -851,7 +900,15 @@ export class KnowledgeGraph {
     };
   }
 
-  /** Execute raw IQL. `timeoutMs` and `signal` bound and cancel the call. */
+  /**
+   * Execute raw IQL. `timeoutMs` and `signal` bound and cancel the call.
+   * `params` binds the program's `$name` references to values sent beside
+   * its text, never parsed as IQL: pass every value you did not write
+   * yourself this way.
+   *
+   * @example
+   * await kg.execute('+eta($shipment, $due)', { params: { shipment, due } });
+   */
   async execute(iql: string, opts?: ExecuteOptions): Promise<ResultSet> {
     const result = await this.conn.execute(iql, opts);
     return new ResultSet({

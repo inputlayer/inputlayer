@@ -1,0 +1,93 @@
+{
+  "name": "snapshot_error_mid_stream",
+  "description": "An error answering the read before its snapshot_end fails the read; the rows received are discarded.",
+  "calls": [
+    {
+      "read": [
+        {
+          "name": "orders",
+          "query": "?order(S, O)"
+        },
+        {
+          "name": "eta",
+          "query": "?eta(O, T)"
+        }
+      ],
+      "expect": {
+        "error": "query",
+        "code": "internal"
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "read",
+        "queries": [
+          {
+            "name": "orders",
+            "query": "?order(S, O)"
+          },
+          {
+            "name": "eta",
+            "query": "?eta(O, T)"
+          }
+        ]
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "snapshot_start",
+        "id": "$q",
+        "knowledge_graph": "default",
+        "revision": 5,
+        "results": [
+          {
+            "name": "orders",
+            "columns": [
+              "S",
+              "O"
+            ],
+            "row_count": 2,
+            "total_count": 2,
+            "truncated": false
+          },
+          {
+            "name": "eta",
+            "columns": [
+              "O",
+              "T"
+            ],
+            "row_count": 0,
+            "total_count": 0,
+            "truncated": false
+          }
+        ],
+        "execution_time_ms": 1
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_chunk",
+        "id": "$q",
+        "result": 0,
+        "chunk_index": 0,
+        "rows": [
+          [
+            1,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$q",
+        "code": "internal",
+        "message": "Snapshot too large to deliver"
+      }
+    }
+  ]
+}

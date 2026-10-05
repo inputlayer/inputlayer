@@ -68,6 +68,30 @@ pub enum ServerFrame {
         row_count: usize,
         chunk_count: usize,
     },
+    /// Results of several queries, all exact at one knowledge graph
+    /// revision: the reply to `read`, and to `subscribe` (then naming the
+    /// subscription in `subscribed`).
+    Snapshot(SnapshotFrame),
+    /// Header of a snapshot streamed as `snapshot_chunk` frames: complete only
+    /// at its `snapshot_end`; if an `error` answering the same request comes
+    /// first, the rows received so far must be discarded.
+    SnapshotStart(SnapshotStartFrame),
+    /// Rows of result `result` (its index in the request) of a streamed
+    /// snapshot, in order from `chunk_index` 0 across all results.
+    SnapshotChunk {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<RequestId>,
+        result: usize,
+        chunk_index: usize,
+        rows: Vec<Row>,
+    },
+    /// End of a streamed snapshot: how many chunks it had. Each result's
+    /// chunks must add up to the `row_count` its header announced.
+    SnapshotEnd {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<RequestId>,
+        chunk_count: usize,
+    },
     /// The request failed as a whole.
     Error {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -121,11 +145,15 @@ impl ServerFrame {
             | Self::AuthError { id, .. }
             | Self::ResultChunk { id, .. }
             | Self::ResultEnd { id, .. }
+            | Self::SnapshotChunk { id, .. }
+            | Self::SnapshotEnd { id, .. }
             | Self::Error { id, .. }
             | Self::CancelAck { id, .. }
             | Self::Pong { id } => id.as_ref(),
             Self::Result(frame) => frame.id.as_ref(),
             Self::ResultStart(frame) => frame.id.as_ref(),
+            Self::Snapshot(frame) => frame.id.as_ref(),
+            Self::SnapshotStart(frame) => frame.id.as_ref(),
             Self::Notice { .. } | Self::Subscription(_) | Self::Notification(_) => None,
         }
     }
@@ -189,6 +217,14 @@ pub struct ResultFrame {
     /// Fact statements the program committed, with their effective counts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub statements: Vec<StatementCounts>,
+    /// Revision the program's committed writes are visible at, the revision
+    /// pushes carry: a push at this revision or later reflects them. Set only
+    /// when the program changed persistent state of a knowledge graph:
+    /// committed fact, schema and rule writes, `.rel drop`, `.clear prefix`,
+    /// `.index create|drop|rebuild`, `.kg create` and
+    /// `.ontology install|remove|upgrade`; with several, the last one's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
     /// Set on the reply to `.subscribe`: `rows` is the subscription's snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscribed: Option<Subscribed>,
@@ -215,9 +251,66 @@ pub struct ResultStartFrame {
     pub errors: Vec<StatementError>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub statements: Vec<StatementCounts>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
     /// Set on the reply to `.subscribe`: the chunks hold the snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscribed: Option<Subscribed>,
+}
+
+/// Results of several queries at one revision, in one frame.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SnapshotFrame {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<RequestId>,
+    pub knowledge_graph: String,
+    /// The knowledge graph revision every result is the exact answer at.
+    pub revision: u64,
+    /// One per query of the request, in its order.
+    pub results: Vec<NamedResult>,
+    pub execution_time_ms: u64,
+    /// Set on the reply to `subscribe`: the results are the group's snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscribed: Option<Subscribed>,
+}
+
+/// One query's result in a [`SnapshotFrame`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NamedResult {
+    /// The query's name in the request.
+    pub name: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Row>,
+    /// Rows before the result cap.
+    pub total_count: usize,
+    /// Whether the result cap cut the rows. Never set in a subscription's
+    /// snapshot: a capped result fails the `subscribe` instead.
+    pub truncated: bool,
+}
+
+/// Header of a streamed snapshot: [`SnapshotFrame`] without its rows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SnapshotStartFrame {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<RequestId>,
+    pub knowledge_graph: String,
+    pub revision: u64,
+    pub results: Vec<NamedResultHeader>,
+    pub execution_time_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscribed: Option<Subscribed>,
+}
+
+/// One query's result in a [`SnapshotStartFrame`]: [`NamedResult`] without
+/// its rows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NamedResultHeader {
+    pub name: String,
+    pub columns: Vec<String>,
+    /// Rows the result's chunks carry, in total.
+    pub row_count: usize,
+    pub total_count: usize,
+    pub truncated: bool,
 }
 
 /// What a committed fact statement changed.
@@ -258,7 +351,7 @@ pub struct SessionMetadata {
     pub warnings: Vec<String>,
 }
 
-/// The subscription a `.subscribe` registered.
+/// The subscription a `.subscribe` or `subscribe` registered.
 ///
 /// A name can be reused after `.unsubscribe`; the generation is unique per
 /// connection, so a push whose generation differs from the one returned here

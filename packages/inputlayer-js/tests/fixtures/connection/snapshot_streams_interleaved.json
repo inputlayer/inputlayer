@@ -1,0 +1,238 @@
+{
+  "name": "snapshot_streams_interleaved",
+  "about": "A streamed read snapshot (rows of two results, then an empty third) interleaves with a streamed program result, a notification and a group delta push for no route; the snapshot assembles result by result, the result whole, the notification is dispatched and the push is dropped and counted.",
+  "calls": [
+    {
+      "read": [
+        {
+          "name": "orders",
+          "query": "?order(S, O)"
+        },
+        {
+          "name": "etas",
+          "query": "?eta(O, T)"
+        },
+        {
+          "name": "none",
+          "query": "?none(X)"
+        }
+      ]
+    },
+    "?a(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 2
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_start",
+        "id": "$r0",
+        "knowledge_graph": "default",
+        "revision": 5,
+        "results": [
+          {
+            "name": "orders",
+            "columns": [
+              "S",
+              "O"
+            ],
+            "row_count": 3,
+            "total_count": 3,
+            "truncated": false
+          },
+          {
+            "name": "etas",
+            "columns": [
+              "O",
+              "T"
+            ],
+            "row_count": 1,
+            "total_count": 1,
+            "truncated": false
+          },
+          {
+            "name": "none",
+            "columns": [
+              "X"
+            ],
+            "row_count": 0,
+            "total_count": 0,
+            "truncated": false
+          }
+        ],
+        "execution_time_ms": 0
+      }
+    },
+    {
+      "send": {
+        "type": "result_start",
+        "id": "$r1",
+        "columns": [
+          "x"
+        ],
+        "total_count": 0,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_chunk",
+        "id": "$r0",
+        "result": 0,
+        "chunk_index": 0,
+        "rows": [
+          [
+            1,
+            10
+          ],
+          [
+            1,
+            11
+          ]
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$r1",
+        "rows": [
+          [
+            7
+          ]
+        ],
+        "chunk_index": 0
+      }
+    },
+    {
+      "send": {
+        "type": "persistent_update",
+        "seq": 3,
+        "timestamp_ms": 0,
+        "knowledge_graph": "default",
+        "relation": "order",
+        "operation": "insert",
+        "count": 1
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_chunk",
+        "id": "$r0",
+        "result": 0,
+        "chunk_index": 1,
+        "rows": [
+          [
+            2,
+            20
+          ]
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "subscription_group_delta",
+        "subscription": "g",
+        "generation": 1,
+        "knowledge_graph": "default",
+        "seq": 1,
+        "revision": 6,
+        "members": [
+          {
+            "name": "orders",
+            "unchanged": false,
+            "columns": [
+              "S",
+              "O"
+            ],
+            "inserted": [
+              [
+                3,
+                30
+              ]
+            ],
+            "retracted": []
+          }
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_chunk",
+        "id": "$r0",
+        "result": 1,
+        "chunk_index": 2,
+        "rows": [
+          [
+            10,
+            "tue"
+          ]
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "result_end",
+        "id": "$r1",
+        "row_count": 1,
+        "chunk_count": 1
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_end",
+        "id": "$r0",
+        "chunk_count": 3
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "revision": 5,
+        "results": {
+          "orders": [
+            [
+              1,
+              10
+            ],
+            [
+              1,
+              11
+            ],
+            [
+              2,
+              20
+            ]
+          ],
+          "etas": [
+            [
+              10,
+              "tue"
+            ]
+          ],
+          "none": []
+        }
+      },
+      {
+        "rows": [
+          [
+            7
+          ]
+        ]
+      }
+    ],
+    "notifications": [
+      3
+    ],
+    "stats": {
+      "stalePushes": 1,
+      "staleReplies": 0
+    }
+  }
+}

@@ -133,6 +133,15 @@ inputlayer_queries_total 15000
 # HELP inputlayer_knowledge_graphs Number of knowledge graphs.
 # TYPE inputlayer_knowledge_graphs gauge
 inputlayer_knowledge_graphs 3
+# HELP inputlayer_knowledge_graphs_loaded Knowledge graphs held in memory.
+# TYPE inputlayer_knowledge_graphs_loaded gauge
+inputlayer_knowledge_graphs_loaded 2
+# HELP inputlayer_knowledge_graph_loads_total Knowledge graphs loaded from disk on use.
+# TYPE inputlayer_knowledge_graph_loads_total counter
+inputlayer_knowledge_graph_loads_total 4
+# HELP inputlayer_knowledge_graph_unloads_total Knowledge graphs unloaded from memory.
+# TYPE inputlayer_knowledge_graph_unloads_total counter
+inputlayer_knowledge_graph_unloads_total 2
 # HELP inputlayer_relations_total Total base relations.
 # TYPE inputlayer_relations_total gauge
 inputlayer_relations_total 10

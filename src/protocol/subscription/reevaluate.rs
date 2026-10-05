@@ -22,9 +22,9 @@ use futures_util::future::BoxFuture;
 use crate::protocol::rest::handlers::wire_value_to_json;
 use crate::protocol::Handler;
 use crate::statement::{parse_query, QueryGoal};
-use crate::storage_engine::KnowledgeGraphSnapshot;
+use crate::storage_engine::{KgPin, KnowledgeGraphSnapshot};
 
-use super::{Dependencies, Refresh, ResultSet, Row, StandingQuery};
+use super::{Dependencies, QueryRefresh, Refresh, ResultSet, Row, StandingQuery};
 
 /// A standing query kept current by full re-evaluation.
 pub struct ReevaluatingQuery {
@@ -35,6 +35,9 @@ pub struct ReevaluatingQuery {
     columns: Vec<String>,
     /// The last complete result.
     current: Arc<ResultSet>,
+    /// Keeps the knowledge graph loaded while the query stands, so a write
+    /// after a quiet spell does not wait for it to load again.
+    _pin: Option<KgPin>,
 }
 
 /// A query's complete result on one snapshot, before it is diffed.
@@ -66,6 +69,11 @@ impl ReevaluatingQuery {
                     .to_string(),
             );
         }
+        // A missing knowledge graph fails at evaluation, with its error.
+        let pin = handler
+            .get_storage()
+            .pin_knowledge_graph(knowledge_graph)
+            .ok();
         Ok(Self {
             handler,
             knowledge_graph: knowledge_graph.to_string(),
@@ -73,6 +81,7 @@ impl ReevaluatingQuery {
             goal,
             columns: Vec::new(),
             current: Arc::default(),
+            _pin: pin,
         })
     }
 
@@ -135,14 +144,33 @@ impl ReevaluatingQuery {
         }
         let inserted = next.difference(&self.current);
         let retracted = self.current.difference(&next);
-        self.current = Arc::clone(&next);
+        let query = if inserted.is_empty() && retracted.is_empty() {
+            // Keep the set publications already share, so a subscriber that
+            // compares results sees at once that this one did not change.
+            self.unchanged()
+        } else {
+            self.current = Arc::clone(&next);
+            QueryRefresh {
+                columns: self.columns.clone(),
+                inserted,
+                retracted,
+                result: next,
+            }
+        };
         Refresh {
-            columns: self.columns.clone(),
-            inserted,
-            retracted,
+            queries: vec![query],
             dependencies,
             revision,
-            result: next,
+        }
+    }
+
+    /// The current result, unchanged.
+    pub fn unchanged(&self) -> QueryRefresh {
+        QueryRefresh {
+            columns: self.columns.clone(),
+            inserted: Vec::new(),
+            retracted: Vec::new(),
+            result: Arc::clone(&self.current),
         }
     }
 

@@ -7,7 +7,7 @@ export { Timestamp } from './types.js';
 export type { Vector, VectorInt8, IQLType, FieldValue, Fact, ColumnDef, RelationSchema } from './types.js';
 
 // Relation system
-export { relation, any, RelationDef, compileValue, resolveRelationName, getColumns, getColumnTypes } from './relation.js';
+export { relation, any, RelationDef, compileValue, compileLiteral, withParams, resolveRelationName, getColumns, getColumnTypes } from './relation.js';
 export type { ColumnTypes, RowOf, ValueOf, Binding } from './relation.js';
 
 // Programs, guards and claims
@@ -80,11 +80,14 @@ export {
 export type { SubscriptionRejectedReason } from './errors.js';
 
 // Subscriptions
-export { Subscription } from './subscription.js';
+export { GroupSubscription, Subscription } from './subscription.js';
 export type {
   Change,
   ChangeKind,
+  GroupChange,
   Live,
+  MemberChange,
+  ReadResult,
   Row,
   SubscribeOptions,
   SubscriptionHandle,
@@ -156,6 +159,9 @@ export type {
   LoginMessage,
   AuthenticateMessage,
   ExecuteMessage,
+  ReadMessage,
+  SubscribeMessage,
+  NamedQuery,
   CancelMessage,
   PingMessage,
   AuthenticatedResponse,
@@ -165,6 +171,12 @@ export type {
   ResultStartResponse,
   ResultChunkResponse,
   ResultEndResponse,
+  NamedResult,
+  NamedResultHeader,
+  SnapshotResponse,
+  SnapshotStartResponse,
+  SnapshotChunkResponse,
+  SnapshotEndResponse,
   PongResponse,
   CancelAckResponse,
   NoticeCode,
@@ -176,15 +188,24 @@ export type {
   SubscriptionDeltaStartResponse,
   SubscriptionDeltaChunkResponse,
   SubscriptionDeltaEndResponse,
+  GroupMemberDelta,
+  GroupMemberDeltaHeader,
+  SubscriptionGroupDeltaResponse,
+  SubscriptionGroupDeltaStartResponse,
+  SubscriptionGroupDeltaChunkResponse,
+  SubscriptionGroupDeltaEndResponse,
   SubscriptionErrorResponse,
   SubscriptionResetResponse,
   TimingBreakdown,
   RuleTiming,
   ErrorCode,
   StatementError,
+  ParamValue,
+  Params,
 } from './protocol.js';
 export {
   PROTOCOL_VERSION,
+  PARAMS_PROTOCOL_VERSION,
   serializeMessage,
   deserializeMessage,
   isPush,
@@ -197,6 +218,7 @@ export type {
   ConnectionEventType,
   ConnectionStats,
   ExecuteOptions,
+  ReadOptions,
   SubscriptionPushMessage,
   SubscriptionRoute,
 } from './connection.js';

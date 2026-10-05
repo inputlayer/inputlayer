@@ -38,17 +38,67 @@ pub fn thread_net_bytes() -> i64 {
     NET_BYTES.try_with(Cell::get).unwrap_or(0)
 }
 
-/// The memory limit of the container the process runs in: its cgroup's
-/// (v2, else v1) limit, if one is set.
+/// Peak bytes past which a finished computation returns the memory it freed
+/// to the operating system; see [`release_freed_memory`].
+pub const RELEASE_AFTER_PEAK_BYTES: i64 = 64 << 20;
+
+/// Return the heap memory the process has freed to the operating system.
+/// The system allocator keeps freed memory for reuse, so without this a
+/// server that once ran a query to its memory limit stays that large after
+/// the query ended. It walks the whole heap: call it only after a
+/// computation that held more than [`RELEASE_AFTER_PEAK_BYTES`].
+pub fn release_freed_memory() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        extern "C" {
+            fn malloc_trim(pad: usize) -> std::ffi::c_int;
+        }
+        // SAFETY: glibc's `malloc_trim` takes no pointers and only returns
+        // free pages of the allocator's own heaps; it is thread-safe.
+        unsafe {
+            malloc_trim(0);
+        }
+    }
+}
+
+/// The memory limit of the container the process runs in, if one is set:
+/// see [`process_memory_limit`].
 pub fn container_memory_limit() -> Option<u64> {
-    cgroup_memory_limit(std::path::Path::new("/sys/fs/cgroup"))
+    let own = std::fs::read_to_string("/proc/self/cgroup").ok();
+    process_memory_limit(std::path::Path::new("/sys/fs/cgroup"), own.as_deref())
+}
+
+/// The memory limit on a process whose `/proc/<pid>/cgroup` reads `own`,
+/// under the cgroup filesystem mounted at `root`: the tightest of the
+/// limit at `root` (a container's own mount, or v1) and the v2 limits of
+/// the process's cgroup and every cgroup above it, where a unit's
+/// `MemoryMax=` lands when systemd runs the server.
+pub fn process_memory_limit(root: &std::path::Path, own: Option<&str>) -> Option<u64> {
+    let path = own.and_then(|text| text.lines().find_map(|line| line.strip_prefix("0::")));
+    let mut dir = root.to_path_buf();
+    let mut tightest = cgroup_memory_limit(root);
+    for part in path.into_iter().flat_map(|path| path.split('/')) {
+        if part.is_empty() || part == "." || part == ".." {
+            continue;
+        }
+        dir.push(part);
+        if let Some(limit) = read_limit(&dir.join("memory.max")) {
+            tightest = Some(tightest.map_or(limit, |t| t.min(limit)));
+        }
+    }
+    tightest
 }
 
 /// The memory limit the cgroup filesystem mounted at `root` sets (v2, else
 /// v1), if any.
 pub fn cgroup_memory_limit(root: &std::path::Path) -> Option<u64> {
-    let read = |path: &str| std::fs::read_to_string(root.join(path)).ok();
-    let text = read("memory.max").or_else(|| read("memory/memory.limit_in_bytes"))?;
+    read_limit(&root.join("memory.max"))
+        .or_else(|| read_limit(&root.join("memory/memory.limit_in_bytes")))
+}
+
+/// The limit a cgroup memory limit file holds, if it sets one.
+fn read_limit(file: &std::path::Path) -> Option<u64> {
+    let text = std::fs::read_to_string(file).ok()?;
     // v2 says `max` when unlimited, v1 a number near 2^63.
     let limit: u64 = text.trim().parse().ok()?;
     (limit < 1 << 60).then_some(limit)

@@ -1,12 +1,16 @@
-"""Live tests of ``kg.subscribe()``, ``kg.watch()`` and ``kg.on()`` against a
-real engine.
+"""Live tests of ``kg.subscribe()``, ``kg.watch()``, ``kg.on()``,
+``kg.subscribe_group()`` and ``kg.read()`` against a real engine.
 
 Snapshot plus deltas must be exact over seeded random histories: the
 differential oracle's universe (``tests/differential_oracle/generate.rs``,
 ported with the same SplitMix64, rules and queries), with a fresh query as
 the recompute reference at every checkpoint. Then projection multiplicity,
 streamed snapshots and deltas, a ``seq`` gap and a reset, a slow consumer, a
-reconnect, an ACL revoke, and the refusals. The cases mirror the JS SDK's
+reconnect, an ACL revoke, and the refusals. Then reads and subscription
+groups: one revision per answer under concurrent writers (every group event
+and every read sees two relations a writer changes together as equal),
+streamed snapshots and group deltas, a gap and a reset, a reconnect, and the
+refusals. The cases mirror the JS SDK's
 ``tests/subscriptions.integration.test.ts``.
 
 Set INPUTLAYER_TEST_SERVER (and INPUTLAYER_TEST_USER /
@@ -29,8 +33,11 @@ import pytest
 
 from inputlayer import (
     Change,
+    GroupChange,
+    GroupSubscription,
     InputLayer,
     KnowledgeGraph,
+    QueryError,
     Relation,
     Row,
     Subscription,
@@ -38,6 +45,7 @@ from inputlayer import (
     count,
 )
 from inputlayer._protocol import deserialize_message
+from inputlayer.subscription import read as read_shapes
 
 SERVER_URL = os.environ.get("INPUTLAYER_TEST_SERVER", "")
 USERNAME = os.environ.get("INPUTLAYER_TEST_USER", "admin")
@@ -510,10 +518,10 @@ async def test_an_acl_revoke_ends_the_subscription_with_access_denied() -> None:
         user = f"{PREFIX}_reader"
         with contextlib.suppress(Exception):
             await il.drop_user(user)
-        await il.create_user(user, "reader-pw-1", "viewer")
+        await il.create_user(user, "reader-password-1", "viewer")
         await kg.grant_access(user, "viewer")
         # Lazy: the reader may read only this graph, so it never opens another.
-        reader = _client(user, "reader-pw-1")
+        reader = _client(user, "reader-password-1")
         try:
             consumer = Consumer(reader.knowledge_graph(kg.name, create=False).subscribe(E))
             await _until(lambda: len(consumer.rows) == 1)
@@ -573,3 +581,338 @@ async def test_watch_yields_the_whole_result_and_on_calls_back() -> None:
         assert seen[1].inserted == [E(a=2, b=2)]
         await levels.aclose()  # type: ignore[attr-defined]
         await handle.close()
+
+
+# ── Reads and subscription groups ────────────────────────────────────
+
+
+class GroupConsumer:
+    """Applies a group's events per member, as ``Consumer`` does for one
+    subscription, and runs ``check`` on the held members after every verified
+    event. A failed check ends it with ``error``."""
+
+    def __init__(
+        self,
+        sub: GroupSubscription,
+        check: Callable[[dict[str, list[tuple[Any, ...]]]], None] | None = None,
+    ) -> None:
+        self.sub = sub
+        self.check = check
+        self.rows: dict[str, dict[tuple[Any, ...], Any]] = {name: {} for name in sub.queries}
+        self.events: list[GroupChange] = []
+        self.revision = -1
+        self.verified = False
+        self.checked = 0
+        self.error: BaseException | None = None
+        self._task = asyncio.ensure_future(self._run())
+
+    async def _run(self) -> None:
+        try:
+            while True:
+                try:
+                    change = await self.sub.__anext__()
+                except StopAsyncIteration:
+                    return
+                self.apply(change)
+        except Exception as e:
+            self.error = e
+
+    def apply(self, change: GroupChange) -> None:
+        self.events.append(change)
+        assert change.revision >= self.revision, f"revision went back: {change}"
+        self.revision = change.revision
+        self.verified = change.verified
+        assert list(change.members) == list(self.rows), f"members: {list(change.members)}"
+        for name, member in change.members.items():
+            assert member.unchanged == (not member.inserted and not member.retracted)
+            held = self.rows[name]
+            if change.kind == "snapshot":
+                assert not held, "a snapshot after rows were held"
+            for row in member.retracted:
+                key = _values(row)
+                assert key in held, f"{name}: retracted {key}, not held"
+                del held[key]
+            for row in member.inserted:
+                key = _values(row)
+                assert key not in held, f"{name}: inserted {key}, already held"
+                held[key] = row
+        if change.verified and self.check is not None:
+            self.check(self.values())
+            self.checked += 1
+
+    def values(self) -> dict[str, list[tuple[Any, ...]]]:
+        return {name: sorted(rows) for name, rows in self.rows.items()}
+
+    def kinds(self) -> list[str]:
+        return [f"unverified:{e.reason}" if e.kind == "unverified" else e.kind for e in self.events]
+
+    async def close(self) -> None:
+        await self.sub.close()
+        with contextlib.suppress(Exception):
+            await self._task
+
+
+async def _group_converges(
+    kg: KnowledgeGraph, consumer: GroupConsumer, timeout: float = 10.0
+) -> None:
+    """Wait until every member holds the engine's current answer to its query
+    (read with the members' own shapes, so projections compare as projected)."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    expected: dict[str, list[tuple[Any, ...]]] = {}
+    while True:
+        snap = await read_shapes(kg._conn, consumer.sub._members)
+        expected = {name: sorted(_values(r) for r in rows) for name, rows in snap.results.items()}
+        if consumer.verified and consumer.values() == expected:
+            return
+        if loop.time() > deadline or consumer.error is not None:
+            break
+        await asyncio.sleep(0.02)
+    assert consumer.error is None, repr(consumer.error)
+    assert consumer.values() == expected, ", ".join(consumer.kinds())
+
+
+async def test_read_answers_several_queries_at_one_revision() -> None:
+    async with _session() as (_, fresh):
+        kg = await fresh("read")
+        await kg.define(E)
+        await kg.insert([E(a=1, b=1), E(a=1, b=2), E(a=2, b=3)])
+        await kg.execute("+f(1, 10)")
+        before = await kg.read({"e": E, "f": "?f(A, B)", "a": E.a})
+        assert before.results["e"] == [E(a=1, b=1), E(a=1, b=2), E(a=2, b=3)]
+        assert before.results["f"] == [Row(["A", "B"], [1, 10])]
+        assert before.results["a"] == [Row(["a"], [1]), Row(["a"], [2])]
+        await kg.insert(E(a=3, b=4))
+        after = await kg.read({"page": {"select": E, "order_by": E.b.desc(), "limit": 2}})
+        assert after.revision > before.revision
+        assert after.results["page"] == [E(a=3, b=4), E(a=2, b=3)]
+        assert after.truncated == ["page"]
+        # Session data is invisible to a read, as to a subscription: refused.
+        await kg.execute("mine(A) <- e(A, _)")
+        with pytest.raises(SubscriptionRejected) as session:
+            await kg.read({"e": E, "mine": "?mine(A)"})
+        assert session.value.reason == "session_view"
+        with pytest.raises(QueryError) as err:
+            await kg.read({"e": E, "bad": "?f("})
+        assert err.value.code == "validation" and "Query 'bad'" in err.value.message
+        with pytest.raises(SubscriptionRejected) as refused:
+            await kg.read({"e": {"select": [E.a], "limit": 1}})
+        assert refused.value.reason == "limit_offset"
+
+
+async def test_group_snapshot_then_deltas_with_unchanged_members() -> None:
+    async with _session() as (_, fresh):
+        kg = await fresh("group")
+        await kg.define(E)
+        await kg.insert(E(a=1, b=1))
+        consumer = GroupConsumer(kg.subscribe_group({"e": E, "a": E.a, "f": "?f(X, Y)"}))
+        await _until(lambda: consumer.events)
+        snap = consumer.events[0]
+        assert snap.kind == "snapshot" and snap.members["f"].unchanged
+        assert snap.members["a"].inserted == [Row(["a"], [1])]
+        # A second tuple behind a = 1: e changes, a does not.
+        await kg.insert(E(a=1, b=2))
+        await _until(lambda: len(consumer.events) == 2)
+        delta = consumer.events[1]
+        assert delta.kind == "delta" and delta.revision > snap.revision
+        assert delta.members["e"].inserted == [E(a=1, b=2)]
+        assert delta.members["a"].unchanged and delta.members["f"].unchanged
+        # One program changing two members: one event at one revision.
+        await kg.execute("+f(1, 2)\n-e(1, 1)")
+        await _until(lambda: len(consumer.events) == 3)
+        both = consumer.events[2]
+        assert both.members["f"].inserted == [Row(["X", "Y"], [1, 2])]
+        assert both.members["e"].retracted == [E(a=1, b=1)]
+        assert both.members["a"].unchanged
+        assert both.seq == delta.seq + 1
+        await _group_converges(kg, consumer)
+        assert consumer.error is None
+        await consumer.close()
+
+
+async def test_groups_and_reads_are_atomic_under_concurrent_writes() -> None:
+    """Writers commit programs that insert or delete one key in two relations
+    together; a rule derives the keys in both. Every verified group event and
+    every read must hold the three members equal."""
+    async with _session() as (_, fresh):
+        kg = await fresh("atomic")
+        await kg.execute("+left(0)\n+right(0)\n+both(K) <- left(K), right(K)")
+        queries = {"left": "?left(K)", "right": "?right(K)", "both": "?both(K)"}
+
+        def equal(values: dict[str, list[tuple[Any, ...]]]) -> None:
+            assert values["left"] == values["right"] == values["both"], values
+
+        subscriber = _client()
+        reader = _client()
+        writers = [_client() for _ in range(3)]
+        try:
+            group = GroupConsumer(
+                subscriber.knowledge_graph(kg.name).subscribe_group(queries), equal
+            )
+            await _until(lambda: group.events)
+            done = asyncio.Event()
+            reads = 0
+
+            async def read_loop() -> None:
+                nonlocal reads
+                rkg = reader.knowledge_graph(kg.name)
+                while not done.is_set():
+                    snap = await rkg.read(queries)
+                    equal({n: sorted(_values(r) for r in rows)
+                           for n, rows in snap.results.items()})
+                    reads += 1
+
+            async def write_loop(client: InputLayer, seed: int) -> None:
+                wkg = client.knowledge_graph(kg.name)
+                rng = _Rng(seed)
+                for _ in range(150):
+                    key = rng.below(25)
+                    if rng.below(2):
+                        await wkg.execute(f"+left({key})\n+right({key})")
+                    else:
+                        await wkg.execute(f"-left({key})\n-right({key})")
+
+            reading = asyncio.ensure_future(read_loop())
+            await asyncio.gather(*(write_loop(w, i + 1) for i, w in enumerate(writers)))
+            done.set()
+            await reading
+            await _group_converges(kg, group)
+            final = await kg.read(queries)
+            values = {n: sorted(_values(r) for r in rows) for n, rows in final.results.items()}
+            equal(values)
+            assert group.values() == values
+            assert group.error is None
+            assert [k for k in group.kinds() if k.startswith("unverified")] == []
+            # The checks ran: many group events and reads, under the writers.
+            assert group.checked > 20 and reads > 20, (group.checked, reads)
+            await group.close()
+        finally:
+            for client in [subscriber, reader, *writers]:
+                await client.close()
+
+
+async def test_streamed_read_group_snapshot_and_group_deltas_are_assembled() -> None:
+    async with _session() as (_, fresh):
+        kg = await fresh("group_streamed")
+        body = "x" * 400
+        for start in range(0, 4000, 1000):
+            rows = ", ".join(f'({i}, "{body}")' for i in range(start, start + 1000))
+            await kg.execute(f"+doc[{rows}]")
+        await kg.execute("+big(I, B) <- doc(I, B)")
+        frames: list[str] = []
+        conn = kg._conn
+        route = conn._route
+
+        def recording(frame: Any) -> None:
+            frames.append(type(frame).__name__)
+            route(frame)
+
+        conn._route = recording  # type: ignore[method-assign]
+        snap = await kg.read({"big": "?big(I, B)", "doc": "?doc(I, B)"})
+        assert len(snap.results["big"]) == len(snap.results["doc"]) == 4000
+        assert "SnapshotStartResponse" in frames
+        consumer = GroupConsumer(kg.subscribe_group({"big": "?big(I, B)", "small": "?s(X)"}))
+        await _until(lambda: len(consumer.rows["big"]) == 4000)
+        await kg.execute(".rule drop big")
+        await _until(lambda: not consumer.rows["big"])
+        await kg.execute("+big(I, B) <- doc(I, B)\n+s(1)")
+        await _until(lambda: len(consumer.rows["big"]) == 4000 and consumer.rows["small"])
+        assert consumer.kinds() == ["snapshot", "delta", "delta"]
+        assert frames.count("SnapshotStartResponse") == 2
+        assert frames.count("SubscriptionGroupDeltaStartResponse") == 2
+        await _group_converges(kg, consumer)
+        await consumer.close()
+
+
+async def test_a_group_seq_gap_and_reset_end_in_unverified_then_an_exact_resync() -> None:
+    async with _session() as (_, fresh):
+        kg = await fresh("group_gap")
+        await kg.define(E)
+        await kg.insert(E(a=1, b=1))
+        sub = kg.subscribe_group({"e": E, "f": "?f(X)"})
+        consumer = GroupConsumer(sub)
+        await _until(lambda: consumer.events)
+        _inject(
+            kg,
+            {
+                "type": "subscription_group_delta",
+                "subscription": sub.id,
+                "generation": kg._conn._routes[sub.id].generation,
+                "knowledge_graph": kg.name,
+                "seq": 7,
+                "revision": 10**9,
+                "members": [
+                    {"name": "e", "unchanged": False, "columns": ["a", "b"],
+                     "inserted": [[9, 9]], "retracted": []},
+                    {"name": "f", "unchanged": True, "columns": ["X"],
+                     "inserted": [], "retracted": []},
+                ],
+            },
+        )
+        await kg.execute("+e(2, 2)\n+f(5)")
+        await _group_converges(kg, consumer)
+        assert consumer.kinds() == ["snapshot", "unverified:seq_gap", "resync"]
+        resync = consumer.events[2]
+        assert resync.members["e"].inserted == [E(a=2, b=2)]
+        assert resync.members["f"].inserted == [Row(["X"], [5])]
+
+        await kg.execute(f".unsubscribe {sub.id}")
+        _inject(
+            kg,
+            {
+                "type": "subscription_reset",
+                "subscription": sub.id,
+                "generation": kg._conn._routes[sub.id].generation,
+                "message": "Delta 4 has a row over the message limit.",
+            },
+        )
+        await kg.delete(E(a=1, b=1))
+        await _group_converges(kg, consumer)
+        assert consumer.kinds()[3:] == ["unverified:subscription_reset", "resync"]
+        assert consumer.events[4].members["e"].retracted == [E(a=1, b=1)]
+        assert consumer.events[4].members["f"].unchanged
+        assert sub.stats.resubscribes == 2
+        await consumer.close()
+
+
+async def test_a_group_reconnect_gives_unverified_then_only_what_changed() -> None:
+    async with _session() as (_, fresh):
+        writer = await fresh("group_reconnect")
+        await writer.define(E)
+        await writer.insert([E(a=1, b=1), E(a=2, b=2)])
+        listener = _client()
+        try:
+            kg = listener.knowledge_graph(writer.name)
+            consumer = GroupConsumer(kg.subscribe_group({"e": E, "f": "?f(X)"}))
+            await _until(lambda: len(consumer.rows["e"]) == 2)
+            reconnected = asyncio.Event()
+            listener.events.on("reconnected", callback=lambda _: reconnected.set())
+            assert kg._conn._ws is not None
+            kg._conn._ws.transport.abort()
+            await _until(lambda: consumer.kinds()[-1:] == ["unverified:connection_lost"])
+            await writer.delete(E(a=1, b=1))
+            await asyncio.wait_for(reconnected.wait(), 10)
+            await _group_converges(writer, consumer)
+            assert consumer.kinds() == ["snapshot", "unverified:connection_lost", "resync"]
+            resync = consumer.events[2]
+            assert resync.members["e"].retracted == [E(a=1, b=1)]
+            assert resync.members["e"].inserted == [] and resync.members["f"].unchanged
+            await consumer.close()
+        finally:
+            await listener.close()
+
+
+async def test_groups_refused_at_the_engine() -> None:
+    async with _session() as (_, fresh):
+        kg = await fresh("group_refused")
+        await kg.define(E)
+        await kg.execute("mine(A) <- e(A, _)")
+        cases: list[tuple[dict[str, Any], str]] = [
+            ({"e": E, "page": "?e(A, B), limit(1)"}, "limit_offset"),
+            ({"e": E, "bad": "?e("}, "rejected"),
+            ({"e": E, "mine": "?mine(A)"}, "session_view"),
+        ]
+        for members, reason in cases:
+            with pytest.raises(SubscriptionRejected) as err:
+                await asyncio.wait_for(kg.subscribe_group(members).__anext__(), 10)
+            assert err.value.reason == reason, f"{reason}: {err.value}"

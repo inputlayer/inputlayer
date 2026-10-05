@@ -1,5 +1,6 @@
 //! `.why` proof construction benchmarks: a tiny bound proof over a large
-//! knowledge graph, many findings proven in one call, and recursive proofs.
+//! knowledge graph, many findings proven in one call, and recursive proofs,
+//! including left-recursive closures over cyclic graphs.
 
 // Benchmark setup aborts on failure; `unwrap` is the intended behavior.
 #![allow(clippy::unwrap_used)]
@@ -100,8 +101,7 @@ fn bench_many_findings(c: &mut Criterion) {
 }
 
 /// Recursive proofs over a chain: deep, shared sub-proofs. The rule recurses
-/// on the right; proof search on a left-recursive closure is exponential in
-/// path length and would measure that, not lookups.
+/// on the right.
 fn bench_recursive(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
@@ -124,12 +124,61 @@ fn bench_recursive(c: &mut Criterion) {
     group.finish();
 }
 
+/// `edges` distinct random edges over nodes `1..=nodes`, no self-loops: the
+/// graph of the perf-gate engine suite's `.why` fixture for the same seed.
+fn random_edges(nodes: u64, edges: usize, seed: u64) -> Vec<String> {
+    let mut state = seed;
+    let mut below = |bound: u64| {
+        // SplitMix64
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        (z ^ (z >> 31)) % bound
+    };
+    let mut set = std::collections::BTreeSet::new();
+    while set.len() < edges {
+        let (src, dst) = (below(nodes) + 1, below(nodes) + 1);
+        if src != dst {
+            set.insert((src, dst));
+        }
+    }
+    set.iter().map(|(s, d)| format!("({s}, {d})")).collect()
+}
+
+/// Bound left-recursive closures over cyclic graphs: the perf-gate engine
+/// suite's `.why ?reach(1, Y)` (200 nodes, 300 random edges) and a ring whose
+/// nodes all reach each other. Magic Sets evaluates the bound query under an
+/// adorned relation; proof search reads those tuples instead of re-deriving
+/// the closure around every cycle.
+fn bench_recursive_cyclic(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    let mut group = c.benchmark_group("why_recursive_cyclic");
+    let ring: Vec<String> = (1..=30).map(|i| format!("({i}, {})", i % 30 + 1)).collect();
+    for (name, edges) in [
+        ("random_200_300", random_edges(200, 300, 42)),
+        ("ring_30", ring),
+    ] {
+        let (handler, _tmp) = make_bench_handler();
+        insert(&rt, &handler, "edge", edges);
+        run(&rt, &handler, "+reach(X, Y) <- edge(X, Y)");
+        run(&rt, &handler, "+reach(X, Z) <- reach(X, Y), edge(Y, Z)");
+
+        group.bench_function(name, |b| {
+            b.iter(|| run(&rt, &handler, ".why ?reach(1, Y)"));
+        });
+    }
+    group.finish();
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default()
         .sample_size(20)
         .measurement_time(Duration::from_secs(10))
         .warm_up_time(Duration::from_secs(2));
-    targets = bench_tiny_proof_large_kg, bench_many_findings, bench_recursive
+    targets = bench_tiny_proof_large_kg, bench_many_findings, bench_recursive,
+        bench_recursive_cyclic
 }
 criterion_main!(benches);

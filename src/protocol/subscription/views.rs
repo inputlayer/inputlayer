@@ -1,7 +1,8 @@
 //! Shared views: one evaluation per distinct standing query, however many subscribers it has.
 //!
-//! A view is keyed by its knowledge graph and query text ([`ViewKey`]). Keys are compared in
-//! full: a hash collision never hands one query's rows to another.
+//! A view is keyed by its knowledge graph and query texts ([`ViewKey`]): one query for a plain
+//! subscription, several for a subscription group, whose results are evaluated and published
+//! together. Keys are compared in full: a hash collision never hands one query's rows to another.
 //!
 //! Each view is either *idle* (its [`StandingQuery`] is parked here) or *in flight* (handed
 //! out in a [`Dispatch`], back in a [`Completion`]): at most one evaluation per view. Changes
@@ -12,11 +13,14 @@
 //! most one window (plus an evaluation in flight) after it is seen.
 //!
 //! A completed refresh that changed, failed or recovered the result is the view's next
-//! [`Publication`], and every subscriber's doorbell rings. A subscriber joins at once only a
-//! clean view: one with a current result and no refresh in flight or due. Otherwise it waits
-//! for an evaluation that has seen every change seen before it joined, started at once if
-//! idle, so its snapshot includes every write acknowledged before it subscribed. A retry of a
-//! failed view failing as before is no news to the others.
+//! [`Publication`], and every subscriber's doorbell rings; one that left it unchanged only
+//! advances the revision the result is exact at. A subscriber joins at once only a clean view:
+//! one with a current result, no refresh in flight or due, and a revision no older than the
+//! knowledge graph's when it subscribed, or older but with nothing it depends on changed since,
+//! which advances it to the graph's. Otherwise it waits for an evaluation that has seen
+//! every change seen before it joined, started at once if idle, so its snapshot includes every
+//! write acknowledged before it subscribed and its revision is as recent as the state it read.
+//! A retry of a failed view failing as before is no news to the others.
 
 use std::collections::hash_map::RandomState;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -26,12 +30,13 @@ use std::time::{Duration, Instant};
 
 use super::publication::{Doorbell, Outcome, Publication, SubscriberId, ViewCell};
 use super::{ChangeSet, Dependencies, Row, StandingQuery};
+use crate::storage_engine::KnowledgeGraphSnapshot;
 
 mod evaluation;
 mod publish;
 
 pub use evaluation::{Completion, Dispatch};
-use publish::{publish, start};
+use publish::{advance, publish, start};
 
 /// Identity of a shared view: what its result is a function of.
 ///
@@ -45,8 +50,8 @@ use publish::{publish, start};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ViewKey {
     pub knowledge_graph: String,
-    /// The trimmed query text; spellings differ in column names, so in views.
-    pub query: String,
+    /// The trimmed query texts, in order; spellings differ in column names, so in views.
+    pub queries: Vec<String>,
 }
 
 /// Unique per registry; never reused.
@@ -57,8 +62,8 @@ pub type ViewId = u64;
 pub struct Attachment {
     pub cell: Arc<ViewCell>,
     pub publication: Arc<Publication>,
-    /// The snapshot's rows, sorted, when the view was created for it.
-    pub initial_rows: Option<Arc<Vec<Row>>>,
+    /// The snapshot's rows, sorted, one list per query, when the view was created for it.
+    pub initial_rows: Option<Arc<Vec<Vec<Row>>>>,
 }
 
 /// Result of [`ViewRegistry::attach`].
@@ -84,7 +89,7 @@ struct Live {
 }
 
 impl Live {
-    fn attachment(&self, initial_rows: Option<Arc<Vec<Row>>>) -> Attachment {
+    fn attachment(&self, initial_rows: Option<Arc<Vec<Vec<Row>>>>) -> Attachment {
         Attachment {
             cell: Arc::clone(&self.cell),
             publication: Arc::clone(&self.latest),
@@ -128,7 +133,7 @@ impl View {
     fn release_waiting(
         &mut self,
         failure: Option<String>,
-        initial_rows: Option<Arc<Vec<Row>>>,
+        initial_rows: Option<Arc<Vec<Vec<Row>>>>,
     ) -> Vec<(SubscriberId, Result<Attachment, String>)> {
         let answer = match (failure, &self.live) {
             (None, Some(live)) => Ok(live.attachment(initial_rows)),
@@ -191,39 +196,51 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
     }
 
     /// Attach `doorbell`'s subscriber to the view of `key`, creating it (with the query
-    /// `create` builds) if there is none.
+    /// `create` builds) if there is none. `graph` is the knowledge graph's snapshot when it
+    /// subscribed: its snapshot is exact at that revision or a later one.
     pub fn attach(
         &mut self,
         key: ViewKey,
         doorbell: Arc<Doorbell>,
+        graph: Option<&KnowledgeGraphSnapshot>,
         create: impl FnOnce() -> Box<dyn StandingQuery>,
     ) -> Attach {
         let subscriber = doorbell.id();
+        let revision = graph.map_or(0, |graph| graph.revision);
         if let Some(id) = self.keys.get(&key).copied() {
             if let Some(view) = self.views.get_mut(&id) {
                 self.subscribers.insert(subscriber, id);
                 let clean = view.query.is_some() && view.due.is_none();
-                return match &view.live {
-                    Some(live) if clean && !matches!(live.latest.outcome, Outcome::Failed(_)) => {
-                        let attachment = live.attachment(None);
-                        view.subscribers.insert(subscriber, doorbell);
-                        Attach::Attached(attachment)
+                let dependencies = &view.dependencies;
+                let current = view.live.as_mut().filter(|live| {
+                    let latest = &live.latest;
+                    clean
+                        && !matches!(latest.outcome, Outcome::Failed(_))
+                        && (latest.revision >= revision
+                            || graph.is_some_and(|graph| {
+                                !dependencies.changed_after(latest.revision, graph.changes())
+                            }))
+                });
+                if let Some(live) = current {
+                    if live.latest.revision < revision {
+                        advance(live, revision);
                     }
-                    _ if view.query.is_none() && view.pending.is_some() => {
-                        view.waiting_next.push(doorbell);
-                        Attach::Waiting(None)
-                    }
-                    _ => {
-                        view.waiting.push(doorbell);
-                        if view.query.is_some() {
-                            view.retry = view.due.is_none();
-                        }
-                        if let Some(due) = view.due.take() {
-                            self.schedule.remove(&(due, id));
-                        }
-                        Attach::Waiting(take_dispatch(id, view))
-                    }
-                };
+                    let attachment = live.attachment(None);
+                    view.subscribers.insert(subscriber, doorbell);
+                    return Attach::Attached(attachment);
+                }
+                if view.query.is_none() && view.pending.is_some() {
+                    view.waiting_next.push(doorbell);
+                    return Attach::Waiting(None);
+                }
+                view.waiting.push(doorbell);
+                if view.query.is_some() {
+                    view.retry = view.due.is_none();
+                }
+                if let Some(due) = view.due.take() {
+                    self.schedule.remove(&(due, id));
+                }
+                return Attach::Waiting(take_dispatch(id, view));
             }
         }
         self.next_view += 1;

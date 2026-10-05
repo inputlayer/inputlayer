@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from inputlayer import _meta
 from inputlayer._ast import AggExpr, BoolExpr, Expr, OrderedColumn
 from inputlayer._ast import Column as AstColumn
+from inputlayer._literal import collect_params, ms_to_datetime
 from inputlayer._literal import encode as encode_literal
-from inputlayer._literal import ms_to_datetime
 from inputlayer._proxy import ColumnProxy, RelationProxy, RelationRef
 from inputlayer.auth import AclEntry
 from inputlayer.compiler import (
@@ -49,14 +49,19 @@ from inputlayer.session import Session
 from inputlayer.subscription import (
     DEFAULT_QUEUE,
     Change,
+    GroupSubscription,
     Live,
+    ReadResult,
+    Shape,
     Subscription,
     SubscriptionHandle,
+    check_names,
     iql_shape,
     plan_shape,
     run_callback,
     watch_changes,
 )
+from inputlayer.subscription import read as read_snapshot
 
 R = TypeVar("R", bound=Relation)
 
@@ -271,14 +276,22 @@ class KnowledgeGraph:
         # il_txn_pending, il_assert).
         self._guard_relations_declared = False
 
-    async def _execute(self, iql: str, *, timeout: float | None = None) -> ResultResponse:
+    async def _execute(
+        self,
+        iql: str,
+        *,
+        timeout: float | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> ResultResponse:
         """Execute a statement on this KG's own connection.
 
         The connection is bound to this KG when it opens (``?kg=``), so no
         statement ever switches it. Engine failures raise ``QueryError``
-        naming *iql*.
+        naming *iql*. *params* are the values of its ``$name`` references.
         """
-        return await _naming_query(iql, self._conn.execute(iql, timeout=timeout))
+        return await _naming_query(
+            iql, self._conn.execute(iql, timeout=timeout, params=params)
+        )
 
     @property
     def name(self) -> str:
@@ -353,37 +366,39 @@ class KnowledgeGraph:
         data: dict | list[dict] | Any | None = None,
     ) -> InsertResult:
         """Insert facts into the knowledge graph."""
-        if isinstance(facts, type) and issubclass(facts, Relation):
-            # Bulk mode: relation class + data
-            if data is None:
-                raise ValueError("Must provide data when passing a Relation class")
-            rel_cls = facts
-            if isinstance(data, dict):
-                instances = [rel_cls(**data)]
-            elif isinstance(data, list):
-                instances = [rel_cls(**d) for d in data]
+        # Values travel as parameters: the engine binds them without parsing.
+        with collect_params() as params:
+            if isinstance(facts, type) and issubclass(facts, Relation):
+                # Bulk mode: relation class + data
+                if data is None:
+                    raise ValueError("Must provide data when passing a Relation class")
+                rel_cls = facts
+                if isinstance(data, dict):
+                    instances = [rel_cls(**data)]
+                elif isinstance(data, list):
+                    instances = [rel_cls(**d) for d in data]
+                else:
+                    # Try pandas DataFrame
+                    try:
+                        instances = [rel_cls(**row) for row in data.to_dict("records")]
+                    except Exception as err:
+                        raise TypeError(
+                            f"Unsupported data type: {type(data).__name__}"
+                        ) from err
+                if len(instances) == 1:
+                    iql = compile_insert(instances[0])
+                else:
+                    iql = compile_bulk_insert(rel_cls, instances)
+            elif isinstance(facts, list):
+                if not facts:
+                    return InsertResult(count=0)
+                iql = compile_bulk_insert(type(facts[0]), facts)
+            elif isinstance(facts, Relation):
+                iql = compile_insert(facts)
             else:
-                # Try pandas DataFrame
-                try:
-                    instances = [rel_cls(**row) for row in data.to_dict("records")]
-                except Exception as err:
-                    raise TypeError(
-                        f"Unsupported data type: {type(data).__name__}"
-                    ) from err
-            if len(instances) == 1:
-                iql = compile_insert(instances[0])
-            else:
-                iql = compile_bulk_insert(rel_cls, instances)
-        elif isinstance(facts, list):
-            if not facts:
-                return InsertResult(count=0)
-            iql = compile_bulk_insert(type(facts[0]), facts)
-        elif isinstance(facts, Relation):
-            iql = compile_insert(facts)
-        else:
-            raise TypeError(f"Unsupported facts type: {type(facts).__name__}")
+                raise TypeError(f"Unsupported facts type: {type(facts).__name__}")
 
-        result = await self._execute(iql)
+        result = await self._execute(iql, params=params)
         return InsertResult(count=_inserted_count(result))
 
     # ── Delete ────────────────────────────────────────────────────────
@@ -395,24 +410,27 @@ class KnowledgeGraph:
         where: Callable | None = None,
     ) -> DeleteResult:
         """Delete facts from the knowledge graph."""
-        if isinstance(facts, type) and issubclass(facts, Relation) and where is not None:
-            # Conditional delete
-            rel_cls = facts
-            proxy = RelationProxy(
-                Relation._resolve_name(rel_cls), columns=tuple(Relation._get_columns(rel_cls))
-            )
-            condition = where(proxy)
-            iql = compile_conditional_delete(rel_cls, condition)
-        elif isinstance(facts, list):
-            if facts:
-                await self._execute("\n".join(compile_delete(fact) for fact in facts))
-            return DeleteResult(count=len(facts))
-        elif isinstance(facts, Relation):
-            iql = compile_delete(facts)
-        else:
-            raise TypeError(f"Unsupported facts type: {type(facts).__name__}")
+        with collect_params() as params:
+            if isinstance(facts, type) and issubclass(facts, Relation) and where is not None:
+                # Conditional delete
+                rel_cls = facts
+                proxy = RelationProxy(
+                    Relation._resolve_name(rel_cls), columns=tuple(Relation._get_columns(rel_cls))
+                )
+                condition = where(proxy)
+                iql = compile_conditional_delete(rel_cls, condition)
+            elif isinstance(facts, list):
+                if not facts:
+                    return DeleteResult(count=0)
+                iql = "\n".join(compile_delete(fact) for fact in facts)
+            elif isinstance(facts, Relation):
+                iql = compile_delete(facts)
+            else:
+                raise TypeError(f"Unsupported facts type: {type(facts).__name__}")
 
-        result = await self._execute(iql)
+        result = await self._execute(iql, params=params)
+        if isinstance(facts, list):
+            return DeleteResult(count=len(facts))
         return DeleteResult(count=len(result.rows) if result.rows else 0)
 
     async def retract(
@@ -441,10 +459,11 @@ class KnowledgeGraph:
     async def _commit_program(self, program: Program, strict: bool) -> ProgramResult:
         if program.guarded:
             await self._ensure_guard_relations()
-        compiled = program.compile(strict)
+        with collect_params() as params:
+            compiled = program.compile(strict)
         iql = compiled.iql
         try:
-            result = await self._execute(iql)
+            result = await self._execute(iql, params=params)
         except StatementFailedError as err:
             if compiled.assert_index is not None and err.errors[0].index == compiled.assert_index:
                 raise PreconditionFailed(iql, err.result) from err
@@ -467,7 +486,9 @@ class KnowledgeGraph:
         )
         if strict and not applied:
             raise PreconditionFailed(iql, result)
-        return ProgramResult(applied=applied, inserted=inserted, deleted=deleted, iql=iql)
+        return ProgramResult(
+            applied=applied, inserted=inserted, deleted=deleted, iql=iql, params=params
+        )
 
     async def claim(
         self,
@@ -493,9 +514,10 @@ class KnowledgeGraph:
         is *row* when won, the row already there when lost, and None when the
         *when* guard did not hold.
         """
-        iql = compile_claim(row, when=when, unless=unless, key=key).iql
+        with collect_params() as params:
+            iql = compile_claim(row, when=when, unless=unless, key=key).iql
         try:
-            result = await self._execute(iql)
+            result = await self._execute(iql, params=params)
         except QueryError as err:
             raise _as_conflict(err, iql) from err
         rel = type(row)
@@ -735,27 +757,10 @@ class KnowledgeGraph:
                 if not change.verified:
                     pause()
         """
-        if iql is not None:
-            if select or join or on or where or computed:
-                raise CompileError(
-                    "subscribe takes a query or iql=, not both",
-                    hint="put the whole query in iql=, or drop iql=",
-                )
-            shape = iql_shape(iql)
-        else:
-            if limit is not None or offset is not None:
-                raise SubscriptionRejected(
-                    "A subscription tracks the whole result: remove limit and offset "
-                    "from the query.",
-                    "limit_offset",
-                )
-            del order_by  # a result is a set: its order means nothing to deltas
-            plan, relation_cls = self._plan(
-                *select, join=join, on=on, where=where,
-                order_by=None, limit=None, offset=None, **computed,
-            )
-            aggregate = any(isinstance(s, AggExpr) for s in (*select, *computed.values()))
-            shape = plan_shape(plan, relation_cls, aggregate=aggregate)
+        shape = self._shape(
+            *select, join=join, on=on, where=where, order_by=order_by,
+            limit=limit, offset=offset, iql=iql, read=False, **computed,
+        )
         return Subscription(
             self._conn,
             shape,
@@ -763,6 +768,153 @@ class KnowledgeGraph:
             timeout=timeout,
             session_rules=self._session.list_rules,
         )
+
+    def subscribe_group(
+        self,
+        members: Mapping[str, Any],
+        *,
+        queue: int = DEFAULT_QUEUE,
+        timeout: float | None = None,
+    ) -> GroupSubscription:
+        """Subscribe to several queries kept current together: an async
+        iterator of ``GroupChange`` events, with every member's change under
+        its name. ``members`` maps a name to a target (see ``read``).
+
+        After every verified event (``snapshot``, ``delta``, ``resync``),
+        every member is its query's exact answer at the event's one
+        ``revision``: rows two members share move in the same event. A
+        ``delta`` lists every member, ``unchanged`` when its rows did not
+        change (a change outside a member's projection is no change); a
+        refresh that changes no member delivers nothing. ``unverified`` and
+        ``resync`` cover the whole group, as for ``subscribe``, and so do
+        ``queue`` and ``timeout``. Commits coalesce: a row that appears and
+        disappears between two refreshes is never seen.
+
+        Raises ``SubscriptionRejected`` for a member ``subscribe`` refuses,
+        and for no members or an empty name::
+
+            async for change in kg.subscribe_group({"orders": Order, "eta": Eta}):
+                orders, eta = change.members["orders"], change.members["eta"]
+                ...  # both are exact at change.revision
+        """
+        shapes = self._shapes(members, read=False)
+        return GroupSubscription(
+            self._conn,
+            shapes,
+            queue=queue,
+            timeout=timeout,
+            session_rules=self._session.list_rules,
+        )
+
+    async def read(
+        self, queries: Mapping[str, Any], *, timeout: float | None = None
+    ) -> ReadResult:
+        """Run several queries on one snapshot: every result is its query's
+        exact answer at ``result.revision``, whatever commits meanwhile.
+
+        ``queries`` maps a name to a target: a relation class, a column or
+        expression, a tuple of them (the arguments of ``query``), a dict of
+        ``query``'s arguments (``{"select": [Order.id], "where": ...,
+        "limit": 10}``), or raw IQL (``"?order(S, O)"``). Rows are shaped as
+        ``subscribe`` shapes them, in the engine's order: ``order_by``,
+        ``limit`` and ``offset`` apply. A read sees persistent data only, as
+        a subscription does: session facts and rules are not visible.
+
+        ``timeout`` (seconds) is the whole read's deadline. The read fails as
+        a whole, with the error naming the failing query; ``truncated`` names
+        the results a ``limit`` or the engine's result cap cut. Raises
+        ``SubscriptionRejected``, naming the query, for a target that is not
+        one ``?`` query (an OR condition, an aggregate, a negated constant, a
+        page of a projection, ``offset`` without ``limit``) or that reads a
+        session rule (checked alongside the read, at no extra round trip)::
+
+            snap = await kg.read({"orders": Order, "eta": Eta})
+            snap.results["orders"], snap.results["eta"]  # both at snap.revision
+        """
+        return await read_snapshot(
+            self._conn,
+            self._shapes(queries, read=True),
+            timeout=timeout,
+            session_rules=lambda: self._session.list_rules(timeout=timeout),
+        )
+
+    def _shapes(self, targets: Mapping[str, Any], *, read: bool) -> dict[str, Shape]:
+        """Each target's shape by name; a refusal names its query."""
+        check_names(list(targets))
+        shapes: dict[str, Shape] = {}
+        for name, target in targets.items():
+            try:
+                shapes[name] = self._target_shape(target, read=read)
+            except SubscriptionRejected as err:
+                raise SubscriptionRejected(
+                    f"Query '{name}': {err.message}", err.reason, query=err.query
+                ) from None
+            except CompileError as err:
+                named = CompileError(f"Query '{name}': {err}")
+                named.hint = err.hint
+                raise named from None
+        return shapes
+
+    def _target_shape(self, target: Any, *, read: bool) -> Shape:
+        """The shape of one target of ``read`` or ``subscribe_group``."""
+        if isinstance(target, str):
+            return iql_shape(target, read=read)
+        if isinstance(target, Mapping):
+            options = dict(target)
+            select = options.pop("select", ())
+            if not isinstance(select, (list, tuple)):
+                select = (select,)
+            return self._shape(*select, read=read, **options)
+        if isinstance(target, (list, tuple)):
+            return self._shape(*target, read=read)
+        return self._shape(target, read=read)
+
+    def _shape(
+        self,
+        *select: Any,
+        join: list[type[Relation] | RelationRef] | None = None,
+        on: Callable[..., Any] | None = None,
+        where: Callable[..., Any] | None = None,
+        order_by: ColumnProxy | OrderedColumn | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        iql: str | None = None,
+        read: bool,
+        **computed: Any,
+    ) -> Shape:
+        """The one ``?`` query of a subscription, or of a read (which keeps
+        order and pagination), refusing what cannot be one."""
+        if iql is not None:
+            if select or join or on or where or computed:
+                raise CompileError(
+                    f"{'read' if read else 'subscribe'} takes a query or iql=, not both",
+                    hint="put the whole query in iql=, or drop iql=",
+                )
+            if limit is not None or offset is not None or (read and order_by is not None):
+                raise SubscriptionRejected(
+                    "iql= takes the whole query as written: drop limit, offset and order_by.",
+                    "limit_offset",
+                )
+            return iql_shape(iql, read=read)
+        if read and offset is not None and limit is None:
+            raise SubscriptionRejected(
+                "A read pages with limit: give offset together with limit, or drop offset.",
+                "limit_offset",
+            )
+        if not read:
+            if limit is not None or offset is not None:
+                raise SubscriptionRejected(
+                    "A subscription tracks the whole result: remove limit and offset "
+                    "from the query.",
+                    "limit_offset",
+                )
+            order_by = None  # a result is a set: its order means nothing to deltas
+        plan, relation_cls = self._plan(
+            *select, join=join, on=on, where=where,
+            order_by=order_by, limit=limit, offset=offset, **computed,
+        )
+        aggregate = any(isinstance(s, AggExpr) for s in (*select, *computed.values()))
+        return plan_shape(plan, relation_cls, aggregate=aggregate, read=read)
 
     def watch(self, *select: Any, **kwargs: Any) -> AsyncIterator[Live[Any]]:
         """The whole current result of a subscription (the arguments of
@@ -898,20 +1050,21 @@ class KnowledgeGraph:
 
     async def define_rules(self, *targets: type[Derived]) -> None:
         """Deploy persistent rule definitions in one program."""
-        clauses = [
-            compile_rule(
-                Relation._resolve_name(target),
-                Relation._get_columns(target),
-                clause.select_map,
-                clause.relations,
-                clause.condition,
-                persistent=True,
-            )
-            for target in targets
-            for clause in target.rules
-        ]
+        with collect_params() as params:
+            clauses = [
+                compile_rule(
+                    Relation._resolve_name(target),
+                    Relation._get_columns(target),
+                    clause.select_map,
+                    clause.relations,
+                    clause.condition,
+                    persistent=True,
+                )
+                for target in targets
+                for clause in target.rules
+            ]
         if clauses:
-            await self._execute("\n".join(clauses))
+            await self._execute("\n".join(clauses), params=params)
 
     async def list_rules(self) -> list[RuleInfo]:
         """List all rules in this KG."""
@@ -945,15 +1098,16 @@ class KnowledgeGraph:
         else:
             head_name = name
             head_columns = list(clause.select_map.keys())
-        iql = compile_rule(
-            head_name,
-            head_columns,
-            clause.select_map,
-            clause.relations,
-            clause.condition,
-            persistent=True,
-        )
-        await self._execute(f"{_meta.rule_remove(head_name, index)}\n{iql}")
+        with collect_params() as params:
+            iql = compile_rule(
+                head_name,
+                head_columns,
+                clause.select_map,
+                clause.relations,
+                clause.condition,
+                persistent=True,
+            )
+        await self._execute(f"{_meta.rule_remove(head_name, index)}\n{iql}", params=params)
 
     async def clear_rule(self, name: str | type) -> None:
         """Clear a rule's clauses."""
@@ -1147,14 +1301,29 @@ class KnowledgeGraph:
             details=[(row[0], int(row[1])) for row in result.rows if len(row) > 1],
         )
 
-    async def execute(self, iql: str, *, timeout: float | None = None) -> ResultSet:
+    async def execute(
+        self,
+        iql: str,
+        *,
+        timeout: float | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> ResultSet:
         """Execute raw IQL.
 
         ``timeout`` (seconds) is the request's deadline, default the client's
         ``default_timeout``; past it the engine stops the program before it
         commits and ``DeadlineExceeded`` is raised.
+
+        ``params`` binds the program's ``$name`` references to values sent
+        beside its text, never parsed as IQL: pass every value you did not
+        write yourself this way::
+
+            await kg.execute("+eta($shipment, $due)", params={"shipment": s, "due": d})
+
+        A value is typed by its JSON form; ``{"float": 2}`` and
+        ``{"int": "9007199254740993"}`` name the type explicitly.
         """
-        result = await self._execute(iql, timeout=timeout)
+        result = await self._execute(iql, timeout=timeout, params=params)
         return ResultSet(
             columns=result.columns,
             rows=result.rows,

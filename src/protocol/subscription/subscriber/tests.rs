@@ -12,7 +12,7 @@ const KG: &str = "kg";
 fn key() -> ViewKey {
     ViewKey {
         knowledge_graph: KG.to_string(),
-        query: "?a(X)".to_string(),
+        queries: vec!["?a(X)".to_string()],
     }
 }
 
@@ -34,7 +34,7 @@ impl Fixture {
         let Attach::Waiting(Some(first)) =
             fixture
                 .registry
-                .attach(key(), Arc::clone(&bell), || Scripted::boxed(steps))
+                .attach(key(), Arc::clone(&bell), None, || Scripted::boxed(steps))
         else {
             panic!("a new view evaluates");
         };
@@ -49,9 +49,9 @@ impl Fixture {
     fn join(&mut self, id: SubscriberId) -> Subscriber {
         let (bell, mailbox) = doorbell(id);
         self.mailboxes.push(mailbox);
-        let Attach::Attached(attachment) = self
-            .registry
-            .attach(key(), Arc::clone(&bell), || Scripted::boxed([]))
+        let Attach::Attached(attachment) =
+            self.registry
+                .attach(key(), Arc::clone(&bell), None, || Scripted::boxed([]))
         else {
             panic!("joins the live view");
         };
@@ -99,13 +99,15 @@ fn error(push: Option<SubscriptionPush>) -> String {
 async fn snapshot_lists_the_result_for_creator_and_joiner() {
     let (mut fixture, _) = Fixture::new(vec![ok(&[3, 1, 2])]).await;
     let (bell, _mailbox) = doorbell(9);
-    let Attach::Attached(attachment) = fixture.registry.attach(key(), bell, || Scripted::boxed([]))
+    let Attach::Attached(attachment) = fixture
+        .registry
+        .attach(key(), bell, None, || Scripted::boxed([]))
     else {
         panic!("joins");
     };
     let snapshot = Snapshot::of(&attachment);
-    assert_eq!(snapshot.rows, rows(&[1, 2, 3]));
-    assert_eq!(snapshot.columns, ["x"]);
+    assert_eq!(snapshot.results[0].rows, rows(&[1, 2, 3]));
+    assert_eq!(snapshot.results[0].columns, ["x"]);
     assert_eq!(snapshot.revision, 1);
 }
 
@@ -237,4 +239,222 @@ async fn rows_keep_their_exact_values() {
     fixture.commit().await;
     let (_, _, inserted, _) = delta(subscriber.deliver(|_| true));
     assert_eq!(inserted, vec![vec![json!(2)]]);
+}
+
+#[tokio::test]
+async fn resuming_takes_up_a_wake_up_rung_before_registration() {
+    let (mut fixture, mut subscriber) = Fixture::new(vec![
+        ok(&[1]),
+        ok(&[1, 2]),
+        ok(&[1, 2, 3]),
+        ok(&[1, 2, 3, 4]),
+    ])
+    .await;
+    // The connection takes the wake-up before it registers the subscriber,
+    // and drops it unanswered: later rings queue nothing.
+    fixture.commit().await;
+    assert_eq!(fixture.mailboxes[0].try_recv().unwrap(), 1);
+    fixture.commit().await;
+    assert!(
+        fixture.mailboxes[0].try_recv().is_err(),
+        "still marked queued"
+    );
+
+    subscriber.resume();
+    assert_eq!(
+        fixture.mailboxes[0].try_recv().unwrap(),
+        1,
+        "rings for the news"
+    );
+    assert_eq!(
+        delta(subscriber.deliver(|_| true)),
+        (1, 3, rows(&[2, 3]), vec![])
+    );
+    fixture.commit().await;
+    assert_eq!(
+        fixture.mailboxes[0].try_recv().unwrap(),
+        1,
+        "answered: rings again"
+    );
+    assert_eq!(
+        delta(subscriber.deliver(|_| true)),
+        (2, 4, rows(&[4]), vec![])
+    );
+}
+
+#[tokio::test]
+async fn resuming_with_nothing_new_queues_no_wake_up() {
+    let (mut fixture, subscriber) = Fixture::new(vec![ok(&[1]), ok(&[1, 2])]).await;
+    subscriber.resume();
+    assert!(fixture.mailboxes[0].try_recv().is_err(), "no news");
+    fixture.commit().await;
+    assert_eq!(fixture.mailboxes[0].try_recv().unwrap(), 1);
+}
+
+mod groups {
+    use super::*;
+    use crate::protocol::subscription::testing::GroupStep;
+    use inputlayer_ws_protocol::GroupMemberDelta;
+
+    fn group_key() -> ViewKey {
+        ViewKey {
+            knowledge_graph: KG.to_string(),
+            queries: vec!["?a(X)".to_string(), "?b(X)".to_string()],
+        }
+    }
+
+    fn step(a: &[i64], b: &[i64]) -> GroupStep {
+        Ok(vec![(a.to_vec(), "a"), (b.to_vec(), "b")])
+    }
+
+    /// A group view of `?a(X)` and `?b(X)`, its first subscriber, and the
+    /// mailbox it rings.
+    async fn fixture(
+        steps: Vec<GroupStep>,
+    ) -> (ViewRegistry, Subscriber, UnboundedReceiver<SubscriberId>) {
+        let mut registry = ViewRegistry::new(Duration::ZERO);
+        let (bell, mailbox) = doorbell(1);
+        let Attach::Waiting(Some(first)) =
+            registry.attach(group_key(), Arc::clone(&bell), None, || {
+                Scripted::group(steps)
+            })
+        else {
+            panic!("a new view evaluates");
+        };
+        let mut completed = registry.on_complete(first.run().await, Instant::now());
+        let attachment = completed.replies.remove(0).1.unwrap();
+        let members: Arc<[String]> = Arc::from(vec!["orders".to_string(), "cands".to_string()]);
+        let subscriber = Subscriber::new("w", 3, KG, bell, &attachment).grouped(members);
+        (registry, subscriber, mailbox)
+    }
+
+    async fn commit(registry: &mut ViewRegistry) {
+        let dispatch = registry
+            .on_change(KG, &ChangeSet::relation("a"), Instant::now())
+            .remove(0);
+        registry.on_complete(dispatch.run().await, Instant::now());
+    }
+
+    fn group_delta(push: Option<SubscriptionPush>) -> (u64, u64, Vec<GroupMemberDelta>) {
+        match push {
+            Some(SubscriptionPush::SubscriptionGroupDelta {
+                subscription,
+                generation,
+                knowledge_graph,
+                seq,
+                revision,
+                members,
+            }) => {
+                assert_eq!((subscription.as_str(), generation), ("w", 3));
+                assert_eq!(knowledge_graph, KG);
+                (seq, revision, members)
+            }
+            other => panic!("expected a group delta, got {other:?}"),
+        }
+    }
+
+    fn member(name: &str, inserted: &[i64], retracted: &[i64]) -> GroupMemberDelta {
+        GroupMemberDelta {
+            name: name.to_string(),
+            unchanged: inserted.is_empty() && retracted.is_empty(),
+            columns: vec!["x".to_string()],
+            inserted: rows(inserted),
+            retracted: rows(retracted),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_group_delta_lists_every_member_and_marks_the_unchanged() {
+        let (mut registry, mut subscriber, _mailbox) =
+            fixture(vec![step(&[1], &[5]), step(&[1, 2], &[5])]).await;
+        assert_eq!(subscriber.weight(), 2);
+        commit(&mut registry).await;
+        assert_eq!(
+            group_delta(subscriber.deliver(|_| true)),
+            (
+                1,
+                2,
+                vec![member("orders", &[2], &[]), member("cands", &[], &[])]
+            )
+        );
+        assert!(subscriber.deliver(|_| true).is_none(), "nothing new");
+    }
+
+    #[tokio::test]
+    async fn a_lagging_group_subscriber_gets_every_member_combined_once() {
+        let (mut registry, mut subscriber, _mailbox) = fixture(vec![
+            step(&[1], &[5]),
+            step(&[1, 2], &[5]),
+            step(&[2], &[6]),
+        ])
+        .await;
+        commit(&mut registry).await;
+        commit(&mut registry).await;
+        assert_eq!(
+            group_delta(subscriber.deliver(|_| true)),
+            (
+                1,
+                3,
+                vec![member("orders", &[2], &[1]), member("cands", &[6], &[5])]
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn a_lagging_subscriber_sees_a_member_changed_and_changed_back_as_unchanged() {
+        let (mut registry, mut subscriber, _mailbox) = fixture(vec![
+            step(&[1], &[5]),
+            step(&[1, 2], &[5]),
+            step(&[1], &[6]),
+        ])
+        .await;
+        commit(&mut registry).await;
+        commit(&mut registry).await;
+        assert_eq!(
+            group_delta(subscriber.deliver(|_| true)),
+            (
+                1,
+                3,
+                vec![member("orders", &[], &[]), member("cands", &[6], &[5])]
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_group_refresh_is_one_error_and_the_next_delta_follows_it() {
+        let (mut registry, mut subscriber, _mailbox) = fixture(vec![
+            step(&[1], &[5]),
+            Err("?a(X): over the cap".to_string()),
+            step(&[1, 2], &[6]),
+        ])
+        .await;
+        commit(&mut registry).await;
+        assert_eq!(error(subscriber.deliver(|_| true)), "?a(X): over the cap");
+        commit(&mut registry).await;
+        assert_eq!(
+            group_delta(subscriber.deliver(|_| true)),
+            (
+                1,
+                3,
+                vec![member("orders", &[2], &[]), member("cands", &[6], &[5])]
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn a_group_snapshot_lists_every_member() {
+        let mut registry = ViewRegistry::new(Duration::ZERO);
+        let (bell, _mailbox) = doorbell(1);
+        let Attach::Waiting(Some(first)) = registry.attach(group_key(), bell, None, || {
+            Scripted::group(vec![step(&[2, 1], &[])])
+        }) else {
+            panic!("a new view evaluates");
+        };
+        let mut completed = registry.on_complete(first.run().await, Instant::now());
+        let snapshot = Snapshot::of(&completed.replies.remove(0).1.unwrap());
+        assert_eq!(snapshot.results.len(), 2);
+        assert_eq!(snapshot.results[0].rows, rows(&[1, 2]));
+        assert!(snapshot.results[1].rows.is_empty());
+        assert_eq!(snapshot.revision, 1);
+    }
 }

@@ -72,16 +72,21 @@ async fn encode(push: SubscriptionPush) -> Result<Vec<String>, Undeliverable> {
 /// serializing anything. Counting stops once past [`FRAME_BUDGET`], so the
 /// walk covers at most about one frame's worth of rows.
 fn estimated_bytes(push: &SubscriptionPush) -> usize {
-    let SubscriptionPush::SubscriptionDelta {
-        inserted,
-        retracted,
-        ..
-    } = push
-    else {
-        return 0;
+    let rows: Box<dyn Iterator<Item = &Row>> = match push {
+        SubscriptionPush::SubscriptionDelta {
+            inserted,
+            retracted,
+            ..
+        } => Box::new(inserted.iter().chain(retracted)),
+        SubscriptionPush::SubscriptionGroupDelta { members, .. } => Box::new(
+            members
+                .iter()
+                .flat_map(|member| member.inserted.iter().chain(&member.retracted)),
+        ),
+        _ => return 0,
     };
     let mut total = 0;
-    for row in inserted.iter().chain(retracted) {
+    for row in rows {
         total += row_width(row);
         if total > FRAME_BUDGET {
             break;

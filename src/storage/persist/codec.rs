@@ -76,9 +76,13 @@ fn encode_value(value: &Value, out: &mut Vec<u8>) {
 pub fn decode_tuple(bytes: &[u8]) -> Result<Tuple, String> {
     let mut r = Reader { bytes, pos: 0 };
     let arity = r.len()?;
-    let values = (0..arity)
-        .map(|_| r.value())
-        .collect::<Result<Vec<_>, _>>()?;
+    // Exactly `arity` values: decoded tuples are kept as loaded, so spare
+    // capacity would stay resident. Each value takes at least one byte, which
+    // bounds the allocation a corrupt arity can ask for.
+    let mut values = Vec::with_capacity(arity.min(bytes.len()));
+    for _ in 0..arity {
+        values.push(r.value()?);
+    }
     if r.pos != bytes.len() {
         return Err(format!("{} trailing bytes", bytes.len() - r.pos));
     }

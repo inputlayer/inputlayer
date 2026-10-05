@@ -291,10 +291,14 @@ pub fn find_sccs<N: Clone + Eq + Hash>(graph: &HashMap<N, HashSet<N>>) -> Vec<Ve
     sccs
 }
 
-/// Helper function for Tarjan's algorithm
+/// Helper function for Tarjan's algorithm.
+///
+/// Walks the DFS with an explicit frame stack: a dependency chain as long as
+/// a client's rules (thousands of links) would overflow the thread stack if
+/// each link were a recursive call.
 #[allow(clippy::too_many_arguments)]
 fn strongconnect<N: Clone + Eq + Hash>(
-    v: &N,
+    root: &N,
     graph: &HashMap<N, HashSet<N>>,
     index: &mut usize,
     stack: &mut Vec<N>,
@@ -303,46 +307,67 @@ fn strongconnect<N: Clone + Eq + Hash>(
     on_stack: &mut HashSet<N>,
     sccs: &mut Vec<Vec<N>>,
 ) {
-    // Set the depth index for v
-    indices.insert(v.clone(), *index);
-    lowlinks.insert(v.clone(), *index);
-    *index += 1;
-    stack.push(v.clone());
-    on_stack.insert(v.clone());
+    let no_neighbors = HashSet::new();
+    // Each frame is a node whose successors are being considered
+    let mut frames = Vec::new();
+    let mut next = Some(root.clone());
 
-    // Consider successors of v
-    if let Some(neighbors) = graph.get(v) {
-        for w in neighbors {
+    loop {
+        if let Some(v) = next.take() {
+            // Set the depth index for v
+            indices.insert(v.clone(), *index);
+            lowlinks.insert(v.clone(), *index);
+            *index += 1;
+            stack.push(v.clone());
+            on_stack.insert(v.clone());
+            let neighbors = graph.get(&v).unwrap_or(&no_neighbors).iter();
+            frames.push((v, neighbors));
+        }
+        let Some((v, neighbors)) = frames.last_mut() else {
+            break;
+        };
+
+        // Consider the next successor of v
+        if let Some(w) = neighbors.next() {
             if !indices.contains_key(w) {
-                // Successor w has not been visited; recurse
-                strongconnect(w, graph, index, stack, indices, lowlinks, on_stack, sccs);
-                let w_lowlink = lowlinks[w];
-                let v_lowlink = lowlinks[v];
-                lowlinks.insert(v.clone(), v_lowlink.min(w_lowlink));
+                // Successor w has not been visited; descend
+                next = Some(w.clone());
             } else if on_stack.contains(w) {
                 // Successor w is on stack and hence in current SCC
                 let w_index = indices[w];
-                let v_lowlink = lowlinks[v];
+                let v_lowlink = lowlinks[&*v];
                 lowlinks.insert(v.clone(), v_lowlink.min(w_index));
             }
+            continue;
         }
-    }
 
-    // If v is a root node, pop the stack to form an SCC
-    if lowlinks[v] == indices[v] {
-        let mut scc = Vec::new();
-        loop {
-            let w = stack
-                .pop()
-                .expect("stack is non-empty: v was pushed and loop breaks when w == v");
-            on_stack.remove(&w);
-            let done = w == *v;
-            scc.push(w);
-            if done {
-                break;
+        // All successors of v are done
+        let v = v.clone();
+        frames.pop();
+
+        // If v is a root node, pop the stack to form an SCC
+        if lowlinks[&v] == indices[&v] {
+            let mut scc = Vec::new();
+            loop {
+                let w = stack
+                    .pop()
+                    .expect("stack is non-empty: v was pushed and loop breaks when w == v");
+                on_stack.remove(&w);
+                let done = w == v;
+                scc.push(w);
+                if done {
+                    break;
+                }
             }
+            sccs.push(scc);
         }
-        sccs.push(scc);
+
+        // Fold v's lowlink into its caller's, as a recursive return would
+        if let Some((parent, _)) = frames.last() {
+            let v_lowlink = lowlinks[&v];
+            let p_lowlink = lowlinks[parent];
+            lowlinks.insert(parent.clone(), p_lowlink.min(v_lowlink));
+        }
     }
 }
 
@@ -688,6 +713,21 @@ fn basic_stratify(program: &Program) -> Vec<Vec<usize>> {
 mod tests {
     use super::*;
     use crate::ast::{Atom, Term};
+
+    /// A dependency chain far longer than a recursive DFS fits in a 2 MiB
+    /// stack, with a cycle at its end.
+    #[test]
+    fn test_find_sccs_long_chain() {
+        let n = 200_000;
+        let mut graph: HashMap<usize, HashSet<usize>> =
+            (0..n).map(|i| (i, HashSet::from([i + 1]))).collect();
+        graph.insert(n, HashSet::from([n - 1]));
+        let sccs = find_sccs(&graph);
+        assert_eq!(sccs.len(), n);
+        let mut cycle = sccs.into_iter().find(|scc| scc.len() > 1).unwrap();
+        cycle.sort_unstable();
+        assert_eq!(cycle, vec![n - 1, n]);
+    }
 
     #[test]
     fn test_is_recursive_rule() {

@@ -32,7 +32,8 @@ timely = "0.27"
 # Configuration
 figment = { version = "0.10", features = ["toml", "env"] }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# unbounded_depth: persisted rules may nest past the default limit of 128
+serde_json = { version = "1.0", features = ["unbounded_depth"] }
 toml = "0.8"
 
 # Storage formats
@@ -58,7 +59,7 @@ rayon = "1.10"
 num_cpus = "1.16"
 
 # High-performance synchronization
-parking_lot = "0.12"
+parking_lot = { version = "0.12", features = ["arc_lock"] }
 arc-swap = "1.7"
 dashmap = "5.5"
 
@@ -114,6 +115,8 @@ proptest = "1.4"
 criterion = "0.5"
 inputlayer-testkit = { path = "testkit" }
 figment = { version = "0.10", features = ["test"] }
+# Every test target sees the test-only seams; `cargo build` does not.
+inputlayer = { path = ".", features = ["test-support"] }
 
 [[bin]]
 name = "inputlayer"
@@ -194,6 +197,11 @@ path = "benches/startup_benchmarks.rs"
 harness = false
 
 [[bench]]
+name = "restart_benchmarks"
+path = "benches/restart_benchmarks.rs"
+harness = false
+
+[[bench]]
 name = "proof_benchmarks"
 path = "benches/proof_benchmarks.rs"
 harness = false
@@ -206,6 +214,9 @@ vectors = []
 temporal = []
 # Enable distributed execution
 distributed = []
+# Expose test-only seams (e.g. sharing regardless of cost); never enable
+# this for a shipped build.
+test-support = []
 
 [profile.release]
 lto = false

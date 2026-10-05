@@ -363,6 +363,7 @@ impl KnowledgeGraph {
             saved = false;
             warn!(kg = %self.name, revision, error = %error, "catalog_save_failed_wal_keeps_changes");
         }
+        self.catalog_unsaved = !saved;
         saved
     }
 
@@ -376,31 +377,41 @@ impl KnowledgeGraph {
         &mut self,
         records: impl Iterator<Item = &'r CatalogRecord>,
     ) -> Result<Option<u64>, String> {
-        let mut newest = None;
-        for record in records {
-            newest = newest.max(Some(record.revision));
-            match &record.entry {
-                CatalogEntry::Rule { name, definition }
-                    if record.revision > self.rule_catalog.revision() =>
-                {
-                    self.rule_catalog.set(name, definition.clone());
-                }
-                CatalogEntry::Schema { relation, schema }
-                    if record.revision > self.schema_catalog.revision() =>
-                {
-                    self.schema_catalog.set_persistent(relation, schema.clone());
-                }
-                _ => {}
-            }
-        }
-        let Some(revision) = newest else {
+        let Some(revision) =
+            apply_catalog_records(&mut self.rule_catalog, &mut self.schema_catalog, records)
+        else {
             return Ok(None);
         };
-        self.schema_catalog.advance_revision(revision);
         self.rule_catalog.save_at(revision)?;
         self.save_schema_catalog()?;
         Ok(Some(revision))
     }
+}
+
+/// Apply to `rules` and `schemas`, in memory, the catalog entries recovered
+/// from the WAL that are newer than them. Returns the newest entry's revision,
+/// which `schemas` now has, or `None` when there was no entry.
+pub(super) fn apply_catalog_records<'r>(
+    rules: &mut RuleCatalog,
+    schemas: &mut SchemaCatalog,
+    records: impl Iterator<Item = &'r CatalogRecord>,
+) -> Option<u64> {
+    let mut newest = None;
+    for record in records {
+        newest = newest.max(Some(record.revision));
+        match &record.entry {
+            CatalogEntry::Rule { name, definition } if record.revision > rules.revision() => {
+                rules.set(name, definition.clone());
+            }
+            CatalogEntry::Schema { relation, schema } if record.revision > schemas.revision() => {
+                schemas.set_persistent(relation, schema.clone());
+            }
+            _ => {}
+        }
+    }
+    let revision = newest?;
+    schemas.advance_revision(revision);
+    Some(revision)
 }
 
 /// Compile every clause of a rule into the incremental engine's description

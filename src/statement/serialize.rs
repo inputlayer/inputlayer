@@ -16,6 +16,16 @@ pub struct RuleDef {
     pub rule: SerializableRule,
 }
 
+impl RuleDef {
+    /// The definition of `rule`'s head relation by `rule`.
+    pub fn from_rule(rule: &Rule) -> Self {
+        RuleDef {
+            name: rule.head.relation.clone(),
+            rule: SerializableRule::from_rule(rule),
+        }
+    }
+}
+
 /// A serializable representation of a Rule for JSON storage
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SerializableRule {
@@ -48,6 +58,9 @@ pub enum SerializableTerm {
     FieldAccess(Box<SerializableTerm>, String),
     /// Record pattern in an atom argument (e.g., `{ id: X }`)
     RecordPattern(Vec<(String, SerializableTerm)>),
+    /// Parameter reference. Registered rules are bound before they are
+    /// stored, and the IR builder refuses an unbound one.
+    Param(String),
 }
 
 /// Serializable arithmetic expression for JSON storage
@@ -61,6 +74,8 @@ pub enum SerializableArithExpr {
         left: Box<SerializableArithExpr>,
         right: Box<SerializableArithExpr>,
     },
+    /// Parameter reference; never stored bound (see [`crate::params`]).
+    Param(String),
 }
 
 /// Serializable arithmetic operator for JSON storage
@@ -177,6 +192,7 @@ impl SerializableTerm {
                     .map(|(name, term)| (name.clone(), SerializableTerm::from_term(term)))
                     .collect(),
             ),
+            Term::Param(name) => SerializableTerm::Param(name.clone()),
         }
     }
 
@@ -204,6 +220,7 @@ impl SerializableTerm {
                     .map(|(name, term)| (name.clone(), term.to_term()))
                     .collect(),
             ),
+            SerializableTerm::Param(name) => Term::Param(name.clone()),
         }
     }
 }
@@ -222,6 +239,7 @@ impl SerializableArithExpr {
                 left: Box::new(Self::from_arith_expr(left)),
                 right: Box::new(Self::from_arith_expr(right)),
             },
+            ArithExpr::Param(name) => SerializableArithExpr::Param(name.clone()),
         }
     }
 
@@ -236,6 +254,7 @@ impl SerializableArithExpr {
                 left: Box::new(left.to_arith_expr()),
                 right: Box::new(right.to_arith_expr()),
             },
+            SerializableArithExpr::Param(name) => ArithExpr::Param(name.clone()),
         }
     }
 }

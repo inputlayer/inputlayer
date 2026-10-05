@@ -31,6 +31,7 @@ fn result(rows: Vec<Row>) -> ResultFrame {
         timing_breakdown: None,
         errors: Vec::new(),
         statements: Vec::new(),
+        revision: None,
         subscribed: Some(Subscribed {
             subscription: "s".into(),
             generation: 2,
@@ -218,4 +219,212 @@ fn errors_and_resets_pass_through_whole() {
                 "message": "gone"})
         ]
     );
+}
+
+fn snapshot(results: Vec<(&str, Vec<Row>)>) -> SnapshotFrame {
+    SnapshotFrame {
+        id: RequestId::new("r").ok(),
+        knowledge_graph: "kg".into(),
+        revision: 11,
+        results: results
+            .into_iter()
+            .map(|(name, rows)| NamedResult {
+                name: name.into(),
+                columns: vec!["i".into(), "pad".into()],
+                total_count: rows.len(),
+                rows,
+                truncated: false,
+            })
+            .collect(),
+        execution_time_ms: 3,
+        subscribed: None,
+    }
+}
+
+#[test]
+fn a_small_snapshot_is_one_frame() {
+    let frame = snapshot(vec![("a", vec![row(1, 10)]), ("b", vec![])]);
+    let expected = serde_json::to_string(&ServerFrame::Snapshot(frame.clone())).unwrap();
+    assert_eq!(snapshot_frames(frame).unwrap(), [expected]);
+}
+
+#[test]
+fn a_large_snapshot_streams_each_result_in_chunks_of_its_own() {
+    let a: Vec<Row> = (0..1_500).map(|i| row(i, 1_000)).collect();
+    let c: Vec<Row> = (0..1_200).map(|i| row(i, 900)).collect();
+    let frames = parsed(
+        &snapshot_frames(snapshot(vec![
+            ("a", a.clone()),
+            ("empty", vec![]),
+            ("c", c.clone()),
+        ]))
+        .unwrap(),
+    );
+    let (_, ServerFrame::SnapshotStart(start)) = &frames[0] else {
+        panic!("{:?}", frames[0]);
+    };
+    assert_eq!(start.revision, 11);
+    let counts: Vec<(&str, usize)> = start
+        .results
+        .iter()
+        .map(|r| (r.name.as_str(), r.row_count))
+        .collect();
+    assert_eq!(counts, [("a", 1_500), ("empty", 0), ("c", 1_200)]);
+    let mut got = vec![Vec::new(), Vec::new(), Vec::new()];
+    let mut last_result = 0;
+    for (index, (bytes, frame)) in frames[1..frames.len() - 1].iter().enumerate() {
+        let ServerFrame::SnapshotChunk {
+            id,
+            result,
+            chunk_index,
+            rows,
+        } = frame
+        else {
+            panic!("{frame:?}");
+        };
+        assert_eq!(id.as_ref().map(RequestId::as_str), Some("r"));
+        assert_eq!(*chunk_index, index);
+        assert!(*bytes <= FRAME_BUDGET, "chunk {index} is {bytes} bytes");
+        assert!(*result >= last_result, "results stream in order");
+        last_result = *result;
+        assert!(!rows.is_empty());
+        got[*result].extend(rows.iter().cloned());
+    }
+    assert_eq!(
+        got,
+        [a, vec![], c],
+        "every row, in its result, in order, once"
+    );
+    let (_, ServerFrame::SnapshotEnd { chunk_count, .. }) = frames.last().unwrap() else {
+        panic!("{:?}", frames.last());
+    };
+    assert_eq!(*chunk_count, frames.len() - 2);
+}
+
+#[test]
+fn a_snapshot_with_a_row_no_frame_can_carry_is_undeliverable() {
+    let frame = snapshot(vec![
+        ("a", vec![row(0, 10)]),
+        ("b", vec![row(1, 10), row(2, MAX_MESSAGE_SIZE)]),
+    ]);
+    let reason = snapshot_frames(frame).expect_err("an unframable row must be refused");
+    assert!(reason.starts_with("The snapshot has a row of"), "{reason}");
+}
+
+fn group_delta(members: Vec<(&str, Vec<Row>, Vec<Row>)>) -> SubscriptionPush {
+    SubscriptionPush::SubscriptionGroupDelta {
+        subscription: "s".into(),
+        generation: 2,
+        knowledge_graph: "kg".into(),
+        seq: 4,
+        revision: 9,
+        members: members
+            .into_iter()
+            .map(|(name, inserted, retracted)| GroupMemberDelta {
+                name: name.into(),
+                unchanged: inserted.is_empty() && retracted.is_empty(),
+                columns: vec!["i".into(), "pad".into()],
+                inserted,
+                retracted,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn a_small_group_delta_is_one_frame() {
+    let push = group_delta(vec![("a", vec![row(1, 10)], vec![]), ("b", vec![], vec![])]);
+    let expected = serde_json::to_string(&ServerFrame::Subscription(push.clone())).unwrap();
+    assert_eq!(push_frames(push).unwrap(), [expected]);
+}
+
+#[test]
+fn a_large_group_delta_streams_as_one_logical_delta() {
+    let ins: Vec<Row> = (0..1_500).map(|i| row(i, 900)).collect();
+    let ret: Vec<Row> = (1_500..2_100).map(|i| row(i, 900)).collect();
+    let other: Vec<Row> = (0..900).map(|i| row(i, 900)).collect();
+    let frames = parsed(
+        &push_frames(group_delta(vec![
+            ("a", ins.clone(), ret.clone()),
+            ("still", vec![], vec![]),
+            ("c", vec![], other.clone()),
+        ]))
+        .unwrap(),
+    );
+    let pushes: Vec<&SubscriptionPush> = frames
+        .iter()
+        .map(|(bytes, frame)| {
+            assert!(*bytes <= FRAME_BUDGET, "frame of {bytes} bytes");
+            let ServerFrame::Subscription(push) = frame else {
+                panic!("{frame:?}");
+            };
+            assert_eq!(push.subscription(), ("s", 2));
+            push
+        })
+        .collect();
+    let SubscriptionPush::SubscriptionGroupDeltaStart {
+        seq: 4,
+        revision: 9,
+        members,
+        ..
+    } = pushes[0]
+    else {
+        panic!("{:?}", pushes[0]);
+    };
+    let headers: Vec<(&str, bool, usize, usize)> = members
+        .iter()
+        .map(|m| {
+            (
+                m.name.as_str(),
+                m.unchanged,
+                m.inserted_count,
+                m.retracted_count,
+            )
+        })
+        .collect();
+    assert_eq!(
+        headers,
+        [
+            ("a", false, 1_500, 600),
+            ("still", true, 0, 0),
+            ("c", false, 0, 900)
+        ]
+    );
+    let mut got = vec![(Vec::new(), Vec::new()); 3];
+    for (index, push) in pushes[1..pushes.len() - 1].iter().enumerate() {
+        let SubscriptionPush::SubscriptionGroupDeltaChunk {
+            seq: 4,
+            chunk_index,
+            member,
+            inserted,
+            retracted,
+            ..
+        } = push
+        else {
+            panic!("{push:?}");
+        };
+        assert_eq!(*chunk_index, index);
+        got[*member].0.extend(inserted.iter().cloned());
+        got[*member].1.extend(retracted.iter().cloned());
+    }
+    assert_eq!(got, [(ins, ret), (vec![], vec![]), (vec![], other)]);
+    let SubscriptionPush::SubscriptionGroupDeltaEnd {
+        seq: 4,
+        chunk_count,
+        ..
+    } = pushes.last().unwrap()
+    else {
+        panic!("{:?}", pushes.last());
+    };
+    assert_eq!(*chunk_count, pushes.len() - 2);
+}
+
+#[test]
+fn a_group_delta_with_a_row_no_frame_can_carry_is_undeliverable() {
+    let push = group_delta(vec![
+        ("a", vec![row(0, 10)], vec![]),
+        ("b", vec![], vec![row(1, MAX_MESSAGE_SIZE)]),
+    ]);
+    let reason = push_frames(push).expect_err("an unframable row must be refused");
+    assert!(reason.starts_with("Delta 4 has a row of"), "{reason}");
 }

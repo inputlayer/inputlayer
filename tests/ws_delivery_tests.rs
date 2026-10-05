@@ -55,7 +55,7 @@ async fn start_server(configure: impl FnOnce(&mut Config)) -> Server {
     config.http.gui.enabled = false;
     configure(&mut config);
     let handler = Arc::new(Handler::from_config(config).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     handler.get_storage().create_knowledge_graph(KG).unwrap();
     let app = create_router(Arc::clone(&handler), &handler.config().http);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -354,4 +354,157 @@ async fn a_client_that_stops_reading_is_disconnected_and_isolated() {
         .wait_until("the stalled connection is dropped", |s| s.active() == 2)
         .await;
     drop(stalled);
+}
+
+impl Client {
+    /// Send `frame`, a `read` or `subscribe`; returns its reply frames (one
+    /// `snapshot` or `error`, or a whole stream).
+    async fn snapshot_request(&mut self, frame: Value) -> Vec<Value> {
+        self.send(frame).await;
+        let (_, first) = self.recv().await;
+        if first["type"] != "snapshot_start" {
+            return vec![first];
+        }
+        let mut frames = vec![first];
+        loop {
+            let (bytes, frame) = self.recv().await;
+            assert!(bytes <= FRAME_BUDGET * 2, "a {bytes}-byte chunk");
+            let end = frame["type"] != "snapshot_chunk";
+            frames.push(frame);
+            if end {
+                return frames;
+            }
+        }
+    }
+}
+
+/// Rows per result of a streamed snapshot, checked whole against its header.
+fn streamed_snapshot_rows(frames: &[Value]) -> Vec<usize> {
+    let start = &frames[0];
+    assert_eq!(start["type"], "snapshot_start", "{start}");
+    let end = frames.last().unwrap();
+    assert_eq!(end["type"], "snapshot_end", "{end}");
+    assert_eq!(end["chunk_count"], frames.len() - 2);
+    let mut counts = vec![0; start["results"].as_array().unwrap().len()];
+    for (index, chunk) in frames[1..frames.len() - 1].iter().enumerate() {
+        assert_eq!(chunk["type"], "snapshot_chunk", "{chunk}");
+        assert_eq!(chunk["chunk_index"], index);
+        counts[chunk["result"].as_u64().unwrap() as usize] += rows(&chunk["rows"]).len();
+    }
+    for (i, header) in start["results"].as_array().unwrap().iter().enumerate() {
+        assert_eq!(header["row_count"], counts[i], "{header}");
+    }
+    counts
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_large_group_snapshot_and_read_stream_whole() {
+    let server = start_server(|_| {}).await;
+    server.install_big(3_000, 1_000).await;
+    server.write("+switch(1)").await;
+    let mut client = Client::connect(&server).await;
+    let queries = json!([
+        {"name": "big", "query": "?big(X, P)"},
+        {"name": "n", "query": "?n(X)"},
+    ]);
+    let reply = client
+        .snapshot_request(json!({"type": "read", "id": "r", "queries": queries}))
+        .await;
+    assert_eq!(reply[0]["id"], "r");
+    assert_eq!(streamed_snapshot_rows(&reply), [3_000, 3_000]);
+
+    let reply = client
+        .snapshot_request(json!({"type": "subscribe", "subscription": "w", "queries": queries}))
+        .await;
+    assert_eq!(reply[0]["subscribed"]["subscription"], "w");
+    assert_eq!(streamed_snapshot_rows(&reply), [3_000, 3_000]);
+
+    server.write("-n(0)").await;
+    let (_, delta) = client.recv().await;
+    assert_eq!(delta["type"], "subscription_group_delta", "{delta}");
+    assert_eq!(delta["seq"], 1);
+    assert_eq!(rows(&delta["members"][0]["retracted"]).len(), 1);
+    assert_eq!(rows(&delta["members"][1]["retracted"]).len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_delta_over_the_frame_limit_streams_whole() {
+    let server = start_server(|_| {}).await;
+    server.install_big(4_000, 5_000).await;
+    let mut client = Client::connect(&server).await;
+    let reply = client
+        .snapshot_request(
+            json!({"type": "subscribe", "subscription": "w", "queries": [
+                {"name": "switch", "query": "?switch(X)"},
+                {"name": "big", "query": "?big(X, P)"},
+            ]}),
+        )
+        .await;
+    assert_eq!(reply[0]["type"], "snapshot", "{:?}", reply[0]);
+
+    server.write("+switch(1)").await;
+    let (_, start) = client.recv().await;
+    assert_eq!(start["type"], "subscription_group_delta_start", "{start}");
+    assert_eq!(start["members"][0]["inserted_count"], 1);
+    assert_eq!(start["members"][1]["inserted_count"], 4_000);
+    let mut inserted = [0, 0];
+    let mut chunks = 0;
+    loop {
+        let (bytes, frame) = client.recv().await;
+        assert!(bytes <= FRAME_BUDGET * 2, "a {bytes}-byte chunk");
+        match frame["type"].as_str().unwrap() {
+            "subscription_group_delta_chunk" => {
+                assert_eq!(frame["chunk_index"], chunks);
+                inserted[frame["member"].as_u64().unwrap() as usize] +=
+                    rows(&frame["inserted"]).len();
+                chunks += 1;
+            }
+            "subscription_group_delta_end" => {
+                assert_eq!(frame["chunk_count"], chunks);
+                break;
+            }
+            other => panic!("{other} inside a streamed group delta"),
+        }
+    }
+    assert_eq!(inserted, [1, 4_000]);
+
+    // A small change afterwards is one ordinary frame with the next seq.
+    server.write("+n(4000)").await;
+    let (_, delta) = client.recv().await;
+    assert_eq!(delta["type"], "subscription_group_delta", "{delta}");
+    assert_eq!(delta["seq"], 2);
+    assert_eq!(delta["members"][0]["unchanged"], true);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_with_a_row_no_frame_can_carry_is_reset_whole() {
+    let server = start_server(|config| {
+        config.storage.performance.max_string_value_bytes = 2 * MAX_FRAME;
+        config.storage.performance.max_query_size_bytes = 2 * MAX_FRAME;
+    })
+    .await;
+    server.install_big(1, MAX_FRAME + 1).await;
+    let mut client = Client::connect(&server).await;
+    let queries = json!([
+        {"name": "n", "query": "?n(X)"},
+        {"name": "big", "query": "?big(X, P)"},
+    ]);
+    let reply = client
+        .snapshot_request(json!({"type": "subscribe", "subscription": "w", "queries": queries}))
+        .await;
+    assert_eq!(reply[0]["type"], "snapshot", "{:?}", reply[0]);
+
+    server.write("+switch(1)").await;
+    let (_, reset) = client.recv().await;
+    assert_eq!(reset["type"], "subscription_reset", "{reset}");
+    assert_eq!(reset["subscription"], "w");
+    assert_eq!(server.active(), 0, "the group is gone");
+
+    // Its snapshot cannot be delivered whole either: nothing registers.
+    let reply = client
+        .snapshot_request(json!({"type": "subscribe", "subscription": "w", "queries": queries}))
+        .await;
+    assert_eq!(reply.len(), 1, "no partial stream: {reply:?}");
+    assert_eq!(reply[0]["type"], "error", "{:?}", reply[0]);
+    assert_eq!(server.active(), 0);
 }

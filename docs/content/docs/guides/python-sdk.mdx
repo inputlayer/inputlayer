@@ -219,6 +219,8 @@ result = await kg.insert(Employee, data=df)
 print(f"Inserted {result.count} rows")
 ```
 
+Every write (inserts, deletes, programs, claims, rules and session facts) sends its values as [parameters](/docs/guides/websocket-api#parameters), beside the program text: the program reads `+employee($p0, $p1, $p2, $p3, $p4)` and the engine binds the values without parsing them, so no value can change what the program does. This needs an engine speaking protocol 4; an older one is refused before anything is sent.
+
 ## Deleting Data
 
 Delete specific facts or use a filter to remove matching rows:
@@ -415,7 +417,16 @@ If you need to drop down to raw InputLayer Query Language for something the OLM 
 result = await kg.execute("?employee(Id, Name, D, Salary, A), Salary > 100000")
 ```
 
-The query body is whatever follows `?`. Variable names must be capitalized (lowercase identifiers parse as constants). For agent-style or chain-style use, prefer the safe parameter binding helpers from the [LangChain Integration](langchain) guide rather than building IQL strings with `f"..."`.
+The query body is whatever follows `?`. Variable names must be capitalized (lowercase identifiers parse as constants). Never build IQL strings with `f"..."` from values you did not write yourself: pass them as parameters, which the engine binds without parsing:
+
+```python
+await kg.execute(
+    "+employee($id, $name, $dept, $salary, $active)",
+    params={"id": 7, "name": user_input, "dept": "eng", "salary": 100000.0, "active": True},
+)
+```
+
+For agent-style or chain-style use, see also the [LangChain Integration](langchain) guide.
 
 ## Derived Relations (Rules)
 
@@ -683,6 +694,25 @@ Rows are instances of the relation when one whole relation is selected, otherwis
 A standing query tracks the whole result of persistent rules, so `subscribe()` raises `SubscriptionRejected` with a `reason`: `limit_offset`, `or_branches` or `session_view` (a session rule, an aggregate or a negated constant) before anything is sent, or the engine's `result_cap`, `access_denied`, `id_taken`, `subscription_limit` or `rejected`. To subscribe to such a query, declare a persistent rule and subscribe to that rule instead.
 
 `kg.watch()` yields the whole current result (`Live`: `rows`, `revision`, `verified`) each time it changes. `kg.on(Late, callback)` calls `callback` with every `Change` and returns a handle; `await handle.close()` stops it. On `InputLayerSync`, `kg.subscribe()` and `kg.watch()` are blocking iterators, and the `on()` callback runs on the client's background thread.
+
+### Several results at one revision
+
+Two subscriptions refresh independently, so an event of one can be ahead of the other. When an agent decides on several results together, read or subscribe to them together. `kg.read()` runs several queries on one snapshot, and `kg.subscribe_group()` keeps several queries current as one subscription. Both take a mapping from a name to a target (a relation, a column, a tuple or dict of `query()` arguments, or raw IQL):
+
+```python
+snap = await kg.read({"orders": Order, "eta": Eta})
+print(snap.revision, snap.results["orders"], snap.truncated)
+
+async for change in kg.subscribe_group({"orders": Order, "eta": Eta}):
+    for name, member in change.members.items():
+        if not member.unchanged:
+            apply(name, member.retracted, member.inserted)
+```
+
+- Every result of a read is its query's exact answer at `snap.revision`, whatever commits meanwhile. After every verified group event (`snapshot`, `delta`, `resync`), every member is its query's exact answer at `change.revision`: a program that changes two members shows up in both in the same event.
+- A `delta` lists every member, `unchanged` when its rows did not move; a refresh that changes no member delivers nothing. `unverified` and `resync` cover the whole group.
+- Reads and groups see persistent data only and refuse a target that is not one `?` query, with `SubscriptionRejected`. A read keeps `order_by`, `limit` and `offset` and names the results a limit or the result cap cut in `snap.truncated`; a group tracks whole results. Commits coalesce: a row that appears and disappears between two refreshes is never seen.
+- On `InputLayerSync`, `kg.read()` blocks and `kg.subscribe_group()` is a blocking iterator. See [Snapshot Reads](/docs/guides/websocket-api#snapshot-reads) and [Subscription Groups](/docs/guides/websocket-api#subscription-groups) for the wire protocol.
 
 ## Notifications
 

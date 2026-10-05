@@ -1,4 +1,4 @@
-//! A checkpoint: every knowledge graph's committed state at one revision,
+//! A checkpoint: every knowledge graph's committed state, each at its own revision,
 //! captured from a running engine by `StorageEngine::capture_checkpoint`.
 //!
 //! A checkpoint shares data with the engine instead of copying it: each
@@ -13,10 +13,11 @@ use crate::schema::SchemaCatalog;
 use crate::value::Relation;
 use std::time::Duration;
 
-/// Every knowledge graph's committed state at one revision.
+/// Every knowledge graph's committed state, each at its own revision.
 #[derive(Debug)]
 pub struct Checkpoint {
-    /// Every commit up to this revision is included, and none after it.
+    /// The newest revision it holds: each knowledge graph holds every commit
+    /// to it up to its own revision, at most this one, and none after.
     pub revision: u64,
     /// How long commits were held off while it was captured.
     pub capture_time: Duration,
