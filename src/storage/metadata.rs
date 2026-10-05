@@ -487,7 +487,6 @@ mod tests {
         );
     }
 
-    /// Regression: Metadata save creates parent directories if they don't exist.
     #[test]
     fn test_save_fails_when_the_directory_sync_fails() {
         let temp = TempDir::new().unwrap();
@@ -496,6 +495,7 @@ mod tests {
         assert!(KnowledgeGraphsMetadata::new().save(&path).is_err());
     }
 
+    /// Regression: Metadata save creates parent directories if they don't exist.
     #[test]
     fn test_metadata_save_creates_parent_dirs() {
         let temp = TempDir::new().unwrap();
