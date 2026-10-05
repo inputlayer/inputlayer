@@ -86,6 +86,7 @@ other benchmark there should hold it too (`flock`), and `--wait-lock
 | `delta_single` | 1 agent subscribed to `?two_hop(1, Z)` on 2.5K nodes / 10K edges; an external writer, open loop, every 20 ms, 150 writes | `delta_us` (scheduled write to delta at agent), `last_agent_us`, `ack_us`, `subscribe_us` |
 | `delta_fanout` | 64 agents on the same query, a write every 80 ms, 100 writes | same |
 | `delta_first` | 40 fresh agents, one after another, on the `delta_single` graph: each subscribes and the writer inserts a probe at once, then another after the agent has been quiet for 100 ms | `first_delta_us` (first write after subscribing, send to delta), `warm_delta_us` (the later write), `subscribe_us` |
+| `delta_keyed` | 300 agents, agent `k` subscribed to `?r1(H_k, Y)` of the deployed rule `r1(X, Y) <- edge(X, Y), label(X, "hot")` over 100K edges (four-node chains, every hundredth head `H` labelled hot); an external writer, open loop, every 20 ms, 120 writes, write `w` adding one row to agent `w mod 300` | `delta_us` (scheduled write to delta at its agent), `ack_us`, `subscribe_us`, `writes_per_server_cpu_sec` (writes per second of server CPU over the write phase) |
 | `interference` | 1 probe agent while another connection loops a long join (`?two_hop(X, Z), edge(Z, X)`) and a slow consumer stops reading with large results pending; a write every 30 ms, 120 writes | `delta_us`, `ack_us`, `long_request_us` |
 
 Each fixture also records `server_peak_rss_kb`.
@@ -106,6 +107,14 @@ stall, for the first write to pay. (A ~40 ms first delta is the signature
 of Nagle's algorithm waiting on the agent's delayed ACK of the subscribe
 reply.)
 
+`delta_keyed` is the keyed case of the views benchmark (#308): every view
+reads `edge`, so every write refreshes all 300, and they differ only in
+their constant. The engine evaluates such a family once per write and hands
+each view its rows; evaluating each view's own query instead costs a write
+many times the server CPU long before the deltas arrive late (issue #378:
+66 times at 1M edges and 1,000 keys), which `writes_per_server_cpu_sec`
+shows on an idle host too.
+
 The `quick` profile is for developing the gate. It has too few samples for
 p99 and therefore never passes.
 
@@ -116,7 +125,7 @@ durable inserts and write-to-delta latency. The engine suite measures what
 they leave out, with the same harness, servers and correctness checks. Its
 fixtures are not in the policy's `required` set: they are measured and
 reported, not gated. `--fixtures engine` runs them, `--fixtures all` runs
-both groups, and the default stays the gate's eight.
+both groups, and the default stays the gate's nine.
 
 | Fixture | Workload (profile `standard`) | Series / rates / gauges |
 |---|---|---|

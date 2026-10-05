@@ -6,6 +6,7 @@ mod engine;
 mod first_delta;
 mod insert;
 mod interference;
+mod keyed;
 mod query;
 
 use std::collections::BTreeMap;
@@ -38,6 +39,8 @@ pub enum Fixture {
     DeltaFanout,
     /// First write after subscribing against a warm one, per fresh agent.
     DeltaFirst,
+    /// External writer to many agents, each subscribed to its own key of a rule.
+    DeltaKeyed,
     /// Writer to a probe agent, beside a long request and a slow consumer.
     Interference,
     // The engine suite (not gated; see `engine`).
@@ -65,7 +68,7 @@ pub enum Fixture {
 
 impl Fixture {
     /// Every fixture, by name.
-    pub const ALL: [Fixture; 18] = [
+    pub const ALL: [Fixture; 19] = [
         Fixture::CheapQuery,
         Fixture::BoundQuery,
         Fixture::InsertSingle,
@@ -73,6 +76,7 @@ impl Fixture {
         Fixture::DeltaSingle,
         Fixture::DeltaFanout,
         Fixture::DeltaFirst,
+        Fixture::DeltaKeyed,
         Fixture::Interference,
         Fixture::RuleQuery,
         Fixture::UnboundQuery,
@@ -87,7 +91,7 @@ impl Fixture {
     ];
 
     /// The gate's fixtures: the default of `run`, and what the policy judges.
-    pub const GATE: [Fixture; 8] = [
+    pub const GATE: [Fixture; 9] = [
         Fixture::CheapQuery,
         Fixture::BoundQuery,
         Fixture::InsertSingle,
@@ -95,6 +99,7 @@ impl Fixture {
         Fixture::DeltaSingle,
         Fixture::DeltaFanout,
         Fixture::DeltaFirst,
+        Fixture::DeltaKeyed,
         Fixture::Interference,
     ];
 
@@ -107,6 +112,7 @@ impl Fixture {
             Fixture::DeltaSingle => "delta_single",
             Fixture::DeltaFanout => "delta_fanout",
             Fixture::DeltaFirst => "delta_first",
+            Fixture::DeltaKeyed => "delta_keyed",
             Fixture::Interference => "interference",
             Fixture::RuleQuery => "rule_query",
             Fixture::UnboundQuery => "unbound_query",
@@ -164,6 +170,7 @@ impl Fixture {
             Fixture::DeltaSingle => delta::run(server, &profile.delta_single).await,
             Fixture::DeltaFanout => delta::run(server, &profile.delta_fanout).await,
             Fixture::DeltaFirst => first_delta::run(server, &profile.delta_first).await,
+            Fixture::DeltaKeyed => keyed::run(server, &profile.delta_keyed).await,
             Fixture::Interference => interference::run(server, &profile.interference).await,
             Fixture::RuleQuery => engine::rule_query(server, &engine.rule_query).await,
             Fixture::UnboundQuery => engine::unbound_query(server, &engine.unbound_query).await,
