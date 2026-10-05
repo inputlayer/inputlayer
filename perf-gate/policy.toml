@@ -46,6 +46,11 @@ required = [
     "delta_first.warm_delta_us.p50",
     "interference.delta_us.p50",
     "interference.delta_us.p99",
+    # Keyed views: one agent per key of a rule; every write refreshes them all.
+    "delta_keyed.delta_us.p50",
+    "delta_keyed.delta_us.p99",
+    "delta_keyed.ack_us.p99",
+    "delta_keyed.writes_per_server_cpu_sec",
 ]
 
 # Largest allowed cost increase of the candidate over the baseline.

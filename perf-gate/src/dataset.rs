@@ -30,6 +30,15 @@ impl Graph {
         Self { edges: set }
     }
 
+    /// `chains` chains of four nodes, three edges each: chain `c` is
+    /// `4c -> 4c + 1 -> 4c + 2 -> 4c + 3`.
+    pub fn chains(chains: u64) -> Self {
+        let edges = (0..chains)
+            .flat_map(|c| (0..3).map(move |i| (4 * c + i, 4 * c + i + 1)))
+            .collect();
+        Self { edges }
+    }
+
     /// Add `edge(src, dst)`.
     pub fn add(&mut self, src: u64, dst: u64) {
         self.edges.insert((src, dst));
@@ -181,6 +190,20 @@ mod tests {
         assert!(closure > 1_000 && closure < 100_000, "closure {closure}");
         assert!(g.reachable(1) > 0);
         assert!(g.two_hop(1) > 0);
+    }
+
+    #[test]
+    fn chains_have_three_edges_each_and_no_others() {
+        let g = Graph::chains(3);
+        let tuples: usize = g
+            .insert_programs("edge")
+            .iter()
+            .map(|p| p.matches('(').count())
+            .sum();
+        assert_eq!(tuples, 9);
+        assert_eq!(g.out_degree(4), 1);
+        assert_eq!(g.out_degree(3), 0, "a chain's last node");
+        assert_eq!(g.reachable(8), 3);
     }
 
     #[test]

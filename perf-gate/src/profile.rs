@@ -15,6 +15,7 @@ pub struct Profile {
     pub delta_single: DeltaParams,
     pub delta_fanout: DeltaParams,
     pub delta_first: FirstDeltaParams,
+    pub delta_keyed: KeyedParams,
     pub interference: InterferenceParams,
     /// The engine suite's fixtures (not gated; see `fixtures::engine`).
     pub engine: EngineParams,
@@ -63,6 +64,17 @@ pub struct FirstDeltaParams {
     pub cycles: usize,
     /// Agent quiet time before the warm write.
     pub settle_ms: u64,
+}
+
+/// Agents each subscribed to their own key of a rule over a graph of
+/// `edges`, written open-loop at a fixed interval.
+#[derive(Debug, Clone, Serialize)]
+pub struct KeyedParams {
+    pub edges: usize,
+    /// Agents, one per key; at most one per hundred chains of three edges.
+    pub keys: usize,
+    pub writes: usize,
+    pub interval_ms: u64,
 }
 
 /// One probe subscriber while a long request loops on another connection and
@@ -265,6 +277,12 @@ impl Profile {
                 cycles: 40,
                 settle_ms: 100,
             },
+            delta_keyed: KeyedParams {
+                edges: 100_000,
+                keys: 300,
+                writes: 120,
+                interval_ms: 20,
+            },
             interference: InterferenceParams {
                 delta: DeltaParams {
                     writes: 120,
@@ -294,6 +312,8 @@ impl Profile {
         profile.delta_fanout.writes /= 5;
         profile.delta_fanout.subscribers /= 4;
         profile.delta_first.cycles /= 4;
+        profile.delta_keyed.keys /= 4;
+        profile.delta_keyed.writes /= 4;
         profile.interference.delta.writes /= 5;
         let engine = &mut profile.engine;
         for query in [&mut engine.rule_query, &mut engine.unbound_query] {
