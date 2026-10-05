@@ -11,9 +11,10 @@ use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
 use inputlayer_ws_protocol::{FrameClass, NoticeCode, RequestId, ServerFrame};
 use serde_json::{json, Value};
-use tokio::net::TcpStream;
+use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
@@ -77,6 +78,12 @@ pub struct QueryResult {
     pub at: Instant,
     /// For a `.subscribe` reply: the revision the snapshot is the answer at.
     pub subscribed_revision: Option<u64>,
+    /// The reply's `revision`: for a write, the revision its changes are
+    /// visible at.
+    pub revision: Option<u64>,
+    /// Effective counts of the fact statements a write committed
+    /// (`statements`), in program order.
+    pub statements: Vec<Value>,
 }
 
 impl QueryResult {
@@ -101,6 +108,8 @@ impl QueryResult {
             errors: header["errors"].as_array().cloned().unwrap_or_default(),
             at,
             subscribed_revision: header["subscribed"]["revision"].as_u64(),
+            revision: header["revision"].as_u64(),
+            statements: header["statements"].as_array().cloned().unwrap_or_default(),
         }
     }
 
@@ -135,6 +144,36 @@ pub struct Commit {
     pub acked_at: Instant,
 }
 
+/// A `snapshot` reply: results of several queries at one revision.
+#[derive(Debug, Clone)]
+pub struct Snapshot {
+    /// The knowledge graph revision every result is the exact answer at.
+    pub revision: u64,
+    /// `(name, rows)` per query, in request order.
+    pub results: Vec<(String, Vec<Value>)>,
+    /// When the snapshot arrived.
+    pub at: Instant,
+}
+
+/// How a connection reads from its socket.
+#[derive(Debug, Clone, Copy)]
+pub struct Pacing {
+    /// Frames read ahead of the consumer. A full inbox stops reading the
+    /// socket, so a consumer that falls behind pushes back on the server.
+    pub inbox_frames: usize,
+    /// `SO_RCVBUF` of the socket; `None` keeps the system default.
+    pub recv_buffer_bytes: Option<u32>,
+}
+
+impl Pacing {
+    /// Read everything as it arrives (the default).
+    pub const EAGER: Self = Self {
+        // The most a bounded channel takes; never reached in practice.
+        inbox_frames: usize::MAX >> 4,
+        recv_buffer_bytes: None,
+    };
+}
+
 /// An authenticated `/ws` connection.
 ///
 /// Every request carries an id; a reply that does not echo it is a
@@ -144,7 +183,7 @@ pub struct Commit {
 /// guarantees. Pushes arriving meanwhile are kept for [`Self::next_push`].
 pub struct WsClient {
     sink: Sink,
-    inbox: mpsc::UnboundedReceiver<Frame>,
+    inbox: mpsc::Receiver<Frame>,
     /// Pushes read while waiting for a reply, in arrival order.
     pushes: VecDeque<Frame>,
     /// Replies read while waiting for a push, for requests still outstanding.
@@ -174,16 +213,20 @@ impl WsClient {
 
     /// Connect to `url` and authenticate with `api_key`.
     pub async fn connect_url(url: &str, api_key: &str) -> Checked<Self> {
-        let (ws, _) = tokio_tungstenite::connect_async(url)
-            .await
-            .map_err(|e| Violation::Transport(format!("connect {url}: {e}")))?;
+        Self::connect_paced(url, api_key, Pacing::EAGER).await
+    }
+
+    /// Connect to `url` and authenticate with `api_key`, reading the socket
+    /// only as fast as `pacing` allows: a slow consumer.
+    pub async fn connect_paced(url: &str, api_key: &str, pacing: Pacing) -> Checked<Self> {
+        let ws = open_socket(url, pacing.recv_buffer_bytes).await?;
         let (sink, mut stream) = ws.split();
-        let (tx, inbox) = mpsc::unbounded_channel();
+        let (tx, inbox) = mpsc::channel(pacing.inbox_frames.max(1));
         let reader = tokio::spawn(async move {
             while let Some(Ok(message)) = stream.next().await {
                 let at = Instant::now();
                 if let Message::Text(text) = message {
-                    if tx.send(Frame::parse(at, &text)).is_err() {
+                    if tx.send(Frame::parse(at, &text)).await.is_err() {
                         break;
                     }
                 }
@@ -414,6 +457,44 @@ impl WsClient {
         }
     }
 
+    /// Keep the connection from idling out (`ping`, answered by `pong`).
+    pub async fn ping(&mut self) -> Checked<()> {
+        let reply = self.request(json!({"type": "ping"})).await?;
+        if reply.kind() != "pong" {
+            return Err(Violation::Transport(format!(
+                "expected pong: {}",
+                reply.value
+            )));
+        }
+        Ok(())
+    }
+
+    /// Read `queries` (`(name, query)`) at one revision (`read`).
+    pub async fn read(&mut self, queries: &[(&str, &str)]) -> Checked<Snapshot> {
+        let reply = self
+            .request(json!({"type": "read", "queries": named(queries)}))
+            .await?;
+        snapshot_of(&reply)
+    }
+
+    /// Subscribe to `queries` (`(name, query)`) as group `subscription`
+    /// (`subscribe`); returns the group's snapshot. Its pushes are
+    /// `subscription_group_delta`s, read with [`Self::next_push`].
+    pub async fn subscribe_group(
+        &mut self,
+        subscription: &str,
+        queries: &[(&str, &str)],
+    ) -> Checked<Snapshot> {
+        let reply = self
+            .request(json!({
+                "type": "subscribe",
+                "subscription": subscription,
+                "queries": named(queries),
+            }))
+            .await?;
+        snapshot_of(&reply)
+    }
+
     /// Run a write `program`; fails unless every statement succeeded.
     pub async fn commit(&mut self, program: &str) -> Checked<Commit> {
         let sent_at = Instant::now();
@@ -469,5 +550,93 @@ impl WsClient {
     /// Close the connection cleanly.
     pub async fn close(mut self) {
         let _ = self.sink.send(Message::Close(None)).await;
+    }
+}
+
+/// Open the WebSocket, with `SO_RCVBUF` set before connecting when given.
+async fn open_socket(
+    url: &str,
+    recv_buffer_bytes: Option<u32>,
+) -> Checked<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+    let transport = |e: &dyn std::fmt::Display| Violation::Transport(format!("connect {url}: {e}"));
+    let Some(bytes) = recv_buffer_bytes else {
+        let (ws, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .map_err(|e| transport(&e))?;
+        return Ok(ws);
+    };
+    let uri: Uri = url.parse().map_err(|e| transport(&e))?;
+    let host = uri.host().unwrap_or("127.0.0.1");
+    let port = uri.port_u16().unwrap_or(80);
+    let addr = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|e| transport(&e))?
+        .next()
+        .ok_or_else(|| transport(&"no address"))?;
+    let socket = if addr.is_ipv4() {
+        TcpSocket::new_v4()
+    } else {
+        TcpSocket::new_v6()
+    }
+    .map_err(|e| transport(&e))?;
+    socket
+        .set_recv_buffer_size(bytes)
+        .map_err(|e| transport(&e))?;
+    let stream = socket.connect(addr).await.map_err(|e| transport(&e))?;
+    let (ws, _) = tokio_tungstenite::client_async(url, MaybeTlsStream::Plain(stream))
+        .await
+        .map_err(|e| transport(&e))?;
+    Ok(ws)
+}
+
+fn named(queries: &[(&str, &str)]) -> Vec<Value> {
+    queries
+        .iter()
+        .map(|(name, query)| json!({"name": name, "query": query}))
+        .collect()
+}
+
+/// A one-frame `snapshot` reply; anything else is the engine's refusal.
+fn snapshot_of(reply: &Frame) -> Checked<Snapshot> {
+    match reply.kind() {
+        "snapshot" => {
+            let results = reply.value["results"]
+                .as_array()
+                .ok_or_else(|| {
+                    Violation::Transport(format!("snapshot without results: {}", reply.value))
+                })?
+                .iter()
+                .map(|result| {
+                    if result["truncated"].as_bool().unwrap_or_default() {
+                        return Err(Violation::IncompleteSnapshot {
+                            rows: result["rows"].as_array().map_or(0, Vec::len),
+                            detail: format!("result {} truncated", result["name"]),
+                        });
+                    }
+                    Ok((
+                        result["name"].as_str().unwrap_or_default().to_string(),
+                        result["rows"].as_array().cloned().unwrap_or_default(),
+                    ))
+                })
+                .collect::<Checked<_>>()?;
+            Ok(Snapshot {
+                revision: reply.value["revision"].as_u64().ok_or_else(|| {
+                    Violation::Transport(format!("snapshot without revision: {}", reply.value))
+                })?,
+                results,
+                at: reply.at,
+            })
+        }
+        "error" => Err(Violation::Rejected(
+            reply.value["message"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        )),
+        // Streamed snapshots are for results too large for one frame.
+        _ => Err(Violation::Transport(format!(
+            "expected a one-frame snapshot: {}",
+            reply.value
+        ))),
     }
 }

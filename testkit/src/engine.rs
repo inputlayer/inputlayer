@@ -33,6 +33,15 @@ pub struct EngineSettings {
     pub notification_buffer_size: Option<usize>,
     /// `[replication]`; `None` runs standalone.
     pub replication: Option<Replication>,
+    /// `http.ws_send_timeout_ms`; `None` keeps the default.
+    pub ws_send_timeout_ms: Option<u64>,
+    /// `http.rate_limit.max_ws_connections` and `max_connections`; `None`
+    /// keeps the defaults.
+    pub max_connections: Option<usize>,
+    /// `http.rate_limit.ws_max_preauth_per_ip`; `None` keeps the default.
+    pub ws_max_preauth_per_ip: Option<usize>,
+    /// Run the process under `taskset -c <cpus>`; `None` runs it unpinned.
+    pub cpus: Option<String>,
 }
 
 /// The `[replication]` section of an engine's config.
@@ -94,6 +103,36 @@ impl EngineBuilder {
         self
     }
 
+    /// Fail a connection whose client has not taken a frame within `ms`
+    /// (`http.ws_send_timeout_ms`).
+    #[must_use]
+    pub fn ws_send_timeout_ms(mut self, ms: u64) -> Self {
+        self.settings.ws_send_timeout_ms = Some(ms);
+        self
+    }
+
+    /// Accept up to `limit` connections (HTTP and `/ws`).
+    #[must_use]
+    pub fn max_connections(mut self, limit: usize) -> Self {
+        self.settings.max_connections = Some(limit);
+        self
+    }
+
+    /// Allow `limit` unauthenticated `/ws` connections per client IP at once
+    /// (0 = unlimited). Every test client connects from 127.0.0.1.
+    #[must_use]
+    pub fn ws_max_preauth_per_ip(mut self, limit: usize) -> Self {
+        self.settings.ws_max_preauth_per_ip = Some(limit);
+        self
+    }
+
+    /// Pin the process to `cpus` (a `taskset -c` list such as `8-31`).
+    #[must_use]
+    pub fn cpus(mut self, cpus: impl Into<String>) -> Self {
+        self.settings.cpus = Some(cpus.into());
+        self
+    }
+
     /// Run with this `[replication]` section.
     #[must_use]
     pub fn replication(mut self, replication: Replication) -> Self {
@@ -144,6 +183,11 @@ impl Engine {
     /// Use `key` to authenticate (a follower takes its primary's keys).
     pub fn set_api_key(&mut self, key: &str) {
         self.api_key = key.to_string();
+    }
+
+    /// The running process's id, e.g. to sample its memory.
+    pub fn pid(&self) -> Option<u32> {
+        self.child.as_ref().and_then(Child::id)
     }
 
     /// The port the engine listens on.
@@ -205,7 +249,15 @@ impl Engine {
                 .append(true)
                 .open(self.log_path())
                 .context("open server log")?;
-            let mut command = Command::new(&self.binary);
+            // `taskset` execs the engine, so the process id stays the engine's.
+            let mut command = match &self.settings.cpus {
+                Some(cpus) => {
+                    let mut command = Command::new("taskset");
+                    command.arg("-c").arg(cpus).arg(&self.binary);
+                    command
+                }
+                None => Command::new(&self.binary),
+            };
             command
                 .arg("--config")
                 .arg(self.config_path())
@@ -308,12 +360,22 @@ impl Engine {
         if let Some(size) = self.settings.notification_buffer_size {
             rate_limit.insert("notification_buffer_size".into(), integer(size)?);
         }
+        if let Some(limit) = self.settings.ws_max_preauth_per_ip {
+            rate_limit.insert("ws_max_preauth_per_ip".into(), integer(limit)?);
+        }
+        if let Some(limit) = self.settings.max_connections {
+            rate_limit.insert("max_connections".into(), integer(limit)?);
+            rate_limit.insert("max_ws_connections".into(), integer(limit)?);
+        }
         let mut http = toml::Table::new();
         http.insert("enabled".into(), true.into());
         http.insert("host".into(), "127.0.0.1".into());
         http.insert("port".into(), i64::from(self.port).into());
         http.insert("auth".into(), auth.into());
         http.insert("rate_limit".into(), rate_limit.into());
+        if let Some(ms) = self.settings.ws_send_timeout_ms {
+            http.insert("ws_send_timeout_ms".into(), integer_u64(ms)?);
+        }
         let mut logging = toml::Table::new();
         logging.insert("level".into(), "warn".into());
 
