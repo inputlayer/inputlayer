@@ -116,37 +116,90 @@ fn query_stopped_error() -> String {
 }
 
 /// Unwinding payload that aborts a stopped query from inside a dataflow
-/// step; see [`stop_point`].
+/// step; see [`stop_point`] and [`Pacer`].
 struct QueryStopped;
 
+/// Unwinding payload that aborts a recursive query past its iteration
+/// ceiling; see [`stop_point`].
+struct IterationLimit(Iter);
+
+/// Abort the query from inside a dataflow step if its request was stopped.
+fn stop_if_cancelled() {
+    if is_query_cancelled() {
+        std::panic::resume_unwind(Box::new(QueryStopped));
+    }
+}
+
+/// Units of work (pairs a join considers, rows a sink takes) done inside one
+/// dataflow step between two checks of the request: often enough that a
+/// join emitting a whole cross product in one step still stops within
+/// milliseconds and a few hundred KB past its memory limit.
+const CHECK_EVERY: u32 = 1024;
+
+/// Counts the work of one operator and checks the request every
+/// [`CHECK_EVERY`] units, charging the thread's allocations to it and
+/// aborting the query once it is stopped (deadline, cancel, or memory). The
+/// step loop checks only between steps, and one step of a join emits
+/// everything one key matches: for a cross product, every pair at once.
+#[derive(Clone, Copy, Default)]
+struct Pacer(u32);
+
+impl Pacer {
+    #[inline]
+    fn tick(&mut self) {
+        self.0 = self.0.wrapping_add(1);
+        if self.0.is_multiple_of(CHECK_EVERY) {
+            stop_if_cancelled();
+        }
+    }
+}
+
 /// Pass `collection` through, aborting the query between its batches once
-/// its request is stopped (deadline, cancel, or memory). One step of an
-/// iterative scope can run a whole fixpoint, far longer than the step loop
-/// can wait to check, so recursive loops check at every batch here. The
-/// abort unwinds out of the dataflow without the panic hook, and
-/// [`dataflow_error`] turns it into the stop's error.
-fn stop_point<G, D, R>(collection: Collection<G, D, R>) -> Collection<G, D, R>
+/// its request is stopped (deadline, cancel, or memory), or once it reaches
+/// iteration `max_iterations` of its fixpoint (0: no ceiling). One step of
+/// an iterative scope can run a whole fixpoint, far longer than the step
+/// loop can wait to check, so recursive loops check at every batch here.
+/// The ceiling bounds recursion that keeps deriving new values (a counter
+/// without a bound) whatever the deadline. The abort unwinds out of the
+/// dataflow without the panic hook, and [`dataflow_error`] turns it into
+/// the query's error.
+fn stop_point<G, D, R>(collection: Collection<G, D, R>, max_iterations: Iter) -> Collection<G, D, R>
 where
-    G: Scope,
+    G: Scope<Timestamp = Product<(), Iter>>,
     D: Clone + 'static,
     R: Clone + 'static,
 {
-    collection.inspect_batch(|_, _| {
-        if is_query_cancelled() {
-            std::panic::resume_unwind(Box::new(QueryStopped));
+    collection.inspect_batch(move |time, _| {
+        if max_iterations > 0 && time.inner >= max_iterations {
+            std::panic::resume_unwind(Box::new(IterationLimit(max_iterations)));
         }
+        stop_if_cancelled();
     })
 }
 
 /// The error of a dataflow that unwound: the stop's error if a
-/// [`stop_point`] aborted it, otherwise an internal error.
+/// [`stop_point`] or [`Pacer`] aborted it, the ceiling's if recursion ran
+/// past it, otherwise an internal error.
 fn dataflow_error(payload: Box<dyn std::any::Any + Send>) -> String {
     if payload.is::<QueryStopped>() {
         return query_stopped_error();
     }
+    if let Some(IterationLimit(limit)) = payload.downcast_ref::<IterationLimit>() {
+        return iteration_limit_error(*limit);
+    }
     format!(
         "Internal error in query execution: {}",
         format_panic_payload(payload)
+    )
+}
+
+/// The error of a recursive query stopped at its iteration ceiling.
+fn iteration_limit_error(limit: Iter) -> String {
+    format!(
+        "Recursion did not reach a fixpoint within {limit} iterations \
+         (storage.performance.max_recursion_iterations): a recursive rule keeps deriving \
+         new facts, such as a counter without an upper bound. Bound the recursion, \
+         for example with N < 1000"
     )
 }
 
@@ -186,6 +239,17 @@ impl RowSink {
             if rows.len() == self.limit {
                 self.full.store(true, Ordering::Relaxed);
             }
+        }
+    }
+
+    /// An `inspect` callback pushing a dataflow's output rows here. One step
+    /// can release a whole relation, so it checks the request as it goes.
+    fn collector<T, R>(&self) -> impl FnMut(&(Tuple, T, R)) + 'static {
+        let sink = self.clone();
+        let mut pacer = Pacer::default();
+        move |(row, _time, _diff)| {
+            pacer.tick();
+            sink.push(row);
         }
     }
 
@@ -229,6 +293,11 @@ fn strip_identity_map(ir: &IRNode) -> &IRNode {
 
 /// Extract a human-readable message from a panic payload.
 fn format_panic_payload(payload: Box<dyn std::any::Any + Send>) -> String {
+    format_panic_payload_ref(&*payload)
+}
+
+/// [`format_panic_payload`] without taking the payload.
+fn format_panic_payload_ref(payload: &(dyn std::any::Any + Send)) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
         s.to_string()
     } else if let Some(s) = payload.downcast_ref::<String>() {
@@ -286,6 +355,9 @@ pub struct CodeGenerator {
     /// Maximum number of result rows (0 = unlimited).
     /// Prevents OOM from queries returning unbounded result sets.
     max_result_rows: usize,
+    /// Most fixpoint iterations a recursive evaluation may run (0 = no
+    /// ceiling).
+    max_iterations: Iter,
 }
 
 impl CodeGenerator {
@@ -296,12 +368,19 @@ impl CodeGenerator {
             semiring_annotations: Vec::new(),
             semiring_type: SemiringType::Counting, // safe default
             max_result_rows: 0,                    // unlimited
+            max_iterations: 0,                     // no ceiling
         }
     }
 
     /// Set the maximum number of result rows (0 = unlimited).
     pub fn set_max_result_rows(&mut self, max: usize) {
         self.max_result_rows = max;
+    }
+
+    /// Set the most fixpoint iterations a recursive evaluation may run
+    /// before it fails (0 = no ceiling).
+    pub fn set_max_iterations(&mut self, max: Iter) {
+        self.max_iterations = max;
     }
 
     /// Set the semiring type for diff-type dispatch.
@@ -406,10 +485,7 @@ impl CodeGenerator {
                     collection
                         .distinct_core::<R>()
                         .inner
-                        .inspect({
-                            let out = sink_clone.clone();
-                            move |(data, _time, _diff)| out.push(data)
-                        })
+                        .inspect(sink_clone.collector())
                         .probe_with(&probe);
                 });
 
@@ -688,6 +764,7 @@ impl CodeGenerator {
     ) -> Result<Vec<Tuple>, String> {
         let sink = RowSink::new(self.max_result_rows);
         let sink_clone = sink.clone();
+        let max_iterations = self.max_iterations;
 
         // Get edge data
         let edges: Vec<Tuple> = self
@@ -740,9 +817,11 @@ impl CodeGenerator {
                         });
 
                         // Join: tc(x, y) JOIN edge(y, z) -> tc(x, z)
-                        let recursive = tc_keyed
-                            .join(edges_keyed)
-                            .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
+                        let mut pacer = Pacer::default();
+                        let recursive = tc_keyed.join_map(edges_keyed, move |_y, x, z| {
+                            pacer.tick();
+                            Tuple::new(vec![x.clone(), z.clone()])
+                        });
 
                         // Base case: project edges to 2 columns (from, to) to match
                         // the recursive case arity. Edge relations may have extra columns
@@ -757,7 +836,7 @@ impl CodeGenerator {
                         let next = base_case.concat(recursive).distinct_core::<R>();
 
                         // Set variable for next iteration
-                        let next = stop_point(next);
+                        let next = stop_point(next, max_iterations);
                         variable.set(next.clone());
 
                         // Leave scope with final result
@@ -767,10 +846,7 @@ impl CodeGenerator {
                     // Capture results
                     tc_result
                         .inner
-                        .inspect({
-                            let out = sink_clone.clone();
-                            move |(data, _time, _diff)| out.push(data)
-                        })
+                        .inspect(sink_clone.collector())
                         .probe_with(&probe);
                 });
 
@@ -827,6 +903,7 @@ impl CodeGenerator {
     ) -> Result<Vec<Tuple>, String> {
         let sink = RowSink::new(self.max_result_rows);
         let sink_clone = sink.clone();
+        let max_iterations = self.max_iterations;
 
         // Get all edges
         let all_edges: Vec<Tuple> = self
@@ -894,9 +971,11 @@ impl CodeGenerator {
                             (Tuple::new(vec![y]), z)
                         });
 
-                        let recursive = tc_keyed
-                            .join(edges_keyed)
-                            .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
+                        let mut pacer = Pacer::default();
+                        let recursive = tc_keyed.join_map(edges_keyed, move |_y, x, z| {
+                            pacer.tick();
+                            Tuple::new(vec![x.clone(), z.clone()])
+                        });
 
                         // Base = seed edges projected to 2 cols (from, to)
                         let base_case = seed_edges_in.map(|tuple| {
@@ -906,7 +985,7 @@ impl CodeGenerator {
                         });
                         let next = base_case.concat(recursive).distinct_core::<R>();
 
-                        let next = stop_point(next);
+                        let next = stop_point(next, max_iterations);
 
                         variable.set(next.clone());
                         next.leave()
@@ -914,10 +993,7 @@ impl CodeGenerator {
 
                     tc_result
                         .inner
-                        .inspect({
-                            let out = sink_clone.clone();
-                            move |(data, _time, _diff)| out.push(data)
-                        })
+                        .inspect(sink_clone.collector())
                         .probe_with(&probe);
                 });
 
@@ -1063,6 +1139,7 @@ impl CodeGenerator {
 
         let sink = RowSink::new(self.max_result_rows);
         let sink_clone = sink.clone();
+        let max_iterations = self.max_iterations;
         let input_data = self.input_tuples.clone();
         let rec_rel = recursive_rel.to_string();
 
@@ -1129,7 +1206,7 @@ impl CodeGenerator {
                         let next = Self::fixpoint_dedup(combined, agg_in_loop.as_ref());
 
                         // Set variable for next iteration
-                        let next = stop_point(next);
+                        let next = stop_point(next, max_iterations);
                         variable.set(next.clone());
 
                         // Leave scope with final result
@@ -1139,10 +1216,7 @@ impl CodeGenerator {
                     // Capture results
                     result
                         .inner
-                        .inspect({
-                            let out = sink_clone.clone();
-                            move |(data, _time, _diff)| out.push(data)
-                        })
+                        .inspect(sink_clone.collector())
                         .probe_with(&probe);
                 });
 
@@ -1459,9 +1533,11 @@ impl CodeGenerator {
                     (key, tuple)
                 });
 
+                let mut pacer = Pacer::default();
                 if filter_predicate.is_none() {
                     // No filter: use join_map to fuse join + projection in one operator
                     left_keyed.join_map(right_keyed, move |_key, left_tuple, right_tuple| {
+                        pacer.tick();
                         let combined = left_tuple.concat(right_tuple);
                         combined.project(&projection)
                     })
@@ -1474,6 +1550,7 @@ impl CodeGenerator {
                     let left_arranged = left_keyed.arrange_by_key();
                     let right_arranged = right_keyed.arrange_by_key();
                     left_arranged.join_core(right_arranged, move |_key, left_tuple, right_tuple| {
+                        pacer.tick();
                         let combined = left_tuple.concat(right_tuple);
                         let projected = combined.project(&projection);
                         match &pred_fn {
@@ -1865,10 +1942,14 @@ impl CodeGenerator {
             let sentinel2 = Tuple::new(vec![Value::Int64(0)]);
             let right_keyed = right_coll.map(move |tuple| (sentinel2.clone(), tuple));
 
-            // For Cartesian product, concatenate ALL columns from both sides
-            left_keyed
-                .join(right_keyed)
-                .map(|(_key, (left_tuple, right_tuple))| left_tuple.concat(&right_tuple))
+            // For Cartesian product, concatenate ALL columns from both sides.
+            // Every pair shares the one key, so the join forms them all in
+            // one step: the pacer is what stops it.
+            let mut pacer = Pacer::default();
+            left_keyed.join_map(right_keyed, move |_key, left_tuple, right_tuple| {
+                pacer.tick();
+                left_tuple.concat(right_tuple)
+            })
         } else {
             // Normal join with actual keys
             let left_keys = left_keys.to_vec();
@@ -1888,13 +1969,13 @@ impl CodeGenerator {
 
             // Join and reconstruct: all of left + non-key columns of right
             let right_keys_for_map = right_keys.clone();
-            left_keyed
-                .join(right_keyed)
-                .map(move |(_key, (left_tuple, right_tuple))| {
-                    // Output schema: all columns from left, then non-key columns from right
-                    let right_non_keys = right_tuple.excluding_indices(&right_keys_for_map);
-                    left_tuple.concat(&right_non_keys)
-                })
+            let mut pacer = Pacer::default();
+            left_keyed.join_map(right_keyed, move |_key, left_tuple, right_tuple| {
+                pacer.tick();
+                // Output schema: all columns from left, then non-key columns from right
+                let right_non_keys = right_tuple.excluding_indices(&right_keys_for_map);
+                left_tuple.concat(&right_non_keys)
+            })
         }
     }
 
@@ -1971,7 +2052,9 @@ impl CodeGenerator {
         match node {
             IRNode::Scan { relation, .. } => {
                 if let Some(tuples) = input_data.get(relation) {
+                    let mut pacer = Pacer::default();
                     for tuple in tuples {
+                        pacer.tick();
                         let key = tuple.from_indices(key_indices);
                         result.insert(key);
                     }
@@ -2003,7 +2086,9 @@ impl CodeGenerator {
             // For complex nodes like Join, execute a sub-dataflow to materialize tuples
             _ => {
                 let tuples = Self::execute_subquery_for_antijoin(node, input_data, live);
+                let mut pacer = Pacer::default();
                 for tuple in tuples {
+                    pacer.tick();
                     let key = tuple.from_indices(key_indices);
                     result.insert(key);
                 }
@@ -2016,6 +2101,10 @@ impl CodeGenerator {
     /// For complex right-side IR nodes (joins, aggregates), we execute the
     /// sub-dataflow to materialize all tuples. The `live` parameter is passed
     /// through so that derived relations are available during execution.
+    ///
+    /// It runs while the enclosing dataflow is built, under the same request:
+    /// a stop aborts it like any step, and a failure aborts the enclosing
+    /// query. Missing rows on the negated side would wrongly keep left rows.
     fn execute_subquery_for_antijoin<G, R: DiffType>(
         node: &IRNode,
         input_data: &RelationMap,
@@ -2044,7 +2133,9 @@ impl CodeGenerator {
                         None,
                     );
                     let results_ref = Arc::clone(&results_clone);
+                    let mut pacer = Pacer::default();
                     coll.inner.inspect(move |(tuple, _time, diff)| {
+                        pacer.tick();
                         if *diff > 0 {
                             results_ref.lock().push(tuple.clone());
                         }
@@ -2052,18 +2143,25 @@ impl CodeGenerator {
                 });
                 // Step until complete
                 while worker.step() {
+                    if is_query_cancelled() {
+                        break;
+                    }
                     std::thread::yield_now();
                 }
+                abandon_if_stopped(worker);
             });
         }));
 
-        if let Err(e) = dd_result {
-            tracing::error!(
-                error = %format_panic_payload(e),
-                "Antijoin subquery panicked"
-            );
-            return Vec::new();
+        if let Err(payload) = dd_result {
+            if !payload.is::<QueryStopped>() {
+                tracing::error!(
+                    error = %format_panic_payload_ref(&*payload),
+                    "Antijoin subquery panicked"
+                );
+            }
+            std::panic::resume_unwind(payload);
         }
+        stop_if_cancelled();
 
         // Safely extract results from Arc<Mutex<Vec<Tuple>>>
         match Arc::try_unwrap(results) {
@@ -3491,6 +3589,7 @@ impl CodeGenerator {
     pub fn execute_transitive_closure_dd(&self, edge_relation: &str) -> Result<Vec<Tuple>, String> {
         let sink = RowSink::new(self.max_result_rows);
         let sink_clone = sink.clone();
+        let max_iterations = self.max_iterations;
 
         // Get edge data
         let edges: Vec<Tuple> = self
@@ -3542,15 +3641,17 @@ impl CodeGenerator {
                         });
 
                         // Join: tc(x, y) JOIN edge(y, z) -> tc(x, z)
-                        let recursive = tc_keyed
-                            .join(edges_keyed)
-                            .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
+                        let mut pacer = Pacer::default();
+                        let recursive = tc_keyed.join_map(edges_keyed, move |_y, x, z| {
+                            pacer.tick();
+                            Tuple::new(vec![x.clone(), z.clone()])
+                        });
 
                         // Combine base case and recursive case
                         let next = edges_in_scope.concat(recursive).distinct();
 
                         // Set variable for next iteration
-                        let next = stop_point(next);
+                        let next = stop_point(next, max_iterations);
                         variable.set(next.clone());
 
                         // Leave scope with final result
@@ -3560,10 +3661,7 @@ impl CodeGenerator {
                     // Capture results
                     tc_result
                         .inner
-                        .inspect({
-                            let out = sink_clone.clone();
-                            move |(data, _time, _diff)| out.push(data)
-                        })
+                        .inspect(sink_clone.collector())
                         .probe_with(&probe);
                 });
 
@@ -3597,6 +3695,7 @@ impl CodeGenerator {
     ) -> Result<Vec<Tuple>, String> {
         let sink = RowSink::new(self.max_result_rows);
         let sink_clone = sink.clone();
+        let max_iterations = self.max_iterations;
 
         // Get source nodes
         let sources: Vec<Tuple> = self
@@ -3658,15 +3757,17 @@ impl CodeGenerator {
                         });
 
                         // Join: reach(x) JOIN edge(x, y) -> reach(y)
-                        let recursive = reach_keyed
-                            .join(edges_keyed)
-                            .map(|(_x_key, (_x, y))| Tuple::new(vec![y]));
+                        let mut pacer = Pacer::default();
+                        let recursive = reach_keyed.join_map(edges_keyed, move |_x_key, _x, y| {
+                            pacer.tick();
+                            Tuple::new(vec![y.clone()])
+                        });
 
                         // Combine base case and recursive case
                         let next = sources_in_scope.concat(recursive).distinct();
 
                         // Set variable for next iteration
-                        let next = stop_point(next);
+                        let next = stop_point(next, max_iterations);
                         variable.set(next.clone());
 
                         // Leave scope with final result
@@ -3676,10 +3777,7 @@ impl CodeGenerator {
                     // Capture results
                     reach_result
                         .inner
-                        .inspect({
-                            let out = sink_clone.clone();
-                            move |(data, _time, _diff)| out.push(data)
-                        })
+                        .inspect(sink_clone.collector())
                         .probe_with(&probe);
                 });
 
@@ -8732,6 +8830,159 @@ mod tests {
         set_request_control(None);
         assert_eq!(result.unwrap().len(), 2000);
         assert_eq!(control.stopped(), None);
+    }
+
+    /// A scan of one-column relation `relation`.
+    fn scan1(relation: &str, column: &str) -> IRNode {
+        IRNode::Scan {
+            relation: relation.to_string(),
+            schema: vec![column.to_string()],
+        }
+    }
+
+    /// Every pair of `left` and `right`: a join on no keys.
+    fn cross(left: IRNode, right: IRNode) -> IRNode {
+        let mut output_schema = left.output_schema();
+        output_schema.extend(right.output_schema());
+        IRNode::Join {
+            left: Box::new(left),
+            right: Box::new(right),
+            left_keys: vec![],
+            right_keys: vec![],
+            output_schema,
+        }
+    }
+
+    /// A generator over one-column relations `a`, `b` and `c` of `n` rows.
+    fn wide_inputs(n: i64) -> CodeGenerator {
+        let mut codegen = CodeGenerator::new();
+        for relation in ["a", "b", "c"] {
+            codegen.add_input(
+                relation.to_string(),
+                (0..n).map(|i| Tuple::new(vec![Value::Int64(i)])).collect(),
+            );
+        }
+        codegen
+    }
+
+    /// Run `ir` on `codegen` under `control`.
+    fn execute_under(
+        control: &Arc<RequestControl>,
+        codegen: &CodeGenerator,
+        ir: &IRNode,
+    ) -> Result<Vec<Tuple>, String> {
+        set_request_control(Some(Arc::clone(control)));
+        let result = codegen.execute(ir);
+        set_request_control(None);
+        result
+    }
+
+    /// A cross product forms every pair in one dataflow step. Its memory
+    /// limit stops it while it forms them, a few hundred KB past the limit,
+    /// not after all 4 million pairs (about 400 MB).
+    #[test]
+    fn test_memory_limit_stops_a_cross_product_inside_its_step() {
+        const LIMIT: u64 = 8 << 20;
+        let control = RequestControl::limited(None, LIMIT, None);
+        let result = execute_under(
+            &control,
+            &wide_inputs(2000),
+            &cross(scan1("a", "x"), scan1("b", "y")),
+        );
+        assert_eq!(result.unwrap_err(), Stop::MemoryExhausted.message());
+        let peak = control.memory_peak();
+        assert!(peak < 2 * LIMIT as i64, "held {peak} bytes at the stop");
+    }
+
+    /// A cancel (or deadline) reaches a cross product while it forms pairs.
+    #[test]
+    fn test_cancel_stops_a_cross_product_inside_its_step() {
+        let control = RequestControl::new(None);
+        let canceller = {
+            let control = Arc::clone(&control);
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                control.cancel();
+            })
+        };
+        let started = Instant::now();
+        let result = execute_under(
+            &control,
+            &wide_inputs(3000),
+            &cross(scan1("a", "x"), scan1("b", "y")),
+        );
+        let elapsed = started.elapsed();
+        canceller.join().unwrap();
+        assert_eq!(result.unwrap_err(), QUERY_CANCELLED);
+        // All 9 million pairs would take seconds and about 1 GB.
+        assert!(elapsed.as_secs() < 5, "stopped after {elapsed:?}");
+        assert!(
+            control.memory_peak() < 512 << 20,
+            "{}",
+            control.memory_peak()
+        );
+    }
+
+    /// The negated side of an antijoin runs as its own sub-dataflow while
+    /// the query is built; a memory limit stops it there too, and the query
+    /// fails instead of treating the negated side as empty.
+    #[test]
+    fn test_memory_limit_stops_an_exploding_negated_side() {
+        const LIMIT: u64 = 8 << 20;
+        let antijoin = IRNode::Antijoin {
+            left: Box::new(scan1("a", "x")),
+            right: Box::new(cross(scan1("b", "x"), scan1("c", "z"))),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+        let control = RequestControl::limited(None, LIMIT, None);
+        let result = execute_under(&control, &wide_inputs(2000), &antijoin);
+        assert_eq!(result.unwrap_err(), Stop::MemoryExhausted.message());
+        let peak = control.memory_peak();
+        assert!(peak < 2 * LIMIT as i64, "held {peak} bytes at the stop");
+
+        // Unlimited, it keeps exactly the rows the negated side lacks.
+        let mut small = wide_inputs(20);
+        small.add_input(
+            "b".to_string(),
+            (0..10).map(|i| Tuple::new(vec![Value::Int64(i)])).collect(),
+        );
+        let rows = small.execute(&antijoin).unwrap();
+        assert_eq!(rows.len(), 10);
+        assert!(rows.iter().all(|t| t.get(0) >= Some(&Value::Int64(10))));
+    }
+
+    /// Recursion that keeps deriving new values fails at its iteration
+    /// ceiling with a clear error, in every recursive evaluator; recursion
+    /// that converges under the ceiling is unaffected.
+    #[test]
+    fn test_recursion_stops_at_its_iteration_ceiling() {
+        let run = |program: &str, ceiling: u32| {
+            let mut engine = crate::IQLEngine::new();
+            engine.set_max_recursion_iterations(ceiling);
+            engine.add_tuples("seed", vec![Tuple::new(vec![Value::Int64(0)])]);
+            engine.add_fact("edge", (0..30).map(|i| (i, i + 1)).collect());
+            engine.execute_tuples(program)
+        };
+        let unbounded_counter = "nat(N) <- seed(N)\nnat(N) <- nat(M), N = M + 1\nout(X) <- nat(X)";
+        let err = run(unbounded_counter, 50).unwrap_err();
+        assert!(err.contains("within 50 iterations"), "{err}");
+
+        let even_odd = "even(N) <- seed(N)\nodd(N) <- even(M), N = M + 1\n\
+                        even(N) <- odd(M), N = M + 1\nout(X) <- even(X)";
+        let err = run(even_odd, 50).unwrap_err();
+        assert!(err.contains("within 50 iterations"), "{err}");
+
+        let closure =
+            "tc(X, Y) <- edge(X, Y)\ntc(X, Z) <- edge(X, Y), tc(Y, Z)\nout(X, Y) <- tc(X, Y)";
+        assert_eq!(run(closure, 50).unwrap().len(), 30 * 31 / 2);
+        let err = run(closure, 10).unwrap_err();
+        assert!(err.contains("within 10 iterations"), "{err}");
+
+        let bounded = "nat(N) <- seed(N)\nnat(N) <- nat(M), N = M + 1, N < 40\nout(X) <- nat(X)";
+        assert_eq!(run(bounded, 50).unwrap().len(), 40);
+        assert_eq!(run(bounded, 0).unwrap().len(), 40);
     }
 
     /// Inputs share tuples with the caller's map; adding a relation to the

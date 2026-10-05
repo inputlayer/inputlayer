@@ -80,8 +80,11 @@ pub struct KnowledgeGraphSnapshot {
     /// Maximum result rows returned per query (0 = unlimited)
     pub max_result_rows: usize,
 
-    /// Maximum query cost score (0 = unlimited)
+    /// Most rows one join of a query may be estimated to produce (0 = unlimited)
     pub max_query_cost: u64,
+
+    /// Most fixpoint iterations a recursive evaluation may run (0 = unlimited)
+    pub max_recursion_iterations: u32,
 
     /// Optimizer passes for engines built from this snapshot
     pub optimization: OptimizationConfig,
@@ -250,6 +253,7 @@ impl KnowledgeGraphSnapshot {
             persistent,
             max_result_rows: 0,
             max_query_cost: 0,
+            max_recursion_iterations: 0,
             optimization: OptimizationConfig::default(),
             hnsw_search_fn: None,
             changes: Arc::new(ChangeLog::starting_at(revision)),
@@ -371,6 +375,7 @@ impl KnowledgeGraphSnapshot {
         engine.set_num_workers(self.num_workers);
         engine.set_max_result_rows(self.max_result_rows);
         engine.set_max_query_cost(self.max_query_cost);
+        engine.set_max_recursion_iterations(self.max_recursion_iterations);
         if let Some(ref search_fn) = self.hnsw_search_fn {
             engine.set_hnsw_search_fn(Arc::clone(search_fn));
         }
