@@ -513,6 +513,19 @@ describe('deadline probe', () => {
     }
   });
 
+  it('every write past its deadline on a dead server fails outcome-unknown when the probe drops it', async () => {
+    // Only the first deadline starts the probe; its drop comes before the
+    // second write's grace ends.
+    const c = await open({ timeoutGraceMs: 100 });
+    const calls = [50, 60].map((timeoutMs) => c.execute(`+a(${timeoutMs})`, { timeoutMs }).catch((e: unknown) => e));
+    await server!.until(() => executes(server!.last).length === 2);
+    stall(server!.last);
+    for (const error of await Promise.all(calls)) {
+      expect(error).toBeInstanceOf(sdk.OutcomeUnknownError);
+      expect((error as sdk.OutcomeUnknownError).code).toBe('outcome_unknown');
+    }
+  });
+
   it('calls failed locally on a server that never replies do not block new calls', async () => {
     const c = await open({ maxInFlight: 2, timeoutGraceMs: 50 });
     const lost = ['?a(X)', '?b(X)'].map((p) => c.execute(p, { timeoutMs: 50 }).catch((e: unknown) => e));
