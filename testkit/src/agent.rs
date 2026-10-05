@@ -216,6 +216,26 @@ impl Agent {
     /// streamed delta applies only once its end frame confirms it complete.
     pub async fn next_delta(&mut self, id: &str) -> Checked<Delta> {
         let frame = self.next_frame_of(id).await?;
+        self.delta_from(id, frame).await
+    }
+
+    /// The next delta of `id` if its first frame arrives within `within`,
+    /// applied as [`Self::next_delta`] applies it; `None` otherwise.
+    pub async fn poll_delta(&mut self, id: &str, within: Duration) -> Checked<Option<Delta>> {
+        match self.next_push_for(id, within).await? {
+            Some(frame) => self.delta_from(id, frame).await.map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// Forget the change notifications received so far, e.g. to bound memory
+    /// while writers commit for a long time.
+    pub fn clear_notices(&mut self) {
+        self.notices.clear();
+    }
+
+    /// The delta that starts with `frame`, read whole and applied.
+    async fn delta_from(&mut self, id: &str, frame: Frame) -> Checked<Delta> {
         if frame.kind() != "subscription_delta_start" {
             return self.apply(id, &frame);
         }

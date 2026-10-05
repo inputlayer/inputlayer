@@ -1,5 +1,5 @@
 //! Parameterized views: subscriptions that differ only in bound constants
-//! share one evaluation per commit, and each subscriber still gets exactly the
+//! share their evaluations, and each subscriber still gets exactly the
 //! rows its own query returns.
 
 use std::collections::BTreeSet;

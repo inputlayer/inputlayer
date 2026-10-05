@@ -154,6 +154,13 @@ streams as a `.subscribe` reply naming its subscription. The testkit agent
 rejects a streamed delta whose chunks are missing, duplicated, out of order or
 short of its end frame's counts (`Violation::BrokenStream`).
 
+`tests/e2e_reactive/saturation.rs` requires correct deliveries under overload,
+at the scale of issue #292: 960 sessions, each subscribed to its own bound
+standing query, while writers saturate the engine for 30 s. Each probe's delta
+reaches exactly its session, once, within a bound of the write's
+acknowledgement, and no session gets a stray delta or a `subscription_error`
+(its module doc states the full contract).
+
 Defects tracked by the reactive plan run as **expected failures** in a
 `tests/e2e_reactive/known_defects.rs` module (none is open today). Each
 asserts the correct contract; its own violation passes as `XFAIL`, any other
