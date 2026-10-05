@@ -3,7 +3,7 @@
  */
 
 import type { Connection } from './connection.js';
-import type { RelationDef } from './relation.js';
+import { withParams, type RelationDef } from './relation.js';
 import type { Fact } from './types.js';
 import type { RuleClause } from './compiler.js';
 import { compileInsert, compileBulkInsert, compileRule } from './compiler.js';
@@ -27,13 +27,10 @@ export class Session {
     const factList = Array.isArray(facts) ? facts : [facts];
     if (factList.length === 0) return;
 
-    let iql: string;
-    if (factList.length === 1) {
-      iql = compileInsert(rel, factList[0], false);
-    } else {
-      iql = compileBulkInsert(rel, factList, false);
-    }
-    await this.conn.execute(iql);
+    const { result: iql, params } = withParams(() =>
+      factList.length === 1 ? compileInsert(rel, factList[0], false) : compileBulkInsert(rel, factList, false),
+    );
+    await this.conn.execute(iql, { params });
   }
 
   /** Define session-scoped rules (no + prefix). */
@@ -43,8 +40,8 @@ export class Session {
     clauses: RuleClause[],
   ): Promise<void> {
     for (const clause of clauses) {
-      const iql = compileRule(headName, headColumns, clause, false);
-      await this.conn.execute(iql);
+      const { result: iql, params } = withParams(() => compileRule(headName, headColumns, clause, false));
+      await this.conn.execute(iql, { params });
     }
   }
 

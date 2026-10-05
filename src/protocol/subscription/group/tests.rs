@@ -3,7 +3,6 @@ use tempfile::TempDir;
 
 use super::*;
 use crate::protocol::subscription::Row;
-use crate::statement::parse_query;
 use crate::Config;
 
 const KG: &str = "groups";
@@ -112,23 +111,23 @@ async fn a_rerun_that_finds_the_same_rows_keeps_the_shared_result() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn rule_changes_rerun_exactly_the_queries_they_can_affect() {
+async fn a_rule_change_reruns_every_query_and_reports_only_real_changes() {
     let (handler, _tmp) = handler(|_| {});
     write(&handler, "+a(1)\n+b(2)").await;
     write(&handler, "+r(X) <- a(X)").await;
     let mut query = group(&handler, &["?r(X)", "?b(X)"]);
     refresh(&handler, &mut query).await;
 
+    // The change log tracks the rules as a whole: every query runs again.
     write(&handler, "+r(X) <- b(X)").await;
     let (refresh_1, ran) = refresh(&handler, &mut query).await;
-    assert_eq!(ran, 1, "a new rule for `r` reruns `?r` only");
+    assert_eq!(ran, 2);
     assert_eq!(values(&refresh_1.queries[0].inserted), [2]);
     assert!(refresh_1.queries[1].is_unchanged());
     assert!(refresh_1.dependencies.contains("b"));
 
-    write(&handler, "+s(X) <- b(X)").await;
     let (refresh_2, ran) = refresh(&handler, &mut query).await;
-    assert_eq!(ran, 0, "a rule no query reads reruns nothing");
+    assert_eq!(ran, 0, "nothing changed since: nothing runs");
     assert!(refresh_2.is_unchanged());
 }
 
@@ -172,18 +171,6 @@ async fn a_delete_and_reinsert_in_one_commit_is_no_change() {
     assert!(ran <= 1, "`b` did not change");
     assert!(again.is_unchanged(), "same rows: {:?}", again.queries[0]);
     assert_eq!(again.queries[0].result.sorted_rows(), [vec![json!(1)]]);
-}
-
-#[test]
-fn a_query_reading_untracked_state_has_no_comparable_inputs() {
-    let snapshot = KnowledgeGraphSnapshot::empty();
-    let plain = parse_query("a(X)").unwrap();
-    let plain = Dependencies::for_query(&plain, &snapshot.rules);
-    assert!(Inputs::of(&plain, &snapshot).is_some_and(|inputs| inputs.hold_in(&plain, &snapshot)));
-    let nearest = parse_query(r#"hnsw_nearest("idx", [0.0, 1.0], 2, Id, Dist)"#).unwrap();
-    let nearest = Dependencies::for_query(&nearest, &snapshot.rules);
-    assert!(nearest.reads_untracked_state());
-    assert!(Inputs::of(&nearest, &snapshot).is_none());
 }
 
 #[test]

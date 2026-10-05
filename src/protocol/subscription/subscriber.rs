@@ -216,6 +216,20 @@ impl Subscriber {
         }
     }
 
+    /// Take up wake-ups once registered. The hub may ring the doorbell
+    /// before the connection registers this subscriber; the connection drops
+    /// that wake-up as stale without answering it, so the doorbell stays
+    /// marked queued and would swallow every later ring. Answer it, then ring
+    /// again if the view published since this subscriber's starting point.
+    /// Answering before loading the cell means a publication either is seen
+    /// here or rings an answered doorbell.
+    pub fn resume(&self) {
+        self.doorbell.answer();
+        if self.cell.latest().number != self.seen {
+            self.doorbell.ring();
+        }
+    }
+
     fn adopt(&mut self, publication: &Publication) {
         self.base = Arc::clone(&publication.results);
         self.base_number = publication.result_number;

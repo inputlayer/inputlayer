@@ -7,8 +7,14 @@ services:
     volumes:
       - inputlayer-data:/var/lib/inputlayer/data
     environment:
-      INPUTLAYER_ADMIN_PASSWORD: ${INPUTLAYER_ADMIN_PASSWORD:-}
-      INPUTLAYER_BOOTSTRAP_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
+      # REQUIRED, at least 12 characters each (the engine refuses shorter
+      # ones on first boot). Compose refuses to start without them; the
+      # gateway uses the API key to reach the engine. Generate them into
+      # .env, on a private network too:
+      #   echo "INPUTLAYER_ADMIN_PASSWORD=$(openssl rand -hex 24)" >> .env
+      #   echo "INPUTLAYER_BOOTSTRAP_API_KEY=$(openssl rand -hex 24)" >> .env
+      INPUTLAYER_ADMIN_PASSWORD: ${INPUTLAYER_ADMIN_PASSWORD:?Set INPUTLAYER_ADMIN_PASSWORD (at least 12 characters) in .env}
+      INPUTLAYER_BOOTSTRAP_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:?Set INPUTLAYER_BOOTSTRAP_API_KEY (at least 12 characters) in .env}
       INPUTLAYER_HTTP__HOST: "0.0.0.0"
       INPUTLAYER_HTTP__PORT: "8080"
       INPUTLAYER_HTTP__CORS_ALLOW_ALL: "${CORS_ALLOW_ALL:-false}"
@@ -31,11 +37,15 @@ services:
       GATEWAY_HOST: "0.0.0.0"
       GATEWAY_PORT: "8081"
       INPUTLAYER_URL: "http://inputlayer:8080"
-      INPUTLAYER_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
+      INPUTLAYER_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:?Set INPUTLAYER_BOOTSTRAP_API_KEY (at least 12 characters) in .env}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      # Bearer token required on /v1/* when set; unset leaves the
-      # gateway endpoints open (fine only behind a private network).
-      GATEWAY_API_KEY: ${GATEWAY_API_KEY:-}
+      # REQUIRED, on a private network too: the port mapping above publishes
+      # the gateway on every host interface unless you bind it to one, and
+      # an unauthenticated gateway spends your model-provider budget for
+      # anyone who reaches it. Clients authenticate with Authorization
+      # Bearer. Generate it into .env:
+      #   echo "GATEWAY_API_KEY=$(openssl rand -hex 24)" >> .env
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:?GATEWAY_API_KEY is required - clients authenticate with Authorization Bearer}
       # Every ontology published in the registry index is loaded at startup
       # and pinned by version and digest; each request selects one via the
       # x-il-ontology header. INPUTLAYER_REGISTRY overrides the index location and

@@ -452,10 +452,10 @@ describe.skipIf(SKIP)('Live: subscriptions', () => {
     await kg.insert(E, { a: 1, b: 1 });
     const user = `${PREFIX}_reader`;
     await il.dropUser(user).catch(() => undefined);
-    await il.createUser(user, 'reader-pw-1', 'viewer');
+    await il.createUser(user, 'reader-password-1', 'viewer');
     await kg.grantAccess(user, 'viewer');
     // Lazy: the reader may read only this graph, so it never opens the default one.
-    const reader = client({ username: user, password: 'reader-pw-1' });
+    const reader = client({ username: user, password: 'reader-password-1' });
     try {
       const consumer = new Consumer(reader.knowledgeGraph(kg.name).subscribe(E));
       await waitFor(() => consumer.rows.size === 1);

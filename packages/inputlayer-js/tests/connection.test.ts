@@ -33,6 +33,8 @@ interface Connected {
 class MockServer {
   readonly connections: Connected[] = [];
   epoch = 'e1';
+  /** `protocol_version` sent in `authenticated`. */
+  static protocolVersion = 5;
   refuseAuth = false;
   /** Answer authentication with a closing notice and close, as on `auth_timeout`. */
   closeOnAuth = false;
@@ -79,7 +81,7 @@ class MockServer {
                     knowledge_graph: kg,
                     version: 'test',
                     role: 'admin',
-                    protocol_version: 3,
+                    protocol_version: MockServer.protocolVersion,
                     stream_epoch: this.epoch,
                   },
             ),
@@ -347,6 +349,50 @@ describe('connection fixtures', () => {
 });
 
 // ── Routing ─────────────────────────────────────────────────────────
+
+describe('params', () => {
+  it('sends values beside the program, and omits empty params', async () => {
+    const c = await open();
+    const call = c.execute('+eta($s, $d)', { params: { s: 'S-77"), +x(1', d: { int: '9007199254740993' } } });
+    const bare = c.execute('?eta(S, D)', { params: {} });
+    await server!.until(() => executes(server!.last).length === 2);
+    const [sent, plain] = executes(server!.last);
+    expect(sent.program).toBe('+eta($s, $d)');
+    expect(sent.params).toEqual({ s: 'S-77"), +x(1', d: { int: '9007199254740993' } });
+    expect('params' in plain).toBe(false);
+    for (const frame of [sent, plain]) {
+      server!.last.socket.send(
+        JSON.stringify({ type: 'result', id: frame.id, columns: [], rows: [], row_count: 0, total_count: 0,
+          truncated: false, execution_time_ms: 0, errors: [] }),
+      );
+    }
+    await Promise.all([call, bare]);
+  });
+
+  it('refuses params on an engine older than protocol 4, sending nothing', async () => {
+    MockServer.protocolVersion = 3;
+    try {
+      const c = await open();
+      await expect(c.execute('+eta($s)', { params: { s: 'S-77' } })).rejects.toThrow(/protocol 3; parameters need version 4/);
+      expect(executes(server!.last)).toEqual([]);
+    } finally {
+      MockServer.protocolVersion = 5;
+    }
+  });
+
+  it('refuses reads and subscription groups on an engine older than protocol 5, sending nothing', async () => {
+    MockServer.protocolVersion = 4;
+    try {
+      const c = await open();
+      const queries = [{ name: 'a', query: '?a(X)' }];
+      await expect(c.read(queries)).rejects.toThrow(/protocol 4; reads and subscription groups need version 5/);
+      await expect(c.subscribeGroup('g', queries)).rejects.toThrow(/need version 5/);
+      expect(requests(server!.last)).toEqual([]);
+    } finally {
+      MockServer.protocolVersion = 5;
+    }
+  });
+});
 
 describe('routing', () => {
   it('every request carries a distinct id', async () => {

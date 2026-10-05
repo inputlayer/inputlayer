@@ -19,6 +19,12 @@ pub fn string_end(s: &str, start: usize) -> Option<usize> {
     None
 }
 
+/// The name of the parameter reference `s` is exactly (`$name`), if it is one.
+pub fn param_name(s: &str) -> Option<&str> {
+    s.strip_prefix('$')
+        .filter(|name| inputlayer_ws_protocol::is_param_name(name))
+}
+
 /// True when `s` is exactly one string literal.
 pub fn is_string_literal(s: &str) -> bool {
     s.starts_with('"') && string_end(s, 0) == Some(s.len())

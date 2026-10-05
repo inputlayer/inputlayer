@@ -219,6 +219,8 @@ result = await kg.insert(Employee, data=df)
 print(f"Inserted {result.count} rows")
 ```
 
+Every write (inserts, deletes, programs, claims, rules and session facts) sends its values as [parameters](/docs/guides/websocket-api#parameters), beside the program text: the program reads `+employee($p0, $p1, $p2, $p3, $p4)` and the engine binds the values without parsing them, so no value can change what the program does. This needs an engine speaking protocol 4; an older one is refused before anything is sent.
+
 ## Deleting Data
 
 Delete specific facts or use a filter to remove matching rows:
@@ -415,7 +417,16 @@ If you need to drop down to raw InputLayer Query Language for something the OLM 
 result = await kg.execute("?employee(Id, Name, D, Salary, A), Salary > 100000")
 ```
 
-The query body is whatever follows `?`. Variable names must be capitalized (lowercase identifiers parse as constants). For agent-style or chain-style use, prefer the safe parameter binding helpers from the [LangChain Integration](langchain) guide rather than building IQL strings with `f"..."`.
+The query body is whatever follows `?`. Variable names must be capitalized (lowercase identifiers parse as constants). Never build IQL strings with `f"..."` from values you did not write yourself: pass them as parameters, which the engine binds without parsing:
+
+```python
+await kg.execute(
+    "+employee($id, $name, $dept, $salary, $active)",
+    params={"id": 7, "name": user_input, "dept": "eng", "salary": 100000.0, "active": True},
+)
+```
+
+For agent-style or chain-style use, see also the [LangChain Integration](langchain) guide.
 
 ## Derived Relations (Rules)
 

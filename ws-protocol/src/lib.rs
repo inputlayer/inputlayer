@@ -58,6 +58,15 @@
 //! result, or [`ErrorCode::OutcomeUnknown`] if the commit itself failed in a
 //! way that leaves the outcome open.
 //!
+//! # Revision preconditions
+//!
+//! An `execute` that writes may set `expect_revision` (see
+//! [`ClientFrame::Execute`]): its writes commit only if no relation in scope
+//! (`expect_relations`, closed over the rules that derive them, or the whole
+//! knowledge graph) and no persistent rule changed after that revision.
+//! Otherwise nothing is applied and it fails with
+//! [`ErrorCode::PreconditionFailed`].
+//!
 //! # Large payloads
 //!
 //! No frame exceeds the engine's message size limit. A result or a
@@ -75,6 +84,7 @@
 mod client;
 mod error;
 mod notice;
+mod params;
 mod push;
 mod request_id;
 mod server;
@@ -83,6 +93,7 @@ mod timing;
 pub use client::{ClientFrame, NamedQuery};
 pub use error::{ErrorCode, StatementError, ValidationError};
 pub use notice::NoticeCode;
+pub use params::{is_param_name, InvalidParamName, ParamValue, Params, MAX_PARAM_NAME_LEN};
 pub use push::{GroupMemberDelta, GroupMemberDeltaHeader, Notification, Row, SubscriptionPush};
 pub use request_id::{probe_request_id, InvalidRequestId, RequestId, MAX_REQUEST_ID_LEN};
 pub use server::{
@@ -94,4 +105,4 @@ pub use timing::{IrBuilderTiming, OptimizerTiming, RuleTiming, TimingBreakdown};
 
 /// Version of this protocol, sent in `authenticated`. Bumped on any change a
 /// client must know about.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;

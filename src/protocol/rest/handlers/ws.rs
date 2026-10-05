@@ -649,10 +649,36 @@ fn admit(
         requests.admit(access, (request, span));
         return;
     }
-    let control = match &request.job {
-        Job::Execute { timeout_ms, .. } | Job::Read { timeout_ms, .. } => {
-            Some(handler.request_control(*timeout_ms))
+    if let Job::Execute {
+        precondition: Some(expectation),
+        ..
+    } = &request.job
+    {
+        let epoch = handler.notifications().epoch();
+        if expectation.epoch.as_deref().is_some_and(|e| e != epoch) {
+            let rejected = ServerFrame::error(
+                request.id.clone(),
+                Some(ErrorCode::PreconditionFailed),
+                format!(
+                    "Precondition failed: expect_epoch is not this engine run's stream \
+                     epoch ({epoch}); revisions restart with the engine. Nothing was applied."
+                ),
+            );
+            let (access, request) = Request::immediate(rejected);
+            requests.admit(access, (request, span));
+            return;
         }
+    }
+    let control = match &request.job {
+        Job::Execute {
+            timeout_ms,
+            precondition,
+            ..
+        } => Some(handler.request_control_expecting(
+            *timeout_ms,
+            precondition.as_ref().map(|e| e.precondition.clone()),
+        )),
+        Job::Read { timeout_ms, .. } => Some(handler.request_control(*timeout_ms)),
         _ => None,
     };
     let id = request.id.clone();
@@ -683,7 +709,9 @@ fn start_requests(
             Job::Immediate(frame) => {
                 requests.complete(ticket, Reply::Frames(vec![encode(&frame)]));
             }
-            Job::Execute { program, .. } => {
+            Job::Execute {
+                program, params, ..
+            } => {
                 let control = match in_flight.control(ticket) {
                     Some(control) => Arc::clone(control),
                     None => handler.request_control(None),
@@ -703,6 +731,7 @@ fn start_requests(
                     session_id.to_string(),
                     id,
                     program,
+                    params,
                     principal.clone(),
                     control,
                 );

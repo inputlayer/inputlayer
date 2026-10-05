@@ -56,6 +56,8 @@ const PUSHES = new Set(['notice', 'persistent_update', 'rule_change', 'kg_change
  */
 class ScriptedEngine {
   readonly sent: string[] = [];
+  /** The `params` of each executed program. */
+  readonly params: unknown[] = [];
   /** The `kg` each connection asked to be bound to (`undefined`: none). */
   readonly bound: Array<string | undefined> = [];
   /** Graphs a connection may bind to. */
@@ -92,7 +94,7 @@ class ScriptedEngine {
               knowledge_graph: kg ?? 'other',
               version: 'test',
               role: 'admin',
-              protocol_version: 3,
+              protocol_version: 5,
               stream_epoch: '00112233aabbccdd',
             }),
           );
@@ -103,6 +105,7 @@ class ScriptedEngine {
           return;
         }
         this.sent.push(msg.program);
+        this.params.push(msg.params);
         this.onProgram?.(msg.program);
         for (const frame of this.replies.shift() ?? []) {
           const reply = PUSHES.has(String(frame.type)) ? frame : { ...frame, id: msg.id };
@@ -389,7 +392,8 @@ describe('KG binding', () => {
     const kg = await kgOn([messages(["Inserted 1 fact(s) into 'demo'."])]);
     expect(await kg.insert(Demo, { x: 1 })).toEqual({ count: 1 });
     expect(engine?.bound).toEqual([undefined, 'default']);
-    expect(engine?.sent).toEqual(['+demo(1)']);
+    expect(engine?.sent).toEqual(['+demo($p0)']);
+    expect(engine?.params).toEqual([{ p0: 1 }]);
   });
 
   it('creates a missing graph through the client connection, then binds', async () => {
@@ -410,7 +414,7 @@ describe('KG binding', () => {
     expect(await client.knowledgeGraph('default').insert(Demo, { x: 1 })).toEqual({ count: 1 });
         // `.kg create` moves the creating session too: the client connection
     // switches back, so the new graph can later be dropped.
-    expect(engine.sent).toEqual(['.kg create default', '.kg use other', '+demo(1)']);
+    expect(engine.sent).toEqual(['.kg create default', '.kg use other', '+demo($p0)']);
     expect(engine.bound).toEqual([undefined, 'default', 'default']);
   });
 

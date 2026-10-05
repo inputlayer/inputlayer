@@ -122,7 +122,7 @@ impl GroupAdapter {
         let first = self.doorbell();
         let Attach::Waiting(Some(dispatch)) =
             self.registry
-                .attach(key.clone(), Arc::clone(&first), || Box::new(fresh))
+                .attach(key.clone(), Arc::clone(&first), None, || Box::new(fresh))
         else {
             return Err(AdapterError::Failed(
                 "a new group did not get its own view".to_string(),
@@ -144,10 +144,9 @@ impl GroupAdapter {
         let eager = Subscriber::new("eager", 1, KG, first, &attachment).grouped(Arc::clone(&names));
 
         let second = self.doorbell();
-        let Attach::Attached(shared) = self
-            .registry
-            .attach(key, Arc::clone(&second), || unreachable!("the view exists"))
-        else {
+        let Attach::Attached(shared) = self.registry.attach(key, Arc::clone(&second), None, || {
+            unreachable!("the view exists")
+        }) else {
             return Err(AdapterError::Failed(
                 "the second subscriber did not share the group".to_string(),
             ));

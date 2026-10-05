@@ -1,6 +1,6 @@
 /**
  * WebSocket wire protocol: message serialization and deserialization.
- * Matches the AsyncAPI spec at docs/spec/asyncapi.yaml (protocol version 4,
+ * Matches the AsyncAPI spec at docs/spec/asyncapi.yaml (protocol version 5,
  * defined by the `inputlayer-ws-protocol` crate).
  *
  * Any request may carry an `id`; every reply to it echoes it. Pushes
@@ -9,7 +9,13 @@
  */
 
 /** The `/ws` protocol version this SDK speaks (`authenticated.protocol_version`). */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
+
+/** The first protocol version whose `execute` takes `params`. */
+export const PARAMS_PROTOCOL_VERSION = 4;
+
+/** The first protocol version with `read` and `subscribe` (subscription groups). */
+export const GROUPS_PROTOCOL_VERSION = 5;
 
 // ── Client -> Server messages ───────────────────────────────────────
 
@@ -26,10 +32,33 @@ export interface AuthenticateMessage {
   api_key: string;
 }
 
+/**
+ * One parameter's value. A bare value is typed by its JSON form: a string, a
+ * boolean, an integer (int64), a number with a fraction or exponent (float)
+ * or an array of numbers (vector). The one-key forms name the type: JSON
+ * writes `2.0` as `2`, so send an integral float as `{ float: 2 }`, and an
+ * integer past 2^53 as `{ int: "9007199254740993" }`.
+ */
+export type ParamValue =
+  | string
+  | boolean
+  | number
+  | number[]
+  | { int: number | string }
+  | { float: number }
+  | { string: string }
+  | { bool: boolean }
+  | { vector: number[] };
+
+/** Values of a program's `$name` references, by name (protocol version 4). */
+export type Params = Record<string, ParamValue>;
+
 export interface ExecuteMessage {
   type: 'execute';
   id?: string;
   program: string;
+  /** Values bound to the program's `$name` references, never parsed as IQL. */
+  params?: Params;
   /** Milliseconds the request may take from its arrival (queueing, admission, computation); capped by the engine's query timeout. */
   timeout_ms?: number;
 }

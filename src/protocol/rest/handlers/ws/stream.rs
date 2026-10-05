@@ -99,6 +99,7 @@ fn stream_result(result: ResultFrame) -> Result<Vec<String>, Undeliverable> {
         timing_breakdown,
         errors,
         statements,
+        revision,
         subscribed,
     } = result;
     let empty_chunk = ServerFrame::ResultChunk {
@@ -141,6 +142,7 @@ fn stream_result(result: ResultFrame) -> Result<Vec<String>, Undeliverable> {
         timing_breakdown,
         errors,
         statements,
+        revision,
         subscribed,
     }))?);
     let mut rows = rows.into_iter();

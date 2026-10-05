@@ -55,7 +55,7 @@ class Peer:
             "knowledge_graph": kg or self.params.get("kg", "default"),
             "version": "0.0.0-mock",
             "role": "admin",
-            "protocol_version": 4,
+            "protocol_version": 5,
             "stream_epoch": epoch,
         })
         return login

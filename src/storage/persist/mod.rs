@@ -1184,7 +1184,7 @@ fn create_directory(path: &Path) -> std::io::Result<()> {
 /// On POSIX systems, file deletion and rename are only guaranteed durable
 /// after the parent directory inode is fsynced. Without this, a crash can
 /// "resurrect" deleted files or roll back renames.
-fn sync_directory(dir: &Path) -> std::io::Result<()> {
+pub(crate) fn sync_directory(dir: &Path) -> std::io::Result<()> {
     #[cfg(test)]
     check_sync_fault(dir)?;
     fs::File::open(dir)?.sync_all()

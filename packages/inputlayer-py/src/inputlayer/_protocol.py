@@ -1,6 +1,6 @@
 """WebSocket wire protocol: message serialization and deserialization.
 
-Matches the AsyncAPI spec at ``docs/spec/asyncapi.yaml`` (protocol version 4,
+Matches the AsyncAPI spec at ``docs/spec/asyncapi.yaml`` (protocol version 5,
 defined by the ``inputlayer-ws-protocol`` crate).
 
 Any request may carry an ``id``; every reply to it (``authenticated``,
@@ -16,14 +16,21 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal
 
-PROTOCOL_VERSION = 4
+PROTOCOL_VERSION = 5
 """The ``/ws`` protocol version this SDK speaks (``authenticated.protocol_version``)."""
+
+PARAMS_PROTOCOL_VERSION = 4
+"""The first protocol version whose ``execute`` takes ``params``."""
+
+GROUPS_PROTOCOL_VERSION = 5
+"""The first protocol version with ``read`` and ``subscribe`` (subscription groups)."""
 
 
 def _with_id(frame: dict[str, Any], request_id: str | None) -> str:
     if request_id is not None:
         frame["id"] = request_id
-    return json.dumps(frame)
+    # A parameter is never NaN or infinite; refuse to write one, never `NaN`.
+    return json.dumps(frame, allow_nan=False)
 
 # ── Client → Server messages ──────────────────────────────────────────
 
@@ -60,9 +67,14 @@ class ExecuteMessage:
     timeout_ms: int | None = None
     """The request's deadline, counted from when the server reads it (capped
     by the engine's own query timeout)."""
+    params: dict[str, Any] | None = None
+    """Values of the program's ``$name`` references, bound by the engine
+    without being parsed (protocol version 4)."""
 
     def to_json(self) -> str:
         frame: dict[str, Any] = {"type": "execute", "program": self.program}
+        if self.params:
+            frame["params"] = self.params
         if self.timeout_ms is not None:
             frame["timeout_ms"] = self.timeout_ms
         return _with_id(frame, self.id)

@@ -21,7 +21,8 @@ async fn live_group(
 ) -> (Attachment, UnboundedReceiver<SubscriberId>) {
     let (doorbell, mailbox) = doorbell(1);
     let key = group_key(&["?a(X)", "?b(X)"]);
-    let Attach::Waiting(Some(first)) = registry.attach(key, doorbell, || Scripted::group(steps))
+    let Attach::Waiting(Some(first)) =
+        registry.attach(key, doorbell, None, || Scripted::group(steps))
     else {
         panic!("a new view evaluates");
     };
@@ -143,9 +144,11 @@ async fn groups_share_a_view_only_with_the_same_queries_in_the_same_order() {
     let (attachment, _mailbox) =
         live_group(&mut registry, vec![step(&[(&[1], "a"), (&[5], "b")])]).await;
     let (same, _m2) = doorbell(2);
-    let Attach::Attached(shared) = registry.attach(group_key(&["?a(X)", "?b(X)"]), same, || {
-        unreachable!("the view exists")
-    }) else {
+    let Attach::Attached(shared) =
+        registry.attach(group_key(&["?a(X)", "?b(X)"]), same, None, || {
+            unreachable!("the view exists")
+        })
+    else {
         panic!("joins the live group");
     };
     assert!(Arc::ptr_eq(&shared.cell, &attachment.cell));
@@ -153,7 +156,7 @@ async fn groups_share_a_view_only_with_the_same_queries_in_the_same_order() {
         let (other, _m) = doorbell(id);
         let steps = vec![step(&[(&[], "a")])];
         assert!(matches!(
-            registry.attach(group_key(&queries), other, || Scripted::group(steps)),
+            registry.attach(group_key(&queries), other, None, || Scripted::group(steps)),
             Attach::Waiting(Some(_))
         ));
     }

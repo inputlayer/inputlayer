@@ -518,10 +518,10 @@ async def test_an_acl_revoke_ends_the_subscription_with_access_denied() -> None:
         user = f"{PREFIX}_reader"
         with contextlib.suppress(Exception):
             await il.drop_user(user)
-        await il.create_user(user, "reader-pw-1", "viewer")
+        await il.create_user(user, "reader-password-1", "viewer")
         await kg.grant_access(user, "viewer")
         # Lazy: the reader may read only this graph, so it never opens another.
-        reader = _client(user, "reader-pw-1")
+        reader = _client(user, "reader-password-1")
         try:
             consumer = Consumer(reader.knowledge_graph(kg.name, create=False).subscribe(E))
             await _until(lambda: len(consumer.rows) == 1)

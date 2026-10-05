@@ -96,8 +96,22 @@ num_threads = 0
 # flagged `truncated` (0 = unlimited)
 max_result_rows = 100000
 
-# Maximum query cost budget (0 = unlimited)
-max_query_cost = 0
+# Most rows one join of a query may be estimated to produce (0 = unlimited).
+# Before a query runs, each join is estimated from the sizes of the
+# relations it reads: on a shared variable as its larger input, on none (a
+# cross product) as the product of its inputs, so in practice only large
+# cross products go over it. Such a query is refused with `validation`
+# before it runs. A plan over it is estimated again with the rows its
+# filters keep of stored relations (`a(X, 7)`), and refused only if it is
+# still over.
+max_query_cost = 100000000
+
+# Optional: most fixpoint iterations a recursive rule may run (default 0 =
+# no limit; the deadline and memory limits already stop recursion that never
+# reaches a fixpoint). Each iteration extends paths by one step; when set,
+# recursion that keeps deriving new values, such as a counter without an
+# upper bound, is refused with `validation` when it reaches this.
+max_recursion_iterations = 0
 
 # Most heap bytes one query may hold while it computes, summed over the
 # threads evaluating it (0 = unlimited). A query that grows past it is
@@ -107,8 +121,9 @@ max_query_memory_bytes = 4294967296
 # Most heap bytes all queries running at once may hold together; a query
 # that grows while they hold more is refused with `resource_exhausted`, so
 # concurrent queries never push the server past its memory. Unset: 60% of
-# the container's memory limit (cgroup), or no limit outside a
-# memory-limited container; set it explicitly when graphs hold real data.
+# the container's memory limit (the tightest cgroup limit on the process,
+# as a container or a systemd unit's MemoryMax= sets it), or no limit
+# without one; set it explicitly when graphs hold real data.
 # 0 = unlimited. Stored graphs are separate from it, so size the server by:
 # (graph budgets below, summed) + this + server overhead (about 0.5 GB)
 # <= 0.8 x the server's memory, and keep the per-query limit at most this.
@@ -184,7 +199,9 @@ static_dir = "./gui/dist"
 # -----------------------------------------------------------------------------
 [http.auth]
 # On first boot, an admin user and bootstrap API key are created.
-# Set a known password, or omit to auto-generate one (printed to stderr).
+# Set a known password (at least 12 characters, or the first boot refuses
+# to start), or omit it or leave it empty to have one generated and saved to
+# credentials.toml in the data directory.
 # bootstrap_admin_password = "your-secure-password"
 
 # Session timeout in seconds (default: 24 hours)
@@ -235,7 +252,7 @@ export INPUTLAYER_HTTP__ENABLED=true
 export INPUTLAYER_HTTP__PORT=9090
 
 # Authentication
-export INPUTLAYER_ADMIN_PASSWORD=your-secure-password   # Admin password (first boot only)
+export INPUTLAYER_ADMIN_PASSWORD=your-secure-password   # Admin password (first boot only, 12+ characters)
 export INPUTLAYER_API_KEY=your-api-key                  # CLI client authentication
 
 # Performance limits

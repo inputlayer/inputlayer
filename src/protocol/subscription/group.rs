@@ -6,25 +6,22 @@
 //! of them do, adopting no result before then, so the group's results are
 //! always exact at one revision together.
 //!
-//! A query whose inputs did not change is not run again: when the persistent
-//! rules defining the relations it reads are the same as at its last
-//! evaluation, and the snapshot shares every one of those relations' tuples
-//! with that evaluation's snapshot ([`Relation::shares_tuples_with`]), its
-//! result is the same, exactly, at the new revision. So a commit that touches
-//! one member costs one evaluation, not one per member. The test reads the
-//! snapshot itself, never the notifications, which may announce a commit
-//! after a snapshot that already holds it. A query that reads state no
-//! relation tracks (HNSW indexes) always runs.
+//! A query whose inputs did not change is not run again: when the snapshot's
+//! change log shows that neither the persistent rules nor any relation the
+//! query reads changed after the revision its result is exact at
+//! ([`Dependencies::changed_after`]), its result is the same, exactly, at the
+//! new revision. So a commit that touches one member costs one evaluation, not
+//! one per member. The test reads the snapshot itself, never the
+//! notifications, which may announce a commit after a snapshot that already
+//! holds it. A query that reads state no relation tracks (HNSW indexes)
+//! always runs.
 
 use std::sync::Arc;
 
 use futures_util::future::{join_all, BoxFuture};
 
-use crate::ast::Rule;
 use crate::protocol::Handler;
 use crate::statement::QueryGoal;
-use crate::storage_engine::KnowledgeGraphSnapshot;
-use crate::value::Relation;
 
 use super::{Dependencies, ReevaluatingQuery, Refresh, StandingQuery};
 
@@ -36,9 +33,8 @@ pub struct GroupQuery {
 /// One query of a [`GroupQuery`].
 struct Member {
     query: ReevaluatingQuery,
-    /// What the current result was computed from; `None` before the first
-    /// result, or when the query reads untracked state.
-    inputs: Option<Inputs>,
+    /// The revision the current result is exact at; `None` before the first.
+    revision: Option<u64>,
 }
 
 impl GroupQuery {
@@ -57,7 +53,7 @@ impl GroupQuery {
             .map(|query| {
                 Ok(Member {
                     query: ReevaluatingQuery::new(Arc::clone(&handler), knowledge_graph, query)?,
-                    inputs: None,
+                    revision: None,
                 })
             })
             .collect::<Result<_, String>>()?;
@@ -78,18 +74,16 @@ impl GroupQuery {
             let snapshot = Arc::clone(&snapshot);
             async move {
                 let unchanged = member
-                    .inputs
-                    .as_ref()
-                    .is_some_and(|inputs| inputs.hold_in(&dependencies, &snapshot));
+                    .revision
+                    .is_some_and(|at| !dependencies.changed_after(at, snapshot.changes()));
                 if unchanged {
                     return (dependencies, Ok(None));
                 }
-                let inputs = Inputs::of(&dependencies, &snapshot);
                 let evaluated = member
                     .query
                     .evaluate_on(snapshot)
                     .await
-                    .map(|evaluated| Some((evaluated, inputs)))
+                    .map(Some)
                     .map_err(|e| {
                         if grouped {
                             format!("{}: {e}", member.query.query())
@@ -113,9 +107,9 @@ impl GroupQuery {
         let mut queries = Vec::with_capacity(self.members.len());
         for (member, (member_dependencies, outcome)) in self.members.iter_mut().zip(outcomes) {
             dependencies.merge(&member_dependencies);
+            member.revision = Some(revision);
             queries.push(match outcome {
-                Ok(Some((evaluated, inputs))) => {
-                    member.inputs = inputs;
+                Ok(Some(evaluated)) => {
                     let refresh = member.query.adopt(evaluated);
                     refresh.queries.into_iter().next().unwrap_or_default()
                 }
@@ -134,64 +128,6 @@ impl StandingQuery for GroupQuery {
     fn refresh(&mut self) -> BoxFuture<'_, Result<Refresh, String>> {
         Box::pin(self.reevaluate())
     }
-}
-
-/// What one query's result was computed from: the persistent rules that
-/// define the relations it reads, and those relations' tuples. Holding the
-/// tuples keeps their chunks from being reused, so a later snapshot that
-/// shares them holds exactly these tuples.
-struct Inputs {
-    dependencies: Dependencies,
-    rules: Vec<Rule>,
-    /// Tuples of each relation in `dependencies`, in its order.
-    relations: Vec<Option<Relation>>,
-}
-
-impl Inputs {
-    /// The inputs of a query with `dependencies` in `snapshot`; `None` when
-    /// it reads state that relations do not track, which only evaluating can
-    /// compare.
-    fn of(dependencies: &Dependencies, snapshot: &KnowledgeGraphSnapshot) -> Option<Self> {
-        if dependencies.reads_untracked_state() {
-            return None;
-        }
-        Some(Self {
-            dependencies: dependencies.clone(),
-            rules: rules_defining(dependencies, snapshot).cloned().collect(),
-            relations: dependencies
-                .relations()
-                .map(|relation| snapshot.input_tuples.get(relation).cloned())
-                .collect(),
-        })
-    }
-
-    /// Whether a query with `dependencies` in `snapshot` has the same inputs,
-    /// and so the same result.
-    fn hold_in(&self, dependencies: &Dependencies, snapshot: &KnowledgeGraphSnapshot) -> bool {
-        self.dependencies == *dependencies
-            && rules_defining(dependencies, snapshot).eq(self.rules.iter())
-            && dependencies
-                .relations()
-                .zip(&self.relations)
-                .all(
-                    |(relation, held)| match (snapshot.input_tuples.get(relation), held) {
-                        (None, None) => true,
-                        (Some(now), Some(held)) => now.shares_tuples_with(held),
-                        _ => false,
-                    },
-                )
-    }
-}
-
-/// The persistent rules of `snapshot` that define a relation in `dependencies`.
-fn rules_defining<'a>(
-    dependencies: &'a Dependencies,
-    snapshot: &'a KnowledgeGraphSnapshot,
-) -> impl Iterator<Item = &'a Rule> {
-    snapshot
-        .rules
-        .iter()
-        .filter(|rule| dependencies.contains(&rule.head.relation))
 }
 
 #[cfg(test)]

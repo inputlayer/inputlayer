@@ -93,6 +93,7 @@ fn term_to_value(term: &Term) -> Result<Value, String> {
             Err("Cannot insert field access - use constants only".to_string())
         }
         Term::BoolConstant(b) => Ok(Value::Bool(*b)),
+        Term::Param(name) => Err(crate::params::unbound(name)),
         Term::RecordPattern(_) => {
             Err("Cannot insert record pattern - use constants only".to_string())
         }
@@ -201,6 +202,8 @@ pub struct Handler {
     /// Permits of standing-query sharing probes, apart from the compute
     /// permits so that a probe never takes one a query waits for.
     probe_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Whether standing-query families share whatever their rounds cost.
+    share_regardless_of_cost: bool,
     /// Memory held by the computations of every request in flight.
     query_memory: Arc<QueryMemoryPool>,
     /// Accumulated timing histogram buckets for Prometheus export.
@@ -237,39 +240,38 @@ mod index_commands {
         storage: &StorageEngine,
         kg: &str,
         opts: &IndexCreateOptions,
-    ) -> Result<String, ProgramError> {
-        let stats = storage
+    ) -> Result<(String, u64), ProgramError> {
+        let (stats, revision) = storage
             .create_index_in(kg, opts)
             .map_err(ProgramError::from)?;
-        Ok(format!(
+        let message = format!(
             "Index '{}' created on {}.{} ({} vectors).",
             stats.name, stats.relation, stats.column, stats.tuple_count
-        ))
+        );
+        Ok((message, revision))
     }
 
     pub(super) fn drop(
         storage: &StorageEngine,
         kg: &str,
         name: &str,
-    ) -> Result<String, ProgramError> {
-        storage
+    ) -> Result<(String, u64), ProgramError> {
+        let revision = storage
             .drop_index_in(kg, name)
             .map_err(ProgramError::from)?;
-        Ok(format!("Index '{name}' dropped."))
+        Ok((format!("Index '{name}' dropped."), revision))
     }
 
     pub(super) fn rebuild(
         storage: &StorageEngine,
         kg: &str,
         name: &str,
-    ) -> Result<String, ProgramError> {
-        let stats = storage
+    ) -> Result<(String, u64), ProgramError> {
+        let (stats, revision) = storage
             .rebuild_index_in(kg, name)
             .map_err(ProgramError::from)?;
-        Ok(format!(
-            "Index '{name}' rebuilt ({} vectors).",
-            stats.tuple_count
-        ))
+        let message = format!("Index '{name}' rebuilt ({} vectors).", stats.tuple_count);
+        Ok((message, revision))
     }
 
     pub(super) fn stats(
@@ -585,6 +587,13 @@ mod proof_snapshot_tests;
 mod pinned_proof_tests;
 
 #[cfg(test)]
+mod why_not_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod expect_revision_tests;
+
+#[cfg(test)]
 mod revocation_tests;
 
 #[cfg(test)]
@@ -864,6 +873,7 @@ impl ProofSnapshot {
             ),
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 
@@ -882,11 +892,35 @@ impl ProofSnapshot {
         let start = std::time::Instant::now();
         let (relation, tuple) = parse_why_not_target(input)?;
         let query_start = std::time::Instant::now();
+        // Evaluate the whole relation, uncapped: whether the target is
+        // derived, and every premise the explanation reads, must come from
+        // its derived relations, not only the base facts.
+        let arity = self
+            .snapshot
+            .rules
+            .iter()
+            .find(|rule| rule.head.relation == relation)
+            .map(|rule| rule.head.args.len());
+        let derived_data = match arity {
+            Some(arity) => {
+                let columns: Vec<String> = (0..arity).map(|i| format!("V{i}")).collect();
+                let query =
+                    transform_query_shorthand(&format!("?{relation}({})", columns.join(", ")))?
+                        .query;
+                crate::without_result_cap(|| {
+                    self.snapshot.execute_with_rules_tuples_and_derived(&query)
+                })
+                .map_err(|e| format!("Query execution failed: {e}"))?
+                .1
+            }
+            None => crate::value::RelationMap::new(),
+        };
         let ctx = ProofContext::new(
             &self.snapshot.rules,
             &self.snapshot.input_tuples,
             ProofConfig::default(),
-        );
+        )
+        .with_derived_data(&derived_data);
         let query_us = query_start.elapsed().as_micros() as u64;
 
         let explain_start = std::time::Instant::now();
@@ -916,6 +950,7 @@ impl ProofSnapshot {
             timing_breakdown: proof_timing(timing_mode, start, query_us, "explanation", explain_us),
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 }
@@ -999,6 +1034,7 @@ impl Handler {
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
+            share_regardless_of_cost: false,
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
@@ -1015,6 +1051,7 @@ impl Handler {
     /// Create a new handler from configuration.
     pub fn from_config(mut config: Config) -> Result<Self, String> {
         config.validate()?;
+        crate::parser::set_max_nesting_depth(config.storage.performance.max_nesting_depth);
         let storage =
             StorageEngine::new(config).map_err(|e| format!("Failed to create storage: {e}"))?;
         let handler = Self::new(storage);
@@ -1049,6 +1086,7 @@ impl Handler {
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
+            share_regardless_of_cost: false,
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
@@ -1081,6 +1119,16 @@ impl Handler {
     /// `query_timeout_ms` from now, or the client's `timeout_ms` when that is
     /// sooner (no deadline when both are unset or the server's is 0).
     pub fn request_control(&self, timeout_ms: Option<u64>) -> Arc<RequestControl> {
+        self.request_control_expecting(timeout_ms, None)
+    }
+
+    /// [`Self::request_control`] for a request whose commit must meet
+    /// `precondition`, if any.
+    pub fn request_control_expecting(
+        &self,
+        timeout_ms: Option<u64>,
+        precondition: Option<crate::storage_engine::Precondition>,
+    ) -> Arc<RequestControl> {
         let server_ms = match self.config.storage.performance.query_timeout_ms {
             0 => None,
             ms => Some(ms),
@@ -1089,10 +1137,12 @@ impl Handler {
             (Some(client), Some(server)) => Some(client.min(server)),
             (client, server) => client.or(server),
         };
-        RequestControl::limited(
-            ms.map(|ms| Instant::now() + std::time::Duration::from_millis(ms)),
+        RequestControl::limited_expecting(
+            // A deadline past what `Instant` can represent is no deadline.
+            ms.and_then(|ms| Instant::now().checked_add(std::time::Duration::from_millis(ms))),
             self.config.storage.performance.max_query_memory_bytes,
             Some(Arc::clone(&self.query_memory)),
+            precondition,
         )
     }
 
@@ -1120,6 +1170,21 @@ impl Handler {
         self.query_semaphore = Arc::new(tokio::sync::Semaphore::new(permits));
         self.compute_permits = permits;
         self
+    }
+
+    /// This handler's standing-query families sharing whenever their views
+    /// outnumber the compute permits, whatever their rounds cost: they still
+    /// probe, and still stop sharing on a failed round. For tests and
+    /// benchmarks that need sharing to happen whatever the host's timing.
+    #[cfg(feature = "test-support")]
+    pub fn with_sharing_regardless_of_cost(mut self) -> Self {
+        self.share_regardless_of_cost = true;
+        self
+    }
+
+    /// Whether standing-query families share whatever their rounds cost.
+    pub(crate) fn shares_regardless_of_cost(&self) -> bool {
+        self.share_regardless_of_cost
     }
 
     /// Standing-query counters.
@@ -1287,9 +1352,11 @@ impl Handler {
     /// Bootstrap auth: create the `_internal` knowledge graph and an admin
     /// user if there is none, then load the credential registry from it.
     /// Called once on server startup; until then no credential authenticates.
-    pub fn bootstrap_auth(&self) {
-        self.seed_admin_credentials();
+    /// `Err` when a supplied secret bootstrap would store is too short.
+    pub fn bootstrap_auth(&self) -> Result<(), String> {
+        self.seed_admin_credentials()?;
         self.load_credentials();
+        Ok(())
     }
 
     /// Load every user and API key from `_internal` into the registry.
@@ -1309,11 +1376,19 @@ impl Handler {
     /// Insert the bootstrap admin user when `_internal` has no users, with an
     /// API key only if bootstrap has never issued one for this data directory.
     /// The key is saved to the credentials file and printed only once stored.
-    fn seed_admin_credentials(&self) {
+    /// `Err`, before anything is written, when a supplied secret it would
+    /// store is too short.
+    fn seed_admin_credentials(&self) -> Result<(), String> {
         use crate::auth;
 
-        let Some(issue_api_key) = self.bootstrap_needed() else {
-            return;
+        let bootstrap = self.bootstrap_needed();
+        // Supplied secrets are never written to disk; blank ones count as unset.
+        let (supplied_password, supplied_api_key) = auth::bootstrap_secrets(
+            self.config.http.auth.bootstrap_admin_password.as_deref(),
+            bootstrap,
+        )?;
+        let Some(issue_api_key) = bootstrap else {
+            return Ok(());
         };
 
         let credentials_path = self
@@ -1325,14 +1400,7 @@ impl Handler {
             .unwrap_or_else(|| self.config.storage.data_dir.join("credentials.toml"));
         let persisted = auth::PersistedCredentials::load(&credentials_path).unwrap_or_default();
 
-        // Precedence: env var / config > persisted file > generated. Supplied
-        // secrets are never written to disk.
-        let supplied_password = std::env::var("INPUTLAYER_ADMIN_PASSWORD")
-            .ok()
-            .or_else(|| self.config.http.auth.bootstrap_admin_password.clone());
-        let supplied_api_key = std::env::var("INPUTLAYER_BOOTSTRAP_API_KEY")
-            .ok()
-            .filter(|k| !k.is_empty());
+        // Precedence: env var / config > persisted file > generated.
         let mut to_persist = auth::PersistedCredentials::default();
         let resolve =
             |supplied: Option<String>, persisted: Option<String>, slot: &mut Option<String>| {
@@ -1361,7 +1429,7 @@ impl Handler {
             Ok(h) => h,
             Err(e) => {
                 eprintln!("ERROR: Failed to hash admin password: {e}");
-                return;
+                return Ok(());
             }
         };
 
@@ -1382,7 +1450,7 @@ impl Handler {
                     "ERROR: cannot save generated credentials to {}: {e}. Admin user not created.",
                     credentials_path.display()
                 );
-                return;
+                return Ok(());
             }
         } else if to_persist != auth::PersistedCredentials::default() {
             info!(
@@ -1402,7 +1470,7 @@ impl Handler {
             },
         ) {
             warn!(error = %e, "Failed to insert admin user");
-            return;
+            return Ok(());
         }
         info!("Auth bootstrap: admin user created");
 
@@ -1455,6 +1523,7 @@ impl Handler {
             eprintln!("Delete this file to generate new credentials on next boot.");
             eprintln!();
         }
+        Ok(())
     }
 
     /// Prepare `_internal` for bootstrap and backfill the record of an already
@@ -1656,6 +1725,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 
@@ -1670,6 +1740,7 @@ impl Handler {
         use std::str::FromStr;
 
         let role = auth::Role::from_str(role_str)?;
+        auth::check_password_strength(password)?;
         let password_hash = auth::hash_password(password)?;
 
         let _credential_writes = self.credential_writes.lock();
@@ -1816,6 +1887,7 @@ impl Handler {
         use crate::auth;
         use crate::value::Value;
 
+        auth::check_password_strength(new_password)?;
         let new_hash = auth::hash_password(new_password)?;
         let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
@@ -2250,6 +2322,7 @@ impl Handler {
         let storage = self.storage.read();
         storage
             .clear_relations_by_prefix_in(kg, prefix)
+            .map(|(cleared, _)| cleared)
             .map_err(ProgramError::from)
     }
 
@@ -2273,12 +2346,12 @@ impl Handler {
         kg: &str,
         opts: &IndexCreateOptions,
     ) -> Result<String, ProgramError> {
-        index_commands::create(&self.storage.read(), kg, opts)
+        index_commands::create(&self.storage.read(), kg, opts).map(|(message, _)| message)
     }
 
     /// Drop an index.
     pub fn drop_index(&self, kg: &str, name: &str) -> Result<String, ProgramError> {
-        index_commands::drop(&self.storage.read(), kg, name)
+        index_commands::drop(&self.storage.read(), kg, name).map(|(message, _)| message)
     }
 
     /// List all indexes of a knowledge graph.
@@ -2293,7 +2366,7 @@ impl Handler {
 
     /// Rebuild an index from base data, dropping tombstones.
     pub fn rebuild_index(&self, kg: &str, name: &str) -> Result<String, ProgramError> {
-        index_commands::rebuild(&self.storage.read(), kg, name)
+        index_commands::rebuild(&self.storage.read(), kg, name).map(|(message, _)| message)
     }
 
     /// Execute an IQL program and return results.
@@ -2479,20 +2552,23 @@ impl QueryJob {
 
         // Phase 2: Execute statements (all guaranteed to parse successfully)
         let mut messages = Vec::new();
-        // The query to run after the statements, with its statement index.
-        let mut query_to_execute: Option<(usize, String)> = None;
+        // The query to run after the statements, with its statement index:
+        // the parsed (and bound) goal, or why a generated one did not parse.
+        let mut query_to_execute: Option<(usize, Result<statement::QueryGoal, String>)> = None;
         let mut current_stmt = String::new();
         // Track KG switch for WS session binding update
         let mut switched_kg_result: Option<String> = None;
         // Collect session facts (non-persisted) to temporarily insert before query
         // Format: (relation_name, tuple_values)
         let mut session_fact_tuples: Vec<(String, Tuple)> = Vec::new();
-        // Collect session rules to prepend to queries
-        let mut session_rules: Vec<String> = Vec::new();
-        // Parsed session rules for validation (arity/aggregation compatibility)
+        // Session rules, evaluated with the query (and checked against each
+        // other for arity/aggregation compatibility)
         let mut session_rules_parsed: Vec<crate::ast::Rule> = Vec::new();
         let mut errors: Vec<StatementError> = Vec::new();
         let mut stmt_index: usize;
+        // The revision the program's last write to persistent state committed
+        // at, if it made one.
+        let mut revision = None;
         // Records a failure of the current statement and reports it as a
         // message row too.
         macro_rules! fail {
@@ -2526,7 +2602,13 @@ impl QueryJob {
                             #[cfg(test)]
                             test_hook::run(test_hook::Point::ProofSearch);
                             match snapshot.explain(proof, timing_mode) {
-                                Ok(qr) => return Ok(QueryResult { errors, ..qr }),
+                                Ok(qr) => {
+                                    return Ok(QueryResult {
+                                        errors,
+                                        revision,
+                                        ..qr
+                                    })
+                                }
                                 Err(e) => {
                                     storage = self.storage.read();
                                     fail!(
@@ -2614,16 +2696,14 @@ impl QueryJob {
                                     continue;
                                 }
 
-                                let rule_text = format_rule_text(&rule);
-                                session_rules.push(rule_text.clone());
-                                session_rules_parsed.push(rule.clone());
                                 messages.push(format!(
                                     "Session rule added for '{}'.",
                                     rule.head.relation
                                 ));
+                                session_rules_parsed.push(rule);
                             }
-                            statement::Statement::Query(_) => {
-                                query_to_execute = Some((stmt_index, stmt_text.to_string()));
+                            statement::Statement::Query(goal) => {
+                                query_to_execute = Some((stmt_index, Ok(goal)));
                             }
                             statement::Statement::DeleteRelationOrRule(name) => {
                                 queue!(WriteStatement::Catalog(CatalogStatement::DropRule(name)));
@@ -2661,9 +2741,10 @@ impl QueryJob {
                                     }
                                     MetaCommand::KgCreate(name) => {
                                         info!(kg = %name, "meta_kg_create_start");
-                                        match storage.create_knowledge_graph(&name) {
-                                            Ok(()) => {
+                                        match storage.create_knowledge_graph_at(&name) {
+                                            Ok(created) => {
                                                 info!(kg = %name, "meta_kg_create_ok");
+                                                revision = Some(created);
                                                 self.notify_kg_change(&name, "created");
                                                 messages.push(format!(
                                                     "Knowledge graph '{name}' created."
@@ -2796,8 +2877,10 @@ impl QueryJob {
                                                     // Execute query to get data (limit 10)
                                                     let query_text =
                                                         format!("?{name}({})", vars.join(", "));
-                                                    query_to_execute =
-                                                        Some((stmt_index, query_text));
+                                                    query_to_execute = Some((
+                                                        stmt_index,
+                                                        generated_query(&query_text),
+                                                    ));
                                                     messages.push(format!("Relation '{name}': {arity} columns, {total_count} total tuples"));
                                                 }
                                             }
@@ -2814,7 +2897,8 @@ impl QueryJob {
 
                                     MetaCommand::RelDrop(name) => {
                                         match storage.drop_relation_in(kg, &name) {
-                                            Ok(()) => {
+                                            Ok(published) => {
+                                                revision = Some(published);
                                                 self.notify_schema_change(kg, &name, "dropped");
                                                 messages
                                                     .push(format!("Relation '{name}' dropped."));
@@ -2863,7 +2947,8 @@ impl QueryJob {
                                     MetaCommand::RuleQuery(name) => {
                                         // Execute as a query - delegate to query path
                                         let query_text = format!("?{name}(X, Y)");
-                                        query_to_execute = Some((stmt_index, query_text));
+                                        query_to_execute =
+                                            Some((stmt_index, generated_query(&query_text)));
                                     }
                                     MetaCommand::RuleShowDef(name) => {
                                         match storage.describe_rule_in(kg, &name) {
@@ -2901,7 +2986,8 @@ impl QueryJob {
                                     // === Clear commands ===
                                     MetaCommand::ClearPrefix(prefix) => {
                                         match storage.clear_relations_by_prefix_in(kg, &prefix) {
-                                            Ok(cleared) => {
+                                            Ok((cleared, published)) => {
+                                                revision = Some(published);
                                                 if cleared.is_empty() {
                                                     messages.push(format!(
                                                         "No relations matching prefix '{prefix}'."
@@ -3048,7 +3134,8 @@ impl QueryJob {
                                     MetaCommand::IndexCreate(opts) => {
                                         info!(index = %opts.name, "meta_index_create_start");
                                         match index_commands::create(&storage, kg, &opts) {
-                                            Ok(msg) => {
+                                            Ok((msg, published)) => {
+                                                revision = Some(published);
                                                 info!(index = %opts.name, "meta_index_create_ok");
                                                 messages.push(msg);
                                             }
@@ -3076,7 +3163,8 @@ impl QueryJob {
                                     MetaCommand::IndexDrop(name) => {
                                         info!(index = %name, "meta_index_drop_start");
                                         match index_commands::drop(&storage, kg, &name) {
-                                            Ok(msg) => {
+                                            Ok((msg, published)) => {
+                                                revision = Some(published);
                                                 info!(index = %name, "meta_index_drop_ok");
                                                 messages.push(msg);
                                             }
@@ -3156,7 +3244,10 @@ impl QueryJob {
                                     }
                                     MetaCommand::IndexRebuild(name) => {
                                         match index_commands::rebuild(&storage, kg, &name) {
-                                            Ok(msg) => messages.push(msg),
+                                            Ok((msg, published)) => {
+                                                revision = Some(published);
+                                                messages.push(msg);
+                                            }
                                             Err(e) => fail!(
                                                 e.code
                                                     .filter(|code| matches!(
@@ -3265,9 +3356,10 @@ impl QueryJob {
         if !write_run.is_empty() {
             if errors.is_empty() {
                 match self.commit_write_run(&storage, &kg_name, &mut write_run, &mut messages) {
-                    Ok((base, counts)) => {
+                    Ok((base, counts, committed_at)) => {
                         committed = Some(base);
                         statement_counts = counts;
+                        revision = committed_at.or(revision);
                     }
                     Err(failure) => {
                         stmt_index = failure.index;
@@ -3289,7 +3381,7 @@ impl QueryJob {
                 program_len,
                 stmt_exec_ms,
                 session_facts = session_fact_tuples.len(),
-                session_rules = session_rules.len(),
+                session_rules = session_rules_parsed.len(),
                 "query_statement_exec_complete"
             );
         }
@@ -3327,6 +3419,7 @@ impl QueryJob {
                 errors,
                 statements: statement_counts,
                 execution_time_ms: start.elapsed().as_millis() as u64,
+                revision,
                 ..Handler::messages_result(messages)
             });
         }
@@ -3347,14 +3440,12 @@ impl QueryJob {
                 errors,
                 statements: statement_counts,
                 execution_time_ms: start.elapsed().as_millis() as u64,
+                revision,
                 ..Handler::messages_result(messages)
             });
         }
 
-        let (query_index, program_text) = match query_to_execute {
-            Some((index, query)) => (Some(index), query),
-            None => (None, program_text),
-        };
+        let query_index = query_to_execute.as_ref().map(|(index, _)| *index);
         // A failed query is a failure of its statement; the statements before
         // it keep their results.
         macro_rules! fail_query {
@@ -3369,6 +3460,7 @@ impl QueryJob {
                             errors,
                             statements: statement_counts,
                             execution_time_ms: start.elapsed().as_millis() as u64,
+                            revision,
                             ..Handler::messages_result(messages)
                         });
                     }
@@ -3377,22 +3469,32 @@ impl QueryJob {
             }};
         }
 
-        // Transform ?shorthand query syntax into __query__(...) <- ... rule
-        let transform = match transform_query_shorthand(&program_text) {
-            Ok(transform) => transform,
-            Err(e) => fail_query!(ErrorCode::Validation, e),
+        // The program evaluated: the session rules, then the query's
+        // `__query__(...) <- ...` rule (with no query, the program's own
+        // rules). Built from the parsed statements, so their constants,
+        // bound parameters included, are never re-parsed.
+        let mut query_program = crate::ast::Program {
+            rules: session_rules_parsed,
         };
-        let query_program = transform.query;
-        let order_by = transform.order_by;
-        let query_limit = transform.limit;
-        let query_offset = transform.offset;
-        // Prepend session rules to the query program
-        let query_program = if session_rules.is_empty() {
-            query_program
-        } else {
-            let rules_text = session_rules.join("\n");
-            format!("{rules_text}\n{query_program}")
+        let (order_by, query_limit, query_offset) = match query_to_execute {
+            Some((_, Ok(goal))) => {
+                let plan = plan_query(&goal);
+                query_program.rules.push(plan.rule);
+                (plan.order_by, plan.limit, plan.offset)
+            }
+            Some((_, Err(e))) => fail_query!(ErrorCode::Validation, e),
+            None => match crate::parser::parse_program(&program_text) {
+                Ok(program) => {
+                    query_program.rules.extend(program.rules);
+                    (Vec::new(), None, None)
+                }
+                Err(e) => fail_query!(
+                    ErrorCode::Validation,
+                    format!("Query execution failed: {e}")
+                ),
+            },
         };
+        let query_rule = query_program.rules.last().cloned();
 
         // Get a snapshot of the KG data under the lock (O(1) Arc clone),
         // then RELEASE the storage lock before the heavy DD computation.
@@ -3400,7 +3502,9 @@ impl QueryJob {
         // (e.g. .kg drop), parking_lot's write-preferring policy would otherwise
         // block ALL new readers while waiting for long-running DD computations.
         // Look up registered schema column names before releasing the lock
-        let schema_col_names: Option<Vec<String>> = find_query_source_relation(&query_program)
+        let schema_col_names: Option<Vec<String>> = query_rule
+            .as_ref()
+            .and_then(query_source_relation)
             .and_then(|rel| storage.get_schema_in(&kg_name, &rel).ok().flatten())
             .map(|s| s.columns.iter().map(|c| c.name.clone()).collect());
 
@@ -3431,21 +3535,31 @@ impl QueryJob {
         let has_session_facts = !session_fact_tuples.is_empty();
         let timing_mode = self.config.storage.performance.timing_mode;
         let run = || {
-            if has_session_facts {
-                snapshot.execute_with_session_facts_profiled(
-                    &query_program,
+            match &self.cache_plan {
+                // A standing query's plan is kept under its text; the miss
+                // compiles the parsed program, never that text.
+                Some(cache_plan) if !has_session_facts => {
+                    let key: Vec<String> = query_program
+                        .rules
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect();
+                    snapshot
+                        .execute_program_with_rules_cached(
+                            &key.join("\n"),
+                            query_program,
+                            timing_mode,
+                        )
+                        .map(|(tuples, timing, run)| {
+                            let _ = cache_plan.set(run);
+                            (tuples, timing)
+                        })
+                }
+                _ => snapshot.execute_program_with_session_facts_profiled(
+                    query_program,
                     session_fact_tuples,
                     timing_mode,
-                )
-            } else if let Some(cache_plan) = &self.cache_plan {
-                snapshot
-                    .execute_with_rules_tuples_cached(&query_program, timing_mode)
-                    .map(|(tuples, timing, run)| {
-                        let _ = cache_plan.set(run);
-                        (tuples, timing)
-                    })
-            } else {
-                snapshot.execute_with_rules_tuples_profiled(&query_program, timing_mode)
+                ),
             }
         };
         let needs_full = needs_full_result(&order_by, query_offset);
@@ -3502,14 +3616,9 @@ impl QueryJob {
         // Fall back to query variable names only when no schema exists.
         let schema: Vec<ColumnDef> = if let Some(first) = results.first() {
             let arity = first.values().len();
-            let col_names = if let Some(ref names) = schema_col_names {
-                if names.len() == arity {
-                    names.clone()
-                } else {
-                    extract_column_names_from_query(&query_program, arity)
-                }
-            } else {
-                extract_column_names_from_query(&query_program, arity)
+            let col_names = match schema_col_names {
+                Some(ref names) if names.len() == arity => names.clone(),
+                _ => query_column_names(query_rule.as_ref(), arity),
             };
 
             first
@@ -3570,6 +3679,7 @@ impl QueryJob {
             timing_breakdown,
             errors,
             statements: statement_counts,
+            revision,
         })
     }
 }
@@ -3652,24 +3762,36 @@ impl Handler {
         // Slow path: combine ephemeral + persistent data
         // Get ephemeral facts and rules from session
         let session_facts = self.sessions.get_session_facts(session_id)?;
-        let rule_texts: Vec<String> = self
+        let session_rules: Vec<crate::ast::Rule> = self
             .sessions
-            .with_session(session_id, |session| session.rule_texts().to_vec())?;
+            .with_session(session_id, |session| session.rules().to_vec())?;
 
-        // Apply same preprocessing as the fast path: strip comments + transform ?shorthand
-        let preprocessed = strip_comments(&program);
-        let transform = transform_query_shorthand(&preprocessed)?;
-        let preprocessed = transform.query;
-        let order_by = transform.order_by;
-        let query_limit = transform.limit;
-        let query_offset = transform.offset;
-        // Build combined program: ephemeral rules + preprocessed query
-        // Keep `preprocessed` for the persistent-only baseline (provenance diff)
-        let combined_program = if rule_texts.is_empty() {
-            preprocessed.clone()
-        } else {
-            let rules_prefix = rule_texts.join("\n");
-            format!("{rules_prefix}\n{preprocessed}")
+        // The query's own program, as the fast path builds it: a single
+        // query evaluates as parsed (and bound), never re-parsed; anything
+        // else is transformed from its text as before.
+        let (query, order_by, query_limit, query_offset) = match statements.as_deref() {
+            Some([statement::Statement::Query(goal)]) => {
+                let plan = plan_query(goal);
+                let query = crate::ast::Program {
+                    rules: vec![plan.rule],
+                };
+                (query, plan.order_by, plan.limit, plan.offset)
+            }
+            _ => {
+                let transform = transform_query_shorthand(&strip_comments(&program))?;
+                let query = crate::parser::parse_program(&transform.query)
+                    .map_err(|e| ProgramError::from(format!("Query execution failed: {e}")))?;
+                (query, transform.order_by, transform.limit, transform.offset)
+            }
+        };
+        let query_rule = query.rules.last().cloned();
+        // Combined program: ephemeral rules + the query. `query` alone is the
+        // persistent-only baseline (provenance diff).
+        let combined_program = crate::ast::Program {
+            rules: session_rules
+                .into_iter()
+                .chain(query.rules.clone())
+                .collect(),
         };
 
         self.inc_query_count();
@@ -3683,7 +3805,9 @@ impl Handler {
             storage
                 .ensure_knowledge_graph(&kg)
                 .map_err(|e| format!("Knowledge graph not found: {e}"))?;
-            let names: Option<Vec<String>> = find_query_source_relation(&preprocessed)
+            let names: Option<Vec<String>> = query_rule
+                .as_ref()
+                .and_then(query_source_relation)
                 .and_then(|rel| storage.get_schema_in(&kg, &rel).ok().flatten())
                 .map(|s| s.columns.iter().map(|c| c.name.clone()).collect());
             let snap = storage.get_snapshot_for(&kg).map_err(|e| e.to_string())?;
@@ -3692,8 +3816,6 @@ impl Handler {
 
         // Offload CPU-bound DD computation to the blocking thread pool, under
         // a compute permit and the request's deadline (same as query_program).
-        let combined_program_clone = combined_program;
-        let preprocessed_clone = preprocessed.clone();
         let timing_mode = self.config.storage.performance.timing_mode;
         let timing_histograms = Arc::clone(&self.timing_histograms);
         let needs_full = needs_full_result(&order_by, query_offset);
@@ -3701,8 +3823,8 @@ impl Handler {
             supervise::run_blocking(&self.query_semaphore, control, move || {
                 // Run session query on snapshot (lock-free) with profiling
                 let run = || {
-                    snapshot.execute_with_session_facts_profiled(
-                        &combined_program_clone,
+                    snapshot.execute_program_with_session_facts_profiled(
+                        combined_program,
                         session_facts,
                         timing_mode,
                     )
@@ -3712,7 +3834,10 @@ impl Handler {
                 } else {
                     run()
                 }
-                .map_err(|e| ProgramError::from(format!("Query execution failed: {e}")))?;
+                .map_err(|e| ProgramError {
+                    code: Some(supervise::computation_failure_code(ErrorCode::Validation)),
+                    message: format!("Query execution failed: {e}"),
+                })?;
                 let row_capped = crate::last_result_truncated();
 
                 // Record timing in Prometheus histograms
@@ -3727,9 +3852,7 @@ impl Handler {
                 let baseline: HashSet<Tuple> = if results.is_empty() {
                     HashSet::new()
                 } else {
-                    match crate::without_result_cap(|| {
-                        snapshot.execute_with_rules_tuples(&preprocessed_clone)
-                    }) {
+                    match crate::without_result_cap(|| snapshot.execute_program_with_rules(query)) {
                         Ok(tuples) => tuples.into_iter().collect(),
                         Err(e) => {
                             warn!(error = %e, "Provenance baseline query failed - all tuples tagged as ephemeral");
@@ -3777,14 +3900,9 @@ impl Handler {
 
         let schema: Vec<ColumnDef> = if let Some(first) = results.first() {
             let arity = first.values().len();
-            let col_names = if let Some(ref names) = schema_col_names {
-                if names.len() == arity {
-                    names.clone()
-                } else {
-                    extract_column_names_from_query(&preprocessed, arity)
-                }
-            } else {
-                extract_column_names_from_query(&preprocessed, arity)
+            let col_names = match schema_col_names {
+                Some(ref names) if names.len() == arity => names.clone(),
+                _ => query_column_names(query_rule.as_ref(), arity),
             };
 
             first
@@ -3859,6 +3977,7 @@ impl Handler {
             timing_breakdown,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 
@@ -3967,9 +4086,33 @@ impl Handler {
         auth: Option<&crate::auth::Principal>,
         control: &Arc<RequestControl>,
     ) -> Result<QueryResult, ProgramError> {
+        let params = crate::params::Params::new();
+        self.execute_program_with_params(
+            session_id,
+            knowledge_graph,
+            program,
+            &params,
+            auth,
+            control,
+        )
+        .await
+    }
+
+    /// `execute_program_status` for a parameterised program: `params` are
+    /// bound to its `$name` references on the parsed statements, so no value
+    /// passes through the parser (see [`crate::params`]).
+    pub async fn execute_program_with_params(
+        &self,
+        session_id: Option<&SessionId>,
+        knowledge_graph: Option<String>,
+        program: String,
+        params: &crate::params::Params,
+        auth: Option<&crate::auth::Principal>,
+        control: &Arc<RequestControl>,
+    ) -> Result<QueryResult, ProgramError> {
         let single_statement = program_statement_count(&program) == 1;
         let result = self
-            .run_execute_program(session_id, knowledge_graph, program, auth, control)
+            .run_execute_program(session_id, knowledge_graph, program, params, auth, control)
             .await?;
         // A stop that won the race discards a result that changed nothing; a
         // later one is too late.
@@ -4072,18 +4215,16 @@ impl Handler {
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         program: String,
+        params: &crate::params::Params,
         auth: Option<&crate::auth::Principal>,
         control: &Arc<RequestControl>,
     ) -> Result<QueryResult, ProgramError> {
-        // Input size validation (protects parsing and downstream handlers)
+        // Input size validation (protects parsing and downstream handlers).
+        // Parameters count toward it: they are the program's values.
         let max_bytes = self.config.storage.performance.max_query_size_bytes;
-        if max_bytes > 0 && program.len() > max_bytes {
-            return Err(format!(
-                "Program too large: {} bytes (max {})",
-                program.len(),
-                max_bytes
-            )
-            .into());
+        let size = program.len() + params.size_bytes();
+        if max_bytes > 0 && size > max_bytes {
+            return Err(format!("Program too large: {size} bytes (max {max_bytes})").into());
         }
 
         let trimmed = program.trim();
@@ -4135,10 +4276,23 @@ impl Handler {
             }
         }
 
-        // Parsed once: these exact statements are authorized and executed.
-        let statements = parse_program(&program).ok();
+        // Parsed and bound once: these exact statements are authorized and
+        // executed.
+        let statements = parse_bound_program(&program, params)?;
         let stmts = statements.as_deref().unwrap_or_default();
         self.authorize_program(effective_auth, current_kg, stmts)?;
+        if control.precondition().is_some()
+            && statements.is_some()
+            && !program_boundary::is_transactional(stmts)
+        {
+            return Err(ProgramError {
+                message: "expect_revision needs a program that writes persistent state \
+                          (facts, schemas or rules): it is checked when those writes commit. \
+                          Nothing ran."
+                    .to_string(),
+                code: Some(ErrorCode::InvalidRequest),
+            });
+        }
         if stmts.len() > 1
             && stmts.iter().any(|stmt| {
                 matches!(
@@ -4544,6 +4698,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         }
     }
 
@@ -4637,6 +4792,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         }
     }
 
@@ -4872,6 +5028,7 @@ impl Handler {
             session_id,
             Some(kg.clone()),
             program,
+            &crate::params::Params::new(),
             auth,
             &self.request_control(None),
         ))
@@ -4934,6 +5091,7 @@ impl Handler {
                 "+pack_meta(name: string, version: string, digest: string)\n\
              +pack_item(pack: string, kind: string, item: string)"
                     .to_string(),
+                &crate::params::Params::new(),
                 auth,
                 &self.request_control(None),
             ),
@@ -4961,6 +5119,7 @@ impl Handler {
             session_id,
             Some(kg.clone()),
             record,
+            &crate::params::Params::new(),
             auth,
             &self.request_control(None),
         ))
@@ -4974,18 +5133,21 @@ impl Handler {
             .into());
         }
 
-        Ok(Self::messages_result(vec![
-            format!(
-                "installed {}@{} into {kg} ({statement_count} statements)",
-                name, entry.version
-            ),
-            format!("digest {}", entry.digest),
-            format!(
-                "recorded {} rule(s), {} relation(s) in pack_item",
-                items.iter().filter(|(k, _)| k == "rule").count(),
-                items.iter().filter(|(k, _)| k == "relation").count()
-            ),
-        ]))
+        Ok(QueryResult {
+            revision: recorded.revision,
+            ..Self::messages_result(vec![
+                format!(
+                    "installed {}@{} into {kg} ({statement_count} statements)",
+                    name, entry.version
+                ),
+                format!("digest {}", entry.digest),
+                format!(
+                    "recorded {} rule(s), {} relation(s) in pack_item",
+                    items.iter().filter(|(k, _)| k == "rule").count(),
+                    items.iter().filter(|(k, _)| k == "relation").count()
+                ),
+            ])
+        })
     }
 
     /// `.ontology remove <name>`: drop the pack's recorded rules and
@@ -5053,16 +5215,19 @@ impl Handler {
         // Failed drops are caught by the read-back below. Surface every
         // sub-result row: drops that fail phrase their errors in many ways,
         // and silence here would misreport a partial removal.
+        let mut revision = None;
         for program in programs {
             let result = Box::pin(self.run_execute_program(
                 session_id,
                 Some(kg.clone()),
                 program,
+                &crate::params::Params::new(),
                 auth,
                 &self.request_control(None),
             ))
             .await?;
             Self::result_problem_rows(&result)?;
+            revision = result.revision.or(revision);
             for row in &result.rows {
                 if let Some(WireValue::String(s)) = row.values.first() {
                     messages.push(format!("  {s}"));
@@ -5107,6 +5272,7 @@ impl Handler {
                 "-pack_item(P, K, I) <- pack_item(P, K, I), P = \"{name}\"\n\
                  -pack_meta(N, V, D) <- pack_meta(N, V, D), N = \"{name}\""
             ),
+            &crate::params::Params::new(),
             auth,
             &self.request_control(None),
         ))
@@ -5120,7 +5286,10 @@ impl Handler {
                 retained.len()
             ));
         }
-        Ok(Self::messages_result(messages))
+        Ok(QueryResult {
+            revision: cleanup.revision.or(revision),
+            ..Self::messages_result(messages)
+        })
     }
 
     /// `.ontology upgrade <name[@version]>`: re-deploy the pack's rules at
@@ -5176,6 +5345,7 @@ impl Handler {
                 session_id,
                 Some(kg.clone()),
                 program,
+                &crate::params::Params::new(),
                 auth,
                 &self.request_control(None),
             ))
@@ -5208,7 +5378,10 @@ impl Handler {
                 messages.push(s.clone());
             }
         }
-        Ok(Self::messages_result(messages))
+        Ok(QueryResult {
+            revision: install.revision,
+            ..Self::messages_result(messages)
+        })
     }
 
     /// Handle `.session` list command
@@ -5266,6 +5439,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 
@@ -5320,112 +5494,141 @@ impl Handler {
 /// Also extracts `:asc`/`:desc` sort annotations from query head variables,
 /// e.g. `?rel(X, Score:desc)` → sort by column 1 descending.
 pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTransform, String> {
+    let passthrough = || QueryTransform {
+        query: program_text.to_string(),
+        order_by: vec![],
+        limit: None,
+        offset: None,
+        columns: vec![],
+    };
     let trimmed = program_text.trim();
-    if let Some(after_q) = trimmed.strip_prefix('?') {
-        let after_q = after_q.trim_start();
-        if !after_q.starts_with(|c: char| c.is_alphabetic() || c == '_') {
-            return Ok(QueryTransform {
-                query: program_text.to_string(),
-                order_by: vec![],
-                limit: None,
-                offset: None,
-                columns: vec![],
-            });
-        }
-        let query_text = after_q;
-        let goal = statement::parse_query(query_text)
-            .map_err(|e| format!("Failed to parse query: {e}"))?;
+    let Some(after_q) = trimmed.strip_prefix('?') else {
+        return Ok(passthrough());
+    };
+    let after_q = after_q.trim_start();
+    if !after_q.starts_with(|c: char| c.is_alphabetic() || c == '_') {
+        return Ok(passthrough());
+    }
+    let goal =
+        statement::parse_query(after_q).map_err(|e| format!("Failed to parse query: {e}"))?;
+    let plan = plan_query(&goal);
+    let columns = plan
+        .rule
+        .head
+        .args
+        .iter()
+        .filter_map(|term| term.as_variable().map(str::to_string))
+        .collect();
+    Ok(QueryTransform {
+        query: plan.rule.to_string(),
+        order_by: plan.order_by,
+        limit: plan.limit,
+        offset: plan.offset,
+        columns,
+    })
+}
 
-        let mut head_vars = Vec::new();
-        let mut extra_constraints = Vec::new();
+/// The goal of a `?name(...)` query the engine generated for a meta command
+/// (`.rel <name>`, `.rule <name>`).
+fn generated_query(text: &str) -> Result<statement::QueryGoal, String> {
+    let goal = text.strip_prefix('?').unwrap_or(text);
+    statement::parse_query(goal).map_err(|e| format!("Failed to parse query: {e}"))
+}
 
-        let transformed_args: Vec<String> = goal
-            .goal
+/// A parsed `?` query as the rule that evaluates it, with its ordering and
+/// paging.
+pub(crate) struct QueryPlan {
+    /// `__query__(vars) <- goal, body`: the goal's constants become fresh
+    /// variables constrained to them.
+    pub rule: crate::ast::Rule,
+    /// Column-index-based sort specification, from `:asc`/`:desc` annotations.
+    pub order_by: Vec<(usize, SortDirection)>,
+    /// Maximum number of rows to return.
+    pub limit: Option<usize>,
+    /// Number of rows to skip before applying limit.
+    pub offset: Option<usize>,
+}
+
+/// The rule evaluating `goal`, built from its syntax tree: the query runs as
+/// parsed (and bound), never re-parsed from text.
+pub(crate) fn plan_query(goal: &statement::QueryGoal) -> QueryPlan {
+    use crate::ast::{Atom, BodyPredicate, ComparisonOp, Rule};
+
+    let mut head_vars = Vec::new();
+    let mut extra_constraints = Vec::new();
+
+    let goal_atom = goal.goal.as_ref().map(|atom| {
+        let args = atom
+            .args
             .iter()
-            .flat_map(|g| g.args.iter())
             .enumerate()
-            .map(|(i, term)| match term {
-                Term::Variable(v) => {
-                    head_vars.push(v.clone());
-                    v.clone()
-                }
-                Term::Constant(_)
-                | Term::FloatConstant(_)
-                | Term::BoolConstant(_)
-                | Term::StringConstant(_) => {
-                    let t = format!("_c{i}");
-                    head_vars.push(t.clone());
-                    extra_constraints.push(format!("{t} = {term}"));
-                    t
-                }
-                Term::VectorLiteral(_) => {
-                    // Vector literals can't be used in comparison constraints
-                    // (parser doesn't support [1,2,3] in comparison context).
+            .map(|(i, term)| {
+                let var = match term {
+                    Term::Variable(v) => v.clone(),
+                    Term::Constant(_)
+                    | Term::FloatConstant(_)
+                    | Term::BoolConstant(_)
+                    | Term::StringConstant(_)
+                    // Unbound, it is refused where the rule is built.
+                    | Term::Param(_) => {
+                        let var = format!("_c{i}");
+                        extra_constraints.push(BodyPredicate::Comparison(
+                            Term::Variable(var.clone()),
+                            ComparisonOp::Equal,
+                            term.clone(),
+                        ));
+                        var
+                    }
+                    // Vector literals can't be used in comparison constraints.
                     // Use a fresh variable - returns all rows for this position.
-                    let t = format!("_v{i}");
-                    head_vars.push(t.clone());
-                    t
-                }
-                Term::Placeholder => {
-                    let t = format!("_p{i}");
-                    head_vars.push(t.clone());
-                    t
-                }
-                _ => {
-                    // For complex terms (Arithmetic, FunctionCall, etc.),
-                    // use a fresh variable. The parser may not support these
-                    // in comparison constraints, so don't add constraints.
-                    let t = format!("_t{i}");
-                    head_vars.push(t.clone());
-                    t
-                }
+                    Term::VectorLiteral(_) => format!("_v{i}"),
+                    Term::Placeholder => format!("_p{i}"),
+                    // Complex terms (arithmetic, function calls, ...) get a
+                    // fresh, unconstrained variable.
+                    Term::Aggregate(..)
+                    | Term::Arithmetic(_)
+                    | Term::FunctionCall(..)
+                    | Term::FieldAccess(..)
+                    | Term::RecordPattern(_) => format!("_t{i}"),
+                };
+                head_vars.push(var.clone());
+                Term::Variable(var)
             })
             .collect();
+        BodyPredicate::Positive(Atom::new(atom.relation.clone(), args))
+    });
 
-        let mut body_parts: Vec<String> = goal
-            .goal
-            .iter()
-            .map(|g| format!("{}({})", g.relation, transformed_args.join(", ")))
-            .collect();
+    for pred in &goal.body {
+        extract_predicate_vars(pred, &mut head_vars);
+    }
 
-        for pred in &goal.body {
-            body_parts.push(format_body_pred(pred));
-            extract_predicate_vars(pred, &mut head_vars);
-        }
+    let body = goal_atom
+        .into_iter()
+        .chain(goal.body.iter().cloned())
+        .chain(extra_constraints)
+        .collect();
 
-        body_parts.extend(extra_constraints);
-
-        // Map sort annotations (variable names) to column indices in head_vars
-        let order_by: Vec<(usize, SortDirection)> = goal
-            .order_by
-            .iter()
-            .filter_map(|(var_name, dir)| {
-                head_vars
-                    .iter()
-                    .position(|v| v == var_name)
-                    .map(|idx| (idx, *dir))
-            })
-            .collect();
-
-        Ok(QueryTransform {
-            query: format!(
-                "__query__({}) <- {}",
-                head_vars.join(", "),
-                body_parts.join(", ")
-            ),
-            order_by,
-            limit: goal.limit,
-            offset: goal.offset,
-            columns: head_vars,
+    // Map sort annotations (variable names) to column indices in head_vars
+    let order_by: Vec<(usize, SortDirection)> = goal
+        .order_by
+        .iter()
+        .filter_map(|(var_name, dir)| {
+            head_vars
+                .iter()
+                .position(|v| v == var_name)
+                .map(|idx| (idx, *dir))
         })
-    } else {
-        Ok(QueryTransform {
-            query: program_text.to_string(),
-            order_by: vec![],
-            limit: None,
-            offset: None,
-            columns: vec![],
-        })
+        .collect();
+
+    let head = Atom::new(
+        "__query__".to_string(),
+        head_vars.into_iter().map(Term::Variable).collect(),
+    );
+    QueryPlan {
+        rule: Rule::new(head, body),
+        order_by,
+        limit: goal.limit,
+        offset: goal.offset,
     }
 }
 
@@ -5479,6 +5682,14 @@ fn join_continuation_lines(program: &str) -> String {
 /// Split a program into statements the way `QueryJob` executes it: comments
 /// stripped, continuation lines joined, one statement per non-empty line.
 fn parse_program(program: &str) -> Result<Vec<statement::Statement>, Vec<ValidationError>> {
+    parse_program_lines(program)
+        .map(|statements| statements.into_iter().map(|(_, stmt)| stmt).collect())
+}
+
+/// `parse_program`, with each statement's 1-based line number.
+fn parse_program_lines(
+    program: &str,
+) -> Result<Vec<(usize, statement::Statement)>, Vec<ValidationError>> {
     let mut statements = Vec::new();
     let mut errors = Vec::new();
     let text = join_continuation_lines(&strip_comments(program));
@@ -5488,7 +5699,7 @@ fn parse_program(program: &str) -> Result<Vec<statement::Statement>, Vec<Validat
             continue;
         }
         match statement::parse_statement(line) {
-            Ok(stmt) => statements.push(stmt),
+            Ok(stmt) => statements.push((line_num + 1, stmt)),
             Err(error) => errors.push(ValidationError {
                 line: line_num + 1,
                 statement_index: statements.len() + errors.len(),
@@ -5501,6 +5712,60 @@ fn parse_program(program: &str) -> Result<Vec<statement::Statement>, Vec<Validat
     } else {
         Err(errors)
     }
+}
+
+/// Parse `program` and bind `params` into its statements: the statements
+/// that are then authorized and executed. `Ok(None)` when it does not parse,
+/// which the executor reports.
+///
+/// Every `$name` the statements reference is replaced by its value on the
+/// syntax tree (see [`crate::params`]); a reference without a value, or one
+/// that cannot stand where it is, fails its statement, and a parameter the
+/// program never references fails the program. Nothing runs then.
+fn parse_bound_program(
+    program: &str,
+    params: &crate::params::Params,
+) -> Result<Option<Vec<statement::Statement>>, ProgramError> {
+    let Ok(statements) = parse_program_lines(program) else {
+        return Ok(None);
+    };
+    // A program without `$` holds no parameter reference.
+    if params.is_empty() && !program.contains('$') {
+        return Ok(Some(statements.into_iter().map(|(_, stmt)| stmt).collect()));
+    }
+    let mut used = std::collections::BTreeSet::new();
+    let mut errors = Vec::new();
+    let mut bound = Vec::with_capacity(statements.len());
+    for (statement_index, (line, mut stmt)) in statements.into_iter().enumerate() {
+        if let Err(error) = crate::params::bind_statement(&mut stmt, params, &mut used) {
+            errors.push(ValidationError {
+                line,
+                statement_index,
+                error,
+            });
+        }
+        bound.push(stmt);
+    }
+    if !errors.is_empty() {
+        let errors_json = serde_json::to_string(&errors).unwrap_or_default();
+        return Err(ProgramError {
+            message: format!("{VALIDATION_ERROR_PREFIX}{errors_json}"),
+            code: Some(ErrorCode::Validation),
+        });
+    }
+    let unused = crate::params::unused(params, &used);
+    if !unused.is_empty() {
+        let names: Vec<String> = unused.iter().map(|name| format!("${name}")).collect();
+        return Err(ProgramError {
+            message: format!(
+                "Parameters not referenced by the program: {}. \
+                 Every parameter sent must appear in the program as $name.",
+                names.join(", ")
+            ),
+            code: Some(ErrorCode::Validation),
+        });
+    }
+    Ok(Some(bound))
 }
 
 /// Whether every statement of `program`, split the way it executes, is a
@@ -5577,16 +5842,6 @@ fn format_rule_text(rule: &crate::ast::Rule) -> String {
     rule.to_string()
 }
 
-/// Format a body predicate as IQL text (uses BodyPredicate's Display impl)
-fn format_body_pred(pred: &crate::ast::BodyPredicate) -> String {
-    pred.to_string()
-}
-
-/// Format a term as IQL text (uses Term's Display impl)
-fn format_term(term: &Term) -> String {
-    term.to_string()
-}
-
 /// Statements in `program`, counted the way `parse_program` splits them.
 /// A program's final result: an error if `auth` was revoked meanwhile, or
 /// when the program was one failed statement.
@@ -5616,20 +5871,20 @@ fn program_statement_count(program: &str) -> usize {
         .count()
 }
 
+/// `query_column_names` of the last rule of `program`, if it parses.
+pub(crate) fn extract_column_names_from_query(program: &str, arity: usize) -> Vec<String> {
+    let parsed = crate::parser::parse_program(program).ok();
+    query_column_names(parsed.as_ref().and_then(|p| p.rules.last()), arity)
+}
+
 /// Extract meaningful column names from a query's head variables.
 ///
-/// Parses the query program and inspects the last rule's head atom arguments
-/// to derive column names. Falls back to `col0, col1, ...` if parsing fails
-/// or arity doesn't match.
-pub(crate) fn extract_column_names_from_query(program: &str, arity: usize) -> Vec<String> {
-    let parsed = match crate::parser::parse_program(program) {
-        Ok(p) => p,
-        Err(_) => return (0..arity).map(|i| format!("col{i}")).collect(),
-    };
-
-    let rule = match parsed.rules.last() {
-        Some(r) => r,
-        None => return (0..arity).map(|i| format!("col{i}")).collect(),
+/// Inspects the query rule's head atom arguments (the last rule of the
+/// evaluated program) to derive column names. Falls back to `col0, col1, ...`
+/// without a rule or when its arity doesn't match.
+fn query_column_names(rule: Option<&crate::ast::Rule>, arity: usize) -> Vec<String> {
+    let Some(rule) = rule else {
+        return (0..arity).map(|i| format!("col{i}")).collect();
     };
 
     let head_args = &rule.head.args;
@@ -5688,15 +5943,18 @@ pub(crate) fn extract_column_names_from_query(program: &str, arity: usize) -> Ve
         .collect()
 }
 
-/// Find the source relation for a query.
+/// `query_source_relation` of the last rule of `program`.
+fn find_query_source_relation(program: &str) -> Option<String> {
+    let parsed = crate::parser::parse_program(program).ok()?;
+    query_source_relation(parsed.rules.last()?)
+}
+
+/// Find the source relation for the query rule `rule`.
 ///
 /// For `__query__` shorthand queries, returns the first positive body atom's relation.
 /// For named head relations, returns the head relation name.
 /// Used to look up registered schemas in the SchemaCatalog.
-fn find_query_source_relation(program: &str) -> Option<String> {
-    let parsed = crate::parser::parse_program(program).ok()?;
-    let rule = parsed.rules.last()?;
-
+fn query_source_relation(rule: &crate::ast::Rule) -> Option<String> {
     if rule.head.relation == "__query__" {
         // Shorthand query: find the first positive body atom
         for pred in &rule.body {
@@ -5749,16 +6007,18 @@ mod tests {
         use crate::storage::persist::wal::WalFault;
         let (mut config, _temp) = make_test_config();
         config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-        config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+        config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
         let handler = Handler::from_config(config).unwrap();
-        handler.bootstrap_auth();
+        handler.bootstrap_auth().unwrap();
         handler
-            .handle_user_create("editor", "password123", "editor")
+            .handle_user_create("editor", "password-0123", "editor")
             .unwrap();
         handler
             .handle_kg_acl_grant("default", "editor", "editor")
             .unwrap();
-        let principal = handler.authenticate_user("editor", "password123").unwrap();
+        let principal = handler
+            .authenticate_user("editor", "password-0123")
+            .unwrap();
         let session = handler
             .create_session_with_auth("default", &principal)
             .unwrap();
@@ -5900,11 +6160,11 @@ mod tests {
         for with_key in [true, false] {
             let (mut config, _temp) = make_test_config();
             config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-            config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+            config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
             let handler = Handler::from_config(config.clone()).unwrap();
-            handler.bootstrap_auth();
+            handler.bootstrap_auth().unwrap();
             handler
-                .handle_user_create("bob", "password123", "viewer")
+                .handle_user_create("bob", "password-0123", "viewer")
                 .unwrap();
             handler
                 .storage
@@ -5935,12 +6195,12 @@ mod tests {
                 with_key
             );
             assert!(handler
-                .handle_user_create("bob", "password456", "viewer")
+                .handle_user_create("bob", "password-0456", "viewer")
                 .is_err());
 
             handler.handle_user_drop("bob").unwrap();
             handler
-                .handle_user_create("bob", "password456", "viewer")
+                .handle_user_create("bob", "password-0456", "viewer")
                 .unwrap();
             assert!(handler
                 .get_kg_role_for_user("private", "bob", &Role::Viewer)
@@ -5951,8 +6211,8 @@ mod tests {
             handler.shutdown();
             drop(handler);
             let reopened = Handler::from_config(config).unwrap();
-            reopened.bootstrap_auth();
-            assert!(reopened.authenticate_user("bob", "password456").is_ok());
+            reopened.bootstrap_auth().unwrap();
+            assert!(reopened.authenticate_user("bob", "password-0456").is_ok());
             assert!(reopened
                 .get_kg_role_for_user("private", "bob", &Role::Viewer)
                 .is_none());
@@ -5975,12 +6235,12 @@ mod tests {
         ] {
             let (mut config, _temp) = make_test_config();
             config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-            config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+            config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
             let handler = Handler::from_config(config).unwrap();
-            handler.bootstrap_auth();
+            handler.bootstrap_auth().unwrap();
             handler.storage.write().create_knowledge_graph("g").unwrap();
             handler
-                .handle_user_create("bob", "password123", "viewer")
+                .handle_user_create("bob", "password-0123", "viewer")
                 .unwrap();
             handler.handle_kg_acl_grant("g", "bob", "viewer").unwrap();
             for fault in faults {
@@ -6021,11 +6281,11 @@ mod tests {
 
         let (mut config, _temp) = make_test_config();
         config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-        config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+        config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
         let handler = Handler::from_config(config).unwrap();
-        handler.bootstrap_auth();
+        handler.bootstrap_auth().unwrap();
         handler
-            .handle_user_create("bob", "password123", "viewer")
+            .handle_user_create("bob", "password-0123", "viewer")
             .unwrap();
         handler.create_api_key("old-key", "bob", None).unwrap();
         handler
@@ -6048,9 +6308,9 @@ mod tests {
     async fn durability_admin_protocol_preserves_outcome_types() {
         use crate::storage::persist::wal::WalFault;
         for command in [
-            ".user create alice password123 viewer",
+            ".user create alice password-0123 viewer",
             ".user drop bob",
-            ".user password bob password456",
+            ".user password bob password-0456",
             ".user role bob editor",
             ".apikey create new-key",
             ".apikey revoke old-key",
@@ -6059,11 +6319,11 @@ mod tests {
         ] {
             let (mut config, _temp) = make_test_config();
             config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-            config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+            config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
             let handler = Handler::from_config(config).unwrap();
-            handler.bootstrap_auth();
+            handler.bootstrap_auth().unwrap();
             handler
-                .handle_user_create("bob", "password123", "viewer")
+                .handle_user_create("bob", "password-0123", "viewer")
                 .unwrap();
             handler.create_api_key("old-key", "bob", None).unwrap();
             handler
@@ -6108,15 +6368,15 @@ mod tests {
     #[tokio::test]
     async fn test_login_outcome_recorded_after_caller_gives_up() {
         let (mut config, _tmp) = make_test_config();
-        config.http.auth.bootstrap_admin_password = Some("pw".to_string());
+        config.http.auth.bootstrap_admin_password = Some("test-password".to_string());
         let handler = Arc::new(Handler::from_config(config).expect("handler creation failed"));
-        handler.bootstrap_auth();
+        handler.bootstrap_auth().unwrap();
         let peer = std::net::IpAddr::from([192, 0, 2, 1]);
         for _ in 0..4 {
             let attempt = handler.login_throttle.begin(peer, "admin").unwrap();
             handler.login_throttle.fail(&attempt);
         }
-        let login = handler.login("admin", "pw", peer);
+        let login = handler.login("admin", "test-password", peer);
         assert!(tokio::time::timeout(Duration::ZERO, login).await.is_err());
         // Wait for the abandoned login to settle.
         let _all = handler
@@ -8987,8 +9247,10 @@ fn extract_arith_vars(expr: &crate::ast::ArithExpr, vars: &mut Vec<String>) {
             extract_arith_vars(left, vars);
             extract_arith_vars(right, vars);
         }
-        // Constants - no variables
-        crate::ast::ArithExpr::Constant(_) | crate::ast::ArithExpr::FloatConstant(_) => {}
+        // Constants and parameters - no variables
+        crate::ast::ArithExpr::Constant(_)
+        | crate::ast::ArithExpr::FloatConstant(_)
+        | crate::ast::ArithExpr::Param(_) => {}
     }
 }
 

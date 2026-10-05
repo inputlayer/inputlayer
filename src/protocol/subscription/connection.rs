@@ -29,6 +29,7 @@ use inputlayer_ws_protocol::{NamedQuery, SubscriptionPush};
 
 use crate::auth::Principal;
 use crate::protocol::Handler;
+use crate::storage_engine::KnowledgeGraphSnapshot;
 
 use super::publication::{Doorbell, SubscriberId};
 use super::views::{Attachment, ViewKey};
@@ -118,6 +119,13 @@ impl ConnectionSubscriptions {
             knowledge_graph: knowledge_graph.to_string(),
             queries: queries.iter().map(|q| q.trim().to_string()).collect(),
         };
+        // A view not refreshed since may still be exact now, but must say so:
+        // a client may expect the revision its snapshot reports.
+        let graph = self
+            .handler
+            .get_storage()
+            .get_snapshot_for(knowledge_graph)
+            .ok();
         let view: Box<dyn StandingQuery> = match (members.is_some(), queries) {
             (false, [query]) => {
                 let view =
@@ -136,16 +144,17 @@ impl ConnectionSubscriptions {
                 Box::new(group)
             }
         };
-        Ok(self.opening(key, id, members, view))
+        Ok(self.opening(key, id, members, graph, view))
     }
 
     /// An [`Opening`] attaching `id` to the view of `key`, created from `view`
-    /// if there is none.
+    /// if there is none, with a snapshot exact at `graph`'s revision or later.
     fn opening(
         &self,
         key: ViewKey,
         id: &str,
         members: Option<Arc<[String]>>,
+        graph: Option<Arc<KnowledgeGraphSnapshot>>,
         view: Box<dyn StandingQuery>,
     ) -> Opening {
         let hub = self.hub().clone();
@@ -154,6 +163,7 @@ impl ConnectionSubscriptions {
             id: id.to_string(),
             key,
             members,
+            graph,
             view,
             attached: Attached {
                 hub,
@@ -198,6 +208,8 @@ impl ConnectionSubscriptions {
         if let Some(members) = members {
             registered = registered.grouped(members);
         }
+        // Registered now: a wake-up rung before this was dropped as stale.
+        registered.resume();
         self.weight += registered.weight();
         self.names.insert(id.clone(), subscriber);
         self.subscribers.insert(subscriber, registered);
@@ -308,7 +320,8 @@ impl ConnectionSubscriptions {
         subscriber: SubscriberId,
         readable: impl FnOnce(&str) -> bool,
     ) -> Option<SubscriptionPush> {
-        // A wake-up for a subscriber already removed is stale.
+        // A wake-up for a subscriber already removed is stale. So is one for
+        // a subscriber not registered yet: registering resumes its doorbell.
         self.subscribers.get_mut(&subscriber)?.deliver(readable)
     }
 
@@ -329,6 +342,7 @@ pub struct Opening {
     id: String,
     key: ViewKey,
     members: Option<Arc<[String]>>,
+    graph: Option<Arc<KnowledgeGraphSnapshot>>,
     view: Box<dyn StandingQuery>,
     attached: Attached,
 }
@@ -356,12 +370,13 @@ impl Opening {
             id,
             key,
             members,
+            graph,
             view,
             attached,
         } = self;
         let attachment = attached
             .hub
-            .attach(key.clone(), Arc::clone(&attached.doorbell), view)
+            .attach(key.clone(), Arc::clone(&attached.doorbell), graph, view)
             .await;
         Opened {
             id,

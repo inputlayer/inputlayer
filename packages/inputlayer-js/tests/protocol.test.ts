@@ -205,9 +205,9 @@ describe('request ids and pushes', () => {
   });
 });
 
-describe('snapshot reads and subscription groups (protocol 4)', () => {
-  it('speaks protocol version 4', () => {
-    expect(PROTOCOL_VERSION).toBe(4);
+describe('snapshot reads and subscription groups (protocol 5)', () => {
+  it('speaks protocol version 5', () => {
+    expect(PROTOCOL_VERSION).toBe(5);
   });
 
   it('serializes read and subscribe requests', () => {

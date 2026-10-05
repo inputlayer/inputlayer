@@ -31,6 +31,7 @@ fn result(rows: Vec<Row>) -> ResultFrame {
         timing_breakdown: None,
         errors: Vec::new(),
         statements: Vec::new(),
+        revision: None,
         subscribed: Some(Subscribed {
             subscription: "s".into(),
             generation: 2,

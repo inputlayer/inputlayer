@@ -84,7 +84,7 @@ admin_password = "..."   # GUI and username/password login as admin
 api_key = "..."          # inputlayer-client, the SDKs and HTTP (Authorization: Bearer)
 ```
 
-To choose the secrets yourself, set `INPUTLAYER_ADMIN_PASSWORD` and `INPUTLAYER_BOOTSTRAP_API_KEY` when the server first starts (`docker run -e ...`); supplied values are never written to disk. Clients read the key from `INPUTLAYER_API_KEY` (or `--api-key` for `inputlayer-client`). Once connected, create less privileged users and keys as described in [Authentication](authentication).
+To choose the secrets yourself, set `INPUTLAYER_ADMIN_PASSWORD` and `INPUTLAYER_BOOTSTRAP_API_KEY` when the server first starts (`docker run -e ...`), at least 12 characters each: the first boot refuses to start with a shorter one (later boots ignore it with a warning), and an empty value counts as unset. Supplied values are never written to disk. Clients read the key from `INPUTLAYER_API_KEY` (or `--api-key` for `inputlayer-client`). Once connected, create less privileged users and keys as described in [Authentication](authentication).
 
 ## Verify Installation
 

@@ -391,9 +391,9 @@ async fn a_group_and_a_plain_subscription_push_their_own_shapes() {
 async fn a_group_needs_read_access_on_subscribe_and_every_refresh() {
     let server = start_server(64).await;
     server.write("+a(1)").await;
-    admin(&server, ".user create eve pw12345678 viewer").await;
+    admin(&server, ".user create eve pw1234567890 viewer").await;
     admin(&server, &format!(".kg acl grant {KG} eve viewer")).await;
-    let mut eve = Client::connect_as(&server, KG, "eve", "pw12345678").await;
+    let mut eve = Client::connect_as(&server, KG, "eve", "pw1234567890").await;
     eve.subscribe_group("w", &ORDERS).await;
 
     admin(&server, &format!(".kg acl revoke {KG} eve")).await;

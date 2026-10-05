@@ -1,31 +1,51 @@
 //! Negative explanation: why a tuple was NOT derived.
 //!
-//! For each rule that could produce the target relation, traces through
-//! body predicates to find the specific blocker - showing which premises
-//! succeeded and which one failed.
+//! The verdict comes from the data: a tuple the base facts or the evaluated
+//! derived relations hold is derived, and the explanation is its proof.
+//! Otherwise each rule clause that could produce the tuple is searched,
+//! backtracking over every match of its body, for the derivation attempt
+//! that gets furthest. The clause's blocker is the premise that attempt
+//! failed on. Premises are read from the same base facts and derived
+//! relations, so every premise shown as holding holds, and the blocker fails
+//! for the bindings shown.
 
-use crate::ast::BodyPredicate;
-use crate::provenance::backward_chaining::ProofContext;
+use crate::ast::{BodyPredicate, Rule, Term};
+use crate::provenance::backward_chaining::{build_proof_tree, ProofContext};
+use crate::provenance::proof_relations::ProofRelations;
 use crate::provenance::proof_tree::{
-    Conclusion, FactSource, NodeKind, ProofNode, ProofTree, ProofTreeBuilder, WhyNotInfo,
+    Conclusion, FactSource, NodeId, NodeKind, ProofNode, ProofTree, ProofTreeBuilder, WhyNotInfo,
 };
+use crate::provenance::prove_body::{apply_comparison, evaluation_order, negation_witness};
 use crate::provenance::unification::{
-    evaluate_comparison, find_matching_tuples, format_bound_terms, resolve_term_pub,
-    substitute_atom, unify_head,
+    check_computed_head, find_matching_tuples, format_bound_terms, resolve_term_pub,
+    substitute_atom, unify_head_explained, Bindings, BoundTerm, ComputedHead, PLACEHOLDER_PREFIX,
 };
 use crate::provenance::Blocker;
 use crate::value::{Tuple, Value};
+use std::collections::HashSet;
+
+/// Body matches one clause's search may try before it settles for the
+/// furthest attempt found so far.
+pub const MAX_SEARCH_STEPS: usize = 100_000;
 
 /// Explain why a specific tuple was NOT derived.
 ///
-/// Returns a proof tree with `WhyNot` nodes showing:
+/// `ctx` must carry the derived relations of an evaluation that covers
+/// `relation` (see [`ProofContext::with_derived_data`]): they decide whether
+/// the tuple is derived, and body atoms over derived relations are matched
+/// against them.
+///
+/// For a tuple that is derived, returns its proof tree, whose root is not a
+/// `WhyNot` node. Otherwise returns a tree with `WhyNot` nodes showing:
 /// - A root node for the target tuple
 /// - Per-clause children showing which body atoms succeeded (Fact nodes)
 ///   and which one failed (WhyNot node with blocker)
 pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -> ProofTree {
-    let target_values: Vec<Value> = (0..target.arity())
-        .filter_map(|i| target.get(i).cloned())
-        .collect();
+    if let Some((tuple, source)) = holding_tuple(relation, target, ctx) {
+        return derived_proof(relation, &tuple, source, ctx);
+    }
+
+    let target_values = target.values().to_vec();
     let conclusion = Conclusion {
         pred: relation.to_string(),
         args: target_values.clone(),
@@ -34,396 +54,599 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
     let mut builder = ProofTreeBuilder::new();
     let mut clause_children = Vec::new();
 
-    if !ctx.derived_relations.contains(relation) {
+    if !ctx.is_derived(relation) {
         // Base-only relation - no rules produce it
-        let id = builder.insert_unique(ProofNode {
-            kind: NodeKind::WhyNot,
-            conclusion: conclusion.clone(),
-            source: None,
-            rule_id: None,
-            bindings: None,
-            aggregate: None,
-            negation: None,
-            vector_search: None,
-            truncated: None,
-            why_not: Some(WhyNotInfo {
+        let id = builder.insert_unique(why_not_node(
+            conclusion.clone(),
+            None,
+            WhyNotInfo {
                 rule_name: relation.to_string(),
                 clause_index: 0,
                 clause_text: String::new(),
                 blocker: Blocker::HeadUnificationFailed {
                     reason: "No rules produce this relation".to_string(),
                 },
-            }),
-            children: vec![],
-        });
+            },
+        ));
         clause_children.push(id);
     } else {
-        let rules = ctx.rules_for(relation);
-
-        for (clause_idx, rule) in rules.iter().enumerate() {
-            let clause_text = format!("{rule}");
-
-            // Step 1: Try head unification
-            let bindings = match unify_head(target, &rule.head) {
-                Some(b) => b,
-                None => {
-                    let id = builder.insert_unique(ProofNode {
-                        kind: NodeKind::WhyNot,
-                        conclusion: conclusion.clone(),
-                        source: None,
-                        rule_id: Some(clause_text),
-                        bindings: None,
-                        aggregate: None,
-                        negation: None,
-                        vector_search: None,
-                        truncated: None,
-                        why_not: Some(WhyNotInfo {
-                            rule_name: relation.to_string(),
-                            clause_index: clause_idx,
-                            clause_text: format!("{rule}"),
-                            blocker: Blocker::HeadUnificationFailed {
-                                reason: format!(
-                                    "Target arity {} does not match head arity {}",
-                                    target.arity(),
-                                    rule.head.args.len()
-                                ),
-                            },
-                        }),
-                        children: vec![],
-                    });
-                    clause_children.push(id);
-                    continue;
-                }
-            };
-
-            // Step 2: Trace body predicates - show which succeeded and which failed
-            let mut current_bindings = bindings;
-            let mut body_children = Vec::new();
-
-            for (pred_idx, pred) in rule.body.iter().enumerate() {
-                match pred {
-                    BodyPredicate::Positive(ref atom) => {
-                        let bound = substitute_atom(atom, &current_bindings);
-                        let matches = find_matching_tuples(&atom.relation, &bound, &ctx.base_data);
-
-                        if matches.is_empty() {
-                            // Also check derived_data
-                            let derived_matches = ctx
-                                .derived_data
-                                .as_ref()
-                                .map(|d| find_matching_tuples(&atom.relation, &bound, d))
-                                .unwrap_or_default();
-
-                            if derived_matches.is_empty() {
-                                // This body atom FAILED - record as WhyNot
-                                let pattern_str = format_bound_terms(&bound);
-                                let id = builder.insert_unique(ProofNode {
-                                    kind: NodeKind::WhyNot,
-                                    conclusion: Conclusion {
-                                        pred: atom.relation.clone(),
-                                        args: bound
-                                            .iter()
-                                            .filter_map(|b| match b {
-                                                crate::provenance::unification::BoundTerm::Concrete(v) => Some(v.clone()),
-                                                crate::provenance::unification::BoundTerm::Unbound(_) => None,
-                                            })
-                                            .collect(),
-                                    },
-                                    source: None,
-                                    rule_id: None,
-                                    bindings: None,
-                                    aggregate: None,
-                                    negation: None,
-                                    vector_search: None,
-                                    truncated: None,
-                                    why_not: Some(WhyNotInfo {
-                                        rule_name: atom.relation.clone(),
-                                        clause_index: pred_idx,
-                                        clause_text: format!("{}({})", atom.relation, pattern_str),
-                                        blocker: Blocker::BodyAtomFailed {
-                                            predicate_index: pred_idx,
-                                            predicate_text: format!(
-                                                "{}({})",
-                                                atom.relation, pattern_str
-                                            ),
-                                            reason: format!(
-                                                "No matching tuples in {}",
-                                                atom.relation
-                                            ),
-                                        },
-                                    }),
-                                    children: vec![],
-                                });
-                                body_children.push(id);
-                                break;
-                            }
-
-                            // Found in derived_data
-                            let (_, new_binds) = &derived_matches[0];
-                            current_bindings.extend(new_binds.clone());
-                            let arity = derived_matches[0].0.arity().min(atom.args.len());
-                            let matched_vals: Vec<Value> = (0..arity)
-                                .filter_map(|i| derived_matches[0].0.get(i).cloned())
-                                .collect();
-                            let id = builder.insert_unique(ProofNode {
-                                kind: NodeKind::Fact,
-                                conclusion: Conclusion {
-                                    pred: atom.relation.clone(),
-                                    args: matched_vals,
-                                },
-                                source: Some(FactSource::Derived),
-                                rule_id: None,
-                                bindings: None,
-                                aggregate: None,
-                                negation: None,
-                                vector_search: None,
-                                truncated: None,
-                                why_not: None,
-                                children: vec![],
-                            });
-                            body_children.push(id);
-                        } else {
-                            // This body atom SUCCEEDED - record the matching fact
-                            let (matched_tuple, new_binds) = &matches[0];
-                            current_bindings.extend(new_binds.clone());
-                            let matched_vals: Vec<Value> = (0..matched_tuple.arity())
-                                .filter_map(|i| matched_tuple.get(i).cloned())
-                                .collect();
-                            let id = builder.insert_unique(ProofNode {
-                                kind: NodeKind::Fact,
-                                conclusion: Conclusion {
-                                    pred: atom.relation.clone(),
-                                    args: matched_vals,
-                                },
-                                source: Some(FactSource::Edb),
-                                rule_id: None,
-                                bindings: None,
-                                aggregate: None,
-                                negation: None,
-                                vector_search: None,
-                                truncated: None,
-                                why_not: None,
-                                children: vec![],
-                            });
-                            body_children.push(id);
-                        }
-                    }
-                    BodyPredicate::Negated(ref atom) => {
-                        let bound = substitute_atom(atom, &current_bindings);
-                        let matches = find_matching_tuples(&atom.relation, &bound, &ctx.base_data);
-
-                        if !matches.is_empty() {
-                            // Negation FAILED (tuple exists that shouldn't)
-                            let (matched_tuple, _) = &matches[0];
-                            let matched_vals: Vec<Value> = (0..matched_tuple.arity())
-                                .filter_map(|i| matched_tuple.get(i).cloned())
-                                .collect();
-                            let id = builder.insert_unique(ProofNode {
-                                kind: NodeKind::WhyNot,
-                                conclusion: Conclusion {
-                                    pred: atom.relation.clone(),
-                                    args: matched_vals.clone(),
-                                },
-                                source: None,
-                                rule_id: None,
-                                bindings: None,
-                                aggregate: None,
-                                negation: None,
-                                vector_search: None,
-                                truncated: None,
-                                why_not: Some(WhyNotInfo {
-                                    rule_name: atom.relation.clone(),
-                                    clause_index: pred_idx,
-                                    clause_text: format!("!{}(...)", atom.relation),
-                                    blocker: Blocker::NegationSucceeded {
-                                        relation: atom.relation.clone(),
-                                        matching_tuple: matched_vals,
-                                    },
-                                }),
-                                children: vec![],
-                            });
-                            body_children.push(id);
-                            break;
-                        }
-                        // Negation succeeded - no node needed, continue
-                    }
-                    BodyPredicate::Comparison(ref lhs, ref op, ref rhs) => {
-                        match evaluate_comparison(lhs, op, rhs, &current_bindings) {
-                            Ok(true) => {} // Passed, continue
-                            Ok(false) => {
-                                let lhs_resolved = resolve_term_pub(lhs, &current_bindings);
-                                let rhs_resolved = resolve_term_pub(rhs, &current_bindings);
-                                let op_str = match op {
-                                    crate::ast::ComparisonOp::Equal => "==",
-                                    crate::ast::ComparisonOp::NotEqual => "!=",
-                                    crate::ast::ComparisonOp::LessThan => "<",
-                                    crate::ast::ComparisonOp::LessOrEqual => "<=",
-                                    crate::ast::ComparisonOp::GreaterThan => ">",
-                                    crate::ast::ComparisonOp::GreaterOrEqual => ">=",
-                                };
-                                let id = builder.insert_unique(ProofNode {
-                                    kind: NodeKind::WhyNot,
-                                    conclusion: conclusion.clone(),
-                                    source: None,
-                                    rule_id: None,
-                                    bindings: None,
-                                    aggregate: None,
-                                    negation: None,
-                                    vector_search: None,
-                                    truncated: None,
-                                    why_not: Some(WhyNotInfo {
-                                        rule_name: relation.to_string(),
-                                        clause_index: pred_idx,
-                                        clause_text: format!(
-                                            "{lhs_resolved} {op_str} {rhs_resolved}"
-                                        ),
-                                        blocker: Blocker::ComparisonFailed {
-                                            comparison_text: format!(
-                                                "{lhs_resolved} {op_str} {rhs_resolved}"
-                                            ),
-                                            lhs_value: lhs_resolved,
-                                            rhs_value: rhs_resolved,
-                                        },
-                                    }),
-                                    children: vec![],
-                                });
-                                body_children.push(id);
-                                break;
-                            }
-                            Err(e) => {
-                                let id = builder.insert_unique(ProofNode {
-                                    kind: NodeKind::WhyNot,
-                                    conclusion: conclusion.clone(),
-                                    source: None,
-                                    rule_id: None,
-                                    bindings: None,
-                                    aggregate: None,
-                                    negation: None,
-                                    vector_search: None,
-                                    truncated: None,
-                                    why_not: Some(WhyNotInfo {
-                                        rule_name: relation.to_string(),
-                                        clause_index: pred_idx,
-                                        clause_text: format!("{lhs:?} vs {rhs:?}"),
-                                        blocker: Blocker::BodyAtomFailed {
-                                            predicate_index: pred_idx,
-                                            predicate_text: format!("{lhs:?} {rhs:?}"),
-                                            reason: e,
-                                        },
-                                    }),
-                                    children: vec![],
-                                });
-                                body_children.push(id);
-                                break;
-                            }
-                        }
-                    }
-                    BodyPredicate::HnswNearest {
-                        ref index_name, k, ..
-                    } => {
-                        let id = builder.insert_unique(ProofNode {
-                            kind: NodeKind::WhyNot,
-                            conclusion: conclusion.clone(),
-                            source: None,
-                            rule_id: None,
-                            bindings: None,
-                            aggregate: None,
-                            negation: None,
-                            vector_search: None,
-                            truncated: None,
-                            why_not: Some(WhyNotInfo {
-                                rule_name: relation.to_string(),
-                                clause_index: pred_idx,
-                                clause_text: format!("hnsw_nearest({index_name}, {k})"),
-                                blocker: Blocker::HnswNotInTopK {
-                                    index_name: index_name.clone(),
-                                    k: *k,
-                                    reason: "Target not found in HNSW search results".to_string(),
-                                },
-                            }),
-                            children: vec![],
-                        });
-                        body_children.push(id);
-                        break;
-                    }
-                }
-            }
-
-            // Clause-level node: shows the rule and its body atom results
-            let clause_bindings: std::collections::HashMap<String, Value> = current_bindings
-                .into_iter()
-                .filter(|(name, _)| !name.starts_with("_placeholder_"))
-                .collect();
-            let id = builder.insert_unique(ProofNode {
-                kind: NodeKind::WhyNot,
-                conclusion: conclusion.clone(),
-                source: None,
-                rule_id: Some(clause_text),
-                bindings: if clause_bindings.is_empty() {
-                    None
-                } else {
-                    Some(clause_bindings)
-                },
-                aggregate: None,
-                negation: None,
-                vector_search: None,
-                truncated: None,
-                why_not: None,
-                children: body_children,
-            });
+        for (clause_idx, rule) in ctx.rules_for(relation).into_iter().enumerate() {
+            let id = explain_clause(relation, clause_idx, rule, target, ctx, &mut builder);
             clause_children.push(id);
         }
     }
 
     // Root node
-    let root_id = builder.insert_unique(ProofNode {
-        kind: NodeKind::WhyNot,
+    let mut root = why_not_node(
         conclusion,
-        source: None,
+        None,
+        WhyNotInfo {
+            rule_name: relation.to_string(),
+            clause_index: 0,
+            clause_text: String::new(),
+            blocker: Blocker::HeadUnificationFailed {
+                reason: format!(
+                    "{relation}({}) was NOT derived",
+                    format_values(&target_values)
+                ),
+            },
+        },
+    );
+    root.children = clause_children;
+    let root_id = builder.insert_unique(root);
+    builder.finish(vec![root_id])
+}
+
+/// The tuple of `relation` equal to `target` that the base facts or the
+/// derived relations hold, with where it was found.
+fn holding_tuple(
+    relation: &str,
+    target: &Tuple,
+    ctx: &ProofContext<'_>,
+) -> Option<(Tuple, FactSource)> {
+    let pattern: Vec<BoundTerm> = target
+        .values()
+        .iter()
+        .cloned()
+        .map(BoundTerm::Concrete)
+        .collect();
+    let found = |relations: &ProofRelations<'_>| {
+        find_matching_tuples(relation, &pattern, relations)
+            .into_iter()
+            .next()
+            .map(|(tuple, _)| tuple)
+    };
+    found(&ctx.base_data)
+        .map(|tuple| (tuple, FactSource::Edb))
+        .or_else(|| {
+            let derived = ctx.derived_data.as_ref()?;
+            found(derived).map(|tuple| (tuple, FactSource::Derived))
+        })
+}
+
+/// The proof of a derived tuple; a bare fact node when backward chaining
+/// cannot trace it.
+fn derived_proof(
+    relation: &str,
+    tuple: &Tuple,
+    source: FactSource,
+    ctx: &ProofContext<'_>,
+) -> ProofTree {
+    if let Ok(tree) = build_proof_tree(relation, tuple, ctx) {
+        return tree;
+    }
+    let mut builder = ProofTreeBuilder::new();
+    let id = builder.insert(ProofNode {
+        kind: NodeKind::Fact,
+        conclusion: Conclusion {
+            pred: relation.to_string(),
+            args: tuple.values().to_vec(),
+        },
+        source: Some(source),
         rule_id: None,
         bindings: None,
         aggregate: None,
         negation: None,
         vector_search: None,
         truncated: None,
-        why_not: Some(WhyNotInfo {
-            rule_name: relation.to_string(),
-            clause_index: 0,
-            clause_text: String::new(),
-            blocker: Blocker::HeadUnificationFailed {
-                reason: format!(
-                    "{}({}) was NOT derived",
-                    relation,
-                    target_values
-                        .iter()
-                        .map(|v| format!("{v}"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            },
-        }),
-        children: clause_children,
+        why_not: None,
+        children: vec![],
     });
+    builder.finish(vec![id])
+}
 
-    builder.finish(vec![root_id])
+/// A `WhyNot` node with no children.
+fn why_not_node(conclusion: Conclusion, rule_id: Option<String>, info: WhyNotInfo) -> ProofNode {
+    ProofNode {
+        kind: NodeKind::WhyNot,
+        conclusion,
+        source: None,
+        rule_id,
+        bindings: None,
+        aggregate: None,
+        negation: None,
+        vector_search: None,
+        truncated: None,
+        why_not: Some(info),
+        children: vec![],
+    }
+}
+
+/// A body atom that held in a derivation attempt.
+#[derive(Clone)]
+struct Held {
+    relation: String,
+    tuple: Tuple,
+    source: FactSource,
+}
+
+/// Where a derivation attempt stopped.
+struct Failure {
+    /// Body atoms that held before it stopped.
+    held: Vec<Held>,
+    bindings: Bindings,
+    /// The `WhyNot` node of the premise that failed.
+    blocker: ProofNode,
+}
+
+/// The backtracking search of one clause's body for the derivation attempt
+/// that gets furthest.
+struct ClauseSearch<'s, 'c> {
+    relation: &'s str,
+    clause_idx: usize,
+    rule: &'s Rule,
+    target: &'s Tuple,
+    ctx: &'s ProofContext<'c>,
+    order: Vec<usize>,
+    steps: usize,
+    /// The furthest failed attempt, and how many premises it passed.
+    furthest: Option<(usize, Failure)>,
+    /// Bindings under which the whole body holds, if the search found any.
+    holds: Option<Bindings>,
+    /// Whether the search stopped at [`MAX_SEARCH_STEPS`].
+    exhausted: bool,
+}
+
+impl ClauseSearch<'_, '_> {
+    /// Search from premise `pos` of the evaluation order on; `false` once the
+    /// search should stop.
+    fn search(&mut self, pos: usize, bindings: &Bindings, held: &mut Vec<Held>) -> bool {
+        let Some(&pred_idx) = self.order.get(pos) else {
+            return self.body_holds(pos, bindings, held);
+        };
+        match &self.rule.body[pred_idx] {
+            BodyPredicate::Positive(atom) => {
+                let bound = substitute_atom(atom, bindings);
+                let matches = self.matches(&atom.relation, &bound);
+                if matches.is_empty() {
+                    let pattern = format!("{}({})", atom.relation, format_bound_terms(&bound));
+                    let node = why_not_node(
+                        Conclusion {
+                            pred: atom.relation.clone(),
+                            args: concrete(&bound),
+                        },
+                        None,
+                        WhyNotInfo {
+                            rule_name: atom.relation.clone(),
+                            clause_index: pred_idx,
+                            clause_text: pattern.clone(),
+                            blocker: Blocker::BodyAtomFailed {
+                                predicate_index: pred_idx,
+                                predicate_text: pattern,
+                                reason: format!("No matching tuples in {}", atom.relation),
+                            },
+                        },
+                    );
+                    self.fail(pos, bindings, held, node);
+                    return true;
+                }
+                for (tuple, source, new_bindings) in matches {
+                    self.steps += 1;
+                    if self.steps > MAX_SEARCH_STEPS {
+                        self.exhausted = true;
+                        return false;
+                    }
+                    let mut extended = bindings.clone();
+                    extended.extend(new_bindings);
+                    held.push(Held {
+                        relation: atom.relation.clone(),
+                        tuple,
+                        source,
+                    });
+                    let go_on = self.search(pos + 1, &extended, held);
+                    held.pop();
+                    if !go_on {
+                        return false;
+                    }
+                }
+                true
+            }
+            BodyPredicate::Negated(atom) => {
+                let bound = substitute_atom(atom, bindings);
+                match negation_witness(&atom.relation, &bound, self.ctx) {
+                    None => self.search(pos + 1, bindings, held),
+                    Some(witness) => {
+                        let values = witness.values().to_vec();
+                        let node = why_not_node(
+                            Conclusion {
+                                pred: atom.relation.clone(),
+                                args: values.clone(),
+                            },
+                            None,
+                            WhyNotInfo {
+                                rule_name: atom.relation.clone(),
+                                clause_index: pred_idx,
+                                clause_text: format!(
+                                    "!{}({})",
+                                    atom.relation,
+                                    format_bound_terms(&bound)
+                                ),
+                                blocker: Blocker::NegationSucceeded {
+                                    relation: atom.relation.clone(),
+                                    matching_tuple: values,
+                                },
+                            },
+                        );
+                        self.fail(pos, bindings, held, node);
+                        true
+                    }
+                }
+            }
+            BodyPredicate::Comparison(lhs, op, rhs) => {
+                match apply_comparison(lhs, op, rhs, bindings) {
+                    Ok(Some(extended)) => self.search(pos + 1, &extended, held),
+                    Ok(None) => {
+                        let lhs_value = resolve_term_pub(lhs, bindings);
+                        let rhs_value = resolve_term_pub(rhs, bindings);
+                        let text = format!("{lhs_value} {op} {rhs_value}");
+                        let node = self.clause_blocker(
+                            pred_idx,
+                            text.clone(),
+                            Blocker::ComparisonFailed {
+                                comparison_text: text,
+                                lhs_value,
+                                rhs_value,
+                            },
+                        );
+                        self.fail(pos, bindings, held, node);
+                        true
+                    }
+                    Err(reason) => {
+                        let text = format!("{lhs} {op} {rhs}");
+                        let node = self.clause_blocker(
+                            pred_idx,
+                            text.clone(),
+                            Blocker::NotExplained {
+                                reason: format!("cannot evaluate {text}: {reason}"),
+                            },
+                        );
+                        self.fail(pos, bindings, held, node);
+                        true
+                    }
+                }
+            }
+            BodyPredicate::HnswNearest { index_name, k, .. } => {
+                let text = format!("hnsw_nearest({index_name}, {k})");
+                let node = self.clause_blocker(
+                    pred_idx,
+                    text,
+                    Blocker::NotExplained {
+                        reason: format!(
+                            "nearest-neighbour results of index {index_name} are not re-evaluated by .why_not"
+                        ),
+                    },
+                );
+                self.fail(pos, bindings, held, node);
+                true
+            }
+        }
+    }
+
+    /// Every body premise held: check the head's computed columns.
+    fn body_holds(&mut self, pos: usize, bindings: &Bindings, held: &[Held]) -> bool {
+        let has_aggregate = self.rule.head.args.iter().any(Term::is_aggregate);
+        let blocker = if has_aggregate {
+            None
+        } else {
+            match check_computed_head(self.target, &self.rule.head, bindings) {
+                ComputedHead::Matches => None,
+                ComputedHead::Differs(reason) => Some(Blocker::HeadUnificationFailed { reason }),
+                ComputedHead::Unevaluable(reason) => Some(Blocker::NotExplained { reason }),
+            }
+        };
+        match blocker {
+            Some(blocker) => {
+                let node = why_not_node(
+                    Conclusion {
+                        pred: self.relation.to_string(),
+                        args: self.target.values().to_vec(),
+                    },
+                    None,
+                    WhyNotInfo {
+                        rule_name: self.relation.to_string(),
+                        clause_index: self.clause_idx,
+                        clause_text: format!("{}", self.rule.head),
+                        blocker,
+                    },
+                );
+                self.fail(pos, bindings, held, node);
+                true
+            }
+            None => {
+                self.holds = Some(bindings.clone());
+                false
+            }
+        }
+    }
+
+    /// Tuples matching a body atom's pattern, from the derived relations for
+    /// a derived relation (they include its base facts) and from the base
+    /// facts otherwise.
+    fn matches(&self, relation: &str, bound: &[BoundTerm]) -> Vec<(Tuple, FactSource, Bindings)> {
+        let derived = self
+            .ctx
+            .derived_data
+            .as_ref()
+            .filter(|derived| self.ctx.is_derived(relation) && derived.get(relation).is_some());
+        match derived {
+            Some(derived) => find_matching_tuples(relation, bound, derived)
+                .into_iter()
+                .map(|(tuple, bindings)| {
+                    let source = if self.ctx.base_data.contains(relation, &tuple) {
+                        FactSource::Edb
+                    } else {
+                        FactSource::Derived
+                    };
+                    (tuple, source, bindings)
+                })
+                .collect(),
+            None => find_matching_tuples(relation, bound, &self.ctx.base_data)
+                .into_iter()
+                .map(|(tuple, bindings)| (tuple, FactSource::Edb, bindings))
+                .collect(),
+        }
+    }
+
+    /// The `WhyNot` node of a failed premise that is not an atom.
+    fn clause_blocker(&self, pred_idx: usize, text: String, blocker: Blocker) -> ProofNode {
+        why_not_node(
+            Conclusion {
+                pred: self.relation.to_string(),
+                args: self.target.values().to_vec(),
+            },
+            None,
+            WhyNotInfo {
+                rule_name: self.relation.to_string(),
+                clause_index: pred_idx,
+                clause_text: text,
+                blocker,
+            },
+        )
+    }
+
+    /// Record an attempt that failed at premise `pos`, if it got further than
+    /// any before it.
+    fn fail(&mut self, pos: usize, bindings: &Bindings, held: &[Held], blocker: ProofNode) {
+        if self
+            .furthest
+            .as_ref()
+            .is_some_and(|(furthest, _)| *furthest >= pos)
+        {
+            return;
+        }
+        self.furthest = Some((
+            pos,
+            Failure {
+                held: held.to_vec(),
+                bindings: bindings.clone(),
+                blocker,
+            },
+        ));
+    }
+}
+
+/// The values of the bound terms of a pattern.
+fn concrete(bound: &[BoundTerm]) -> Vec<Value> {
+    bound
+        .iter()
+        .filter_map(|term| match term {
+            BoundTerm::Concrete(value) => Some(value.clone()),
+            BoundTerm::Unbound(_) => None,
+        })
+        .collect()
+}
+
+/// The clause-level node explaining why `rule` does not derive `target`.
+fn explain_clause(
+    relation: &str,
+    clause_idx: usize,
+    rule: &Rule,
+    target: &Tuple,
+    ctx: &ProofContext<'_>,
+    builder: &mut ProofTreeBuilder,
+) -> NodeId {
+    let clause_text = format!("{rule}");
+    let clause_node = |bindings: Option<&Bindings>, children: Vec<NodeId>| {
+        let bindings: std::collections::HashMap<String, Value> = bindings
+            .into_iter()
+            .flatten()
+            .filter(|(name, _)| !name.starts_with(PLACEHOLDER_PREFIX))
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect();
+        ProofNode {
+            kind: NodeKind::WhyNot,
+            conclusion: Conclusion {
+                pred: relation.to_string(),
+                args: target.values().to_vec(),
+            },
+            source: None,
+            rule_id: Some(clause_text.clone()),
+            bindings: (!bindings.is_empty()).then_some(bindings),
+            aggregate: None,
+            negation: None,
+            vector_search: None,
+            truncated: None,
+            why_not: None,
+            children,
+        }
+    };
+    let clause_failure = |blocker: Blocker| {
+        let mut node = clause_node(None, vec![]);
+        node.why_not = Some(WhyNotInfo {
+            rule_name: relation.to_string(),
+            clause_index: clause_idx,
+            clause_text: clause_text.clone(),
+            blocker,
+        });
+        node
+    };
+
+    // Step 1: Head unification
+    let bindings = match unify_head_explained(target, &rule.head) {
+        Ok(bindings) => bindings,
+        Err(reason) => {
+            return builder.insert_unique(clause_failure(Blocker::HeadUnificationFailed { reason }))
+        }
+    };
+
+    // Step 2: Search the body for the furthest derivation attempt
+    let bound: HashSet<String> = bindings.keys().cloned().collect();
+    let mut search = ClauseSearch {
+        relation,
+        clause_idx,
+        rule,
+        target,
+        ctx,
+        order: evaluation_order(&rule.body, &bound),
+        steps: 0,
+        furthest: None,
+        holds: None,
+        exhausted: false,
+    };
+    search.search(0, &bindings, &mut Vec::new());
+
+    if let Some(bindings) = search.holds {
+        let blocker = if rule.head.args.iter().any(Term::is_aggregate) {
+            aggregate_blocker(relation, rule, target, ctx)
+        } else {
+            Blocker::NotExplained {
+                reason: "the body holds for these bindings, yet the evaluation derived no such row"
+                    .to_string(),
+            }
+        };
+        let mut node = clause_failure(blocker);
+        let filtered = clause_node(Some(&bindings), vec![]);
+        node.bindings = filtered.bindings;
+        return builder.insert_unique(node);
+    }
+
+    let Some((_, failure)) = search.furthest else {
+        let reason = if search.exhausted {
+            format!("search stopped after {MAX_SEARCH_STEPS} body matches")
+        } else {
+            "no premise failed".to_string()
+        };
+        return builder.insert_unique(clause_failure(Blocker::NotExplained { reason }));
+    };
+
+    let mut children: Vec<NodeId> = failure
+        .held
+        .into_iter()
+        .map(|held| {
+            builder.insert_unique(ProofNode {
+                kind: NodeKind::Fact,
+                conclusion: Conclusion {
+                    pred: held.relation,
+                    args: held.tuple.values().to_vec(),
+                },
+                source: Some(held.source),
+                rule_id: None,
+                bindings: None,
+                aggregate: None,
+                negation: None,
+                vector_search: None,
+                truncated: None,
+                why_not: None,
+                children: vec![],
+            })
+        })
+        .collect();
+    children.push(builder.insert_unique(failure.blocker));
+    builder.insert_unique(clause_node(Some(&failure.bindings), children))
+}
+
+/// Why an aggregate clause whose group has contributing rows does not derive
+/// `target`: the aggregate columns hold other values for the group.
+fn aggregate_blocker(
+    relation: &str,
+    rule: &Rule,
+    target: &Tuple,
+    ctx: &ProofContext<'_>,
+) -> Blocker {
+    let pattern: Vec<BoundTerm> = rule
+        .head
+        .args
+        .iter()
+        .zip(target.values())
+        .enumerate()
+        .map(|(i, (term, value))| match term {
+            Term::Aggregate(_, _) => BoundTerm::Unbound(format!("{PLACEHOLDER_PREFIX}agg{i}")),
+            _ => BoundTerm::Concrete(value.clone()),
+        })
+        .collect();
+    let group_rows = ctx
+        .derived_data
+        .as_ref()
+        .map(|derived| find_matching_tuples(relation, &pattern, derived))
+        .unwrap_or_default();
+    let Some((row, _)) = group_rows.first() else {
+        return Blocker::NotExplained {
+            reason: "the group has contributing rows, yet the evaluation derived no row for it"
+                .to_string(),
+        };
+    };
+    let differences: Vec<String> = rule
+        .head
+        .args
+        .iter()
+        .zip(row.values().iter().zip(target.values()))
+        .enumerate()
+        .filter(|(_, (term, _))| term.is_aggregate())
+        .map(|(i, (term, (actual, wanted)))| {
+            format!("column {i}: {term} over this group is {actual}, target has {wanted}")
+        })
+        .collect();
+    Blocker::HeadUnificationFailed {
+        reason: differences.join("; "),
+    }
+}
+
+fn format_values(values: &[Value]) -> String {
+    values
+        .iter()
+        .map(|v| format!("{v}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Format a why-not proof tree as human-readable text for CLI output.
 ///
-/// Derives text directly from the tree structure - no duplicated logic.
+/// Derives text directly from the tree structure - no duplicated logic. A
+/// tree whose root is not a `WhyNot` node is the proof of a derived tuple.
 pub fn format_why_not_text(graph: &ProofTree) -> String {
     let root = match graph.roots.first().and_then(|id| graph.nodes.get(id)) {
         Some(r) => r,
         None => return "No explanation available.\n".to_string(),
     };
 
-    let vals = root
-        .conclusion
-        .args
-        .iter()
-        .map(|v| format!("{v}"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let vals = format_values(&root.conclusion.args);
+    if root.kind != NodeKind::WhyNot {
+        let mut output = format!("{}({vals}) was derived:\n", root.conclusion.pred);
+        for line in graph.format_tree().lines() {
+            output.push_str(&format!("  {line}\n"));
+        }
+        return output;
+    }
     let mut output = format!("{}({vals}) was NOT derived:\n", root.conclusion.pred);
 
     // Check for "no rules" case: root has children but they're all WhyNot

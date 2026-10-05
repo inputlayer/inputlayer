@@ -93,7 +93,8 @@ impl SubscriptionMetrics {
     }
 
     /// Evaluations of lifted queries, each serving every view of its family
-    /// at one revision (see [`parameterized`]).
+    /// at one revision (see [`parameterized`]). Each counts once it is
+    /// judged: a family's verdict on it holds by the time the count does.
     pub fn shared_evaluations(&self) -> u64 {
         self.shared_evaluations.load(Ordering::SeqCst)
     }

@@ -181,6 +181,11 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
         return Ok(Term::Placeholder);
     }
 
+    // Parameter reference: $name, bound to a value sent beside the program
+    if let Some(name) = crate::parser::lexer::param_name(input) {
+        return Ok(Term::Param(name.to_string()));
+    }
+
     // Vector literal: [1.0, 2.0, 3.0]
     if input.starts_with('[') && input.ends_with(']') {
         return parse_vector_literal(input);
@@ -510,16 +515,11 @@ pub fn parse_persistent_rule(input: &str) -> Result<Rule, String> {
 
 /// Parse a rule definition: head <- body.
 pub fn parse_rule_definition(input: &str) -> Result<super::serialize::RuleDef, String> {
-    use super::serialize::{RuleDef, SerializableRule};
+    use super::serialize::RuleDef;
 
     let input = input.trim();
 
-    let rule = parse_rule(input)?;
-
-    Ok(RuleDef {
-        name: rule.head.relation.clone(),
-        rule: SerializableRule::from_rule(&rule),
-    })
+    Ok(RuleDef::from_rule(&parse_rule(input)?))
 }
 
 #[cfg(test)]

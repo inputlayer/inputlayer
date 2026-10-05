@@ -124,6 +124,7 @@ mod ir_builder; // AST -> IR construction
 mod join_planning; // Join order optimization
 mod magic_sets; // Magic Sets demand-driven rewriting for recursive queries
 mod optimizer; // Basic IR optimizations
+pub mod params; // Parameterised programs: `$name` values bound out of band
 pub mod parser; // IQL parsing & AST construction
 pub mod rule_catalog; // Rule catalog for persistent rules
 pub mod semiring_types; // Diff type abstraction: BooleanDiff, MinDiff, MaxDiff
@@ -135,6 +136,7 @@ pub mod syntax; // PEG-based syntax highlighting for REPL
 // Storage Engine
 pub mod config; // Configuration system
 pub mod naming; // Canonical KG and relation name grammar
+pub mod size_limits; // Bounds on request-supplied sizes
 pub mod storage; // Storage formats (Parquet, metadata)
 pub mod storage_engine; // Multi-knowledge-graph storage engine
 
@@ -256,6 +258,12 @@ pub use statement::{
 
 // Re-export parser functions
 pub use parser::{parse_program, parse_rule};
+
+/// Stack size for threads that parse, plan and evaluate client programs. The
+/// parser's nesting and rule-body limits were measured against it so every
+/// recursive pass fits, in debug as well as release builds; Rust's 2 MiB
+/// default does not. The stack is virtual memory, committed only as used.
+pub const ENGINE_THREAD_STACK_BYTES: usize = 64 * 1024 * 1024;
 
 // Re-export rule catalog
 pub use rule_catalog::{validate_rule, validate_rules_stratification, RuleCatalog, RuleDefinition};
@@ -407,9 +415,14 @@ pub struct IQLEngine {
     /// relations are never cut.
     max_result_rows: usize,
 
-    /// Maximum query cost score (0 = unlimited). Queries exceeding this
-    /// are rejected before DD execution.
+    /// Most rows one join of a query's plan may be estimated to produce (0 =
+    /// unlimited); see [`ir::IRNode::estimate_rows`]. Queries over it are
+    /// rejected before DD execution.
     max_query_cost: u64,
+
+    /// Most fixpoint iterations a recursive evaluation may run before it
+    /// fails (0 = unlimited).
+    max_recursion_iterations: u32,
 
     /// HNSW search callback for `hnsw_nearest` (resolved before each rule runs).
     hnsw_search_fn: Option<HnswSearchFn>,
@@ -434,6 +447,7 @@ impl IQLEngine {
             num_workers: 1,
             max_result_rows: 0,
             max_query_cost: 0,
+            max_recursion_iterations: 0,
             hnsw_search_fn: None,
             timing_mode: execution::TimingMode::default(),
         }
@@ -454,6 +468,7 @@ impl IQLEngine {
             num_workers: 1,
             max_result_rows: 0,
             max_query_cost: 0,
+            max_recursion_iterations: 0,
             hnsw_search_fn: None,
             timing_mode: execution::TimingMode::default(),
         }
@@ -507,9 +522,16 @@ impl IQLEngine {
         }
     }
 
-    /// Set maximum query cost score (0 = unlimited)
+    /// Set the most rows one join of a query's plan may be estimated to
+    /// produce (0 = unlimited); see [`ir::IRNode::estimate_rows`].
     pub fn set_max_query_cost(&mut self, max: u64) {
         self.max_query_cost = max;
+    }
+
+    /// Set the most fixpoint iterations a recursive evaluation may run
+    /// before it fails (0 = unlimited).
+    pub fn set_max_recursion_iterations(&mut self, max: u32) {
+        self.max_recursion_iterations = max;
     }
 
     /// Replace all input data. Relations share tuples, so this copies none.
@@ -1161,6 +1183,7 @@ impl IQLEngine {
 
         let mut codegen = CodeGenerator::new();
         codegen.set_semiring_type(semiring);
+        codegen.set_max_iterations(self.max_recursion_iterations);
         self.load_inputs_into_codegen(&mut codegen, accumulated);
         codegen
     }
@@ -1299,6 +1322,131 @@ impl IQLEngine {
         }
 
         Ok(results)
+    }
+
+    /// Refuse the program if a join of its plan is estimated to produce
+    /// more than `max_query_cost` rows; see [`IRNode::estimate_rows`].
+    /// Relations the program derives are estimated from their rules in the
+    /// order they run, a recursive one from its rules' first pass. Only a
+    /// plan over the limit counts the rows its filters keep of stored
+    /// relations, and is refused if it is still over it.
+    fn check_query_cost(
+        &self,
+        unoptimized_ir_nodes: &[IRNode],
+        recursive_info: &[Option<String>],
+        rule_heads: &[String],
+        execution_groups: &[Vec<usize>],
+        source_len: usize,
+    ) -> Result<(), String> {
+        let over_limit = |j: &ir::JoinEstimate| j.rows > self.max_query_cost;
+        let mut largest = self.largest_join(
+            unoptimized_ir_nodes,
+            recursive_info,
+            rule_heads,
+            execution_groups,
+            false,
+        );
+        if largest.as_ref().is_some_and(over_limit) {
+            largest = self.largest_join(
+                unoptimized_ir_nodes,
+                recursive_info,
+                rule_heads,
+                execution_groups,
+                true,
+            );
+        }
+
+        let Some(join) = largest.filter(over_limit) else {
+            tracing::debug!(
+                source_len,
+                largest_join_rows = largest.map_or(0, |j| j.rows),
+                max_cost = self.max_query_cost,
+                "engine_cost_check_pass"
+            );
+            return Ok(());
+        };
+        info!(
+            source_len,
+            join_rows = join.rows,
+            left_rows = join.left,
+            right_rows = join.right,
+            cross_product = join.cross_product,
+            max_cost = self.max_query_cost,
+            "engine_cost_check_refused"
+        );
+        Err(if join.cross_product {
+            format!(
+                "Query too complex: it joins {} rows with {} rows on no shared variable, \
+                 a cross product of about {} rows, over the limit of {} \
+                 (storage.performance.max_query_cost). Join them on a shared variable, \
+                 order the rule body so each atom shares a variable with one before it, \
+                 or filter a side with a constant or comparison so fewer of its rows meet",
+                join.left, join.right, join.rows, self.max_query_cost
+            )
+        } else {
+            format!(
+                "Query too complex: it joins {} rows with {} rows, an estimated {} rows, \
+                 over the limit of {} (storage.performance.max_query_cost). \
+                 Filter an input with a constant or comparison so fewer of its rows meet",
+                join.left, join.right, join.rows, self.max_query_cost
+            )
+        })
+    }
+
+    /// The program's join with the most estimated output rows; with
+    /// `count_filters`, a filter over a stored relation keeps the rows it
+    /// matches rather than all of them.
+    fn largest_join(
+        &self,
+        unoptimized_ir_nodes: &[IRNode],
+        recursive_info: &[Option<String>],
+        rule_heads: &[String],
+        execution_groups: &[Vec<usize>],
+        count_filters: bool,
+    ) -> Option<ir::JoinEstimate> {
+        let mut derived: HashMap<&str, u64> = HashMap::new();
+        let mut largest: Option<ir::JoinEstimate> = None;
+        let mut estimate = |ir: &IRNode, derived: &HashMap<&str, u64>| {
+            let rows_of = |name: &str| {
+                let stored = self.input_tuples.get(name).map_or(0, |r| r.len() as u64);
+                stored.saturating_add(derived.get(name).copied().unwrap_or(0))
+            };
+            let is_derived = |name: &str| derived.contains_key(name);
+            let filtered_rows = |node: &IRNode| {
+                count_filters
+                    .then(|| {
+                        CodeGenerator::count_filtered_scan(node, &self.input_tuples, &is_derived)
+                    })
+                    .flatten()
+            };
+            let estimate = ir.estimate_rows(&rows_of, &filtered_rows);
+            largest = largest
+                .into_iter()
+                .chain(estimate.largest_join)
+                .max_by_key(ir::JoinEstimate::rank);
+            estimate.rows
+        };
+        for (name, view) in &self.shared_views {
+            let rows = estimate(view, &derived);
+            derived.insert(name, rows);
+        }
+        for group in execution_groups {
+            for &i in group {
+                let recursive =
+                    group.len() > 1 || recursive_info.get(i).is_some_and(Option::is_some);
+                let ir = if recursive {
+                    &unoptimized_ir_nodes[i]
+                } else {
+                    &self.ir_nodes[i]
+                };
+                let rows = estimate(ir, &derived);
+                if let Some(head) = rule_heads.get(i) {
+                    let total = derived.entry(head).or_default();
+                    *total = total.saturating_add(rows);
+                }
+            }
+        }
+        largest
     }
 
     /// Group IR nodes into strongly connected components of the rule
@@ -1552,35 +1700,17 @@ impl IQLEngine {
             return Err("No IR nodes to execute".to_string());
         }
 
-        // Query cost check (#47): reject queries exceeding configured cost threshold
+        // Rules run one SCC at a time, in dependency order. A plan that would
+        // multiply large relations is refused before anything runs.
+        let execution_groups = Self::execution_groups(&unoptimized_ir_nodes, &rule_heads);
         if self.max_query_cost > 0 {
-            let mutual = self
-                .program
-                .as_ref()
-                .map(recursion::mutually_recursive_relations)
-                .unwrap_or_default();
-            let total_cost: u64 = self.ir_nodes.iter().map(IRNode::estimate_cost).sum();
-            // Add recursion multiplier for recursive queries
-            let recursion_multiplier = (0..self.ir_nodes.len())
-                .filter(|&i| recursive_info[i].is_some() || mutual.contains(&rule_heads[i]))
-                .count() as u64;
-            let adjusted_cost = if recursion_multiplier > 0 {
-                total_cost.saturating_mul(10 * recursion_multiplier)
-            } else {
-                total_cost
-            };
-            if adjusted_cost > self.max_query_cost {
-                return Err(format!(
-                    "Query too complex: estimated cost {} exceeds maximum {} (reduce joins, recursion, or aggregations)",
-                    adjusted_cost, self.max_query_cost
-                ));
-            }
-            info!(
+            self.check_query_cost(
+                &unoptimized_ir_nodes,
+                &recursive_info,
+                &rule_heads,
+                &execution_groups,
                 source_len,
-                query_cost = adjusted_cost,
-                max_cost = self.max_query_cost,
-                "engine_cost_check_pass"
-            );
+            )?;
         }
 
         // Execute shared views first (from subplan sharing optimization)
@@ -1595,8 +1725,6 @@ impl IQLEngine {
         );
         collector.breakdown.shared_views_us = shared_us;
 
-        // Execute rules one SCC at a time, in dependency order
-        let execution_groups = Self::execution_groups(&unoptimized_ir_nodes, &rule_heads);
         let query_idx = self.ir_nodes.len() - 1;
         let mut last_result: Vec<Tuple> = Vec::new();
         // The final rule may stop early (one row past the cap, to detect

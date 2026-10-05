@@ -35,6 +35,19 @@ pub(super) fn start(view: &mut View, refresh: Refresh) -> Arc<Vec<Vec<Row>>> {
     Arc::new(rows)
 }
 
+/// Mark the view's result exact at `revision` too: no news for subscribers.
+pub(super) fn advance(live: &mut Live, revision: u64) {
+    let last = &live.latest;
+    let publication = Arc::new(Publication {
+        revision,
+        results: Arc::clone(&last.results),
+        outcome: last.outcome.clone(),
+        ..**last
+    });
+    live.cell.publish(Arc::clone(&publication));
+    live.latest = publication;
+}
+
 /// Publish a refresh's news and ring every subscriber; returns those whose connection is gone.
 pub(super) fn publish(
     view: &mut View,
@@ -51,6 +64,7 @@ pub(super) fn publish(
             let unchanged = refresh.is_unchanged();
             view.dependencies = refresh.dependencies;
             if unchanged && !matches!(last.outcome, Outcome::Failed(_)) {
+                advance(live, refresh.revision);
                 return Vec::new();
             }
             let mut results = Vec::with_capacity(refresh.queries.len());

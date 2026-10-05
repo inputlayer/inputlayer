@@ -37,6 +37,8 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 
 from inputlayer._protocol import (
+    GROUPS_PROTOCOL_VERSION,
+    PARAMS_PROTOCOL_VERSION,
     AuthenticatedResponse,
     AuthenticateMessage,
     AuthErrorResponse,
@@ -314,6 +316,7 @@ class Connection:
         self._ws: ClientConnection | None = None
         self._session_id: str | None = None
         self._server_version: str | None = None
+        self._protocol_version: int | None = None
         self._role: str | None = None
         self._current_kg: str | None = None
         self._state: _State = "idle"
@@ -538,6 +541,7 @@ class Connection:
             if isinstance(response, AuthenticatedResponse):
                 self._session_id = response.session_id
                 self._server_version = response.version
+                self._protocol_version = response.protocol_version
                 self._role = response.role
                 self._current_kg = response.knowledge_graph
                 if self._epoch != response.stream_epoch:
@@ -556,8 +560,18 @@ class Connection:
         self._next_id += 1
         return f"r{self._next_id}"
 
-    async def execute(self, program: str, *, timeout: float | None = None) -> ResultResponse:
+    async def execute(
+        self,
+        program: str,
+        *,
+        timeout: float | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> ResultResponse:
         """Send a program and await its result.
+
+        ``params`` are the values of the program's ``$name`` references, sent
+        beside its text and bound by the engine without being parsed
+        (protocol version 4; see :func:`inputlayer._literal.collect_params`).
 
         ``timeout`` (seconds, default the connection's ``default_timeout``)
         becomes the request's deadline, covering any wait for a connection
@@ -566,12 +580,16 @@ class Connection:
         A ``rate_limited`` refusal is retried once after the rate window, when
         the deadline leaves time for it.
         """
+        params = params or None
         result: ResultResponse = await self._request(
             "execute",
-            lambda id, timeout_ms: ExecuteMessage(program=program, id=id, timeout_ms=timeout_ms),
+            lambda id, timeout_ms: ExecuteMessage(
+                program=program, id=id, timeout_ms=timeout_ms, params=params
+            ),
             label=program,
             writes=_may_write(program),
             timeout=timeout,
+            requires=None if params is None else (PARAMS_PROTOCOL_VERSION, "parameters"),
         )
         return result
 
@@ -592,6 +610,7 @@ class Connection:
             label=describe_queries(named),
             writes=False,
             timeout=timeout,
+            requires=(GROUPS_PROTOCOL_VERSION, "reads and subscription groups"),
         )
         return reply
 
@@ -617,6 +636,7 @@ class Connection:
             label=describe_queries(named),
             writes=True,
             timeout=timeout,
+            requires=(GROUPS_PROTOCOL_VERSION, "reads and subscription groups"),
         )
         return reply
 
@@ -628,20 +648,23 @@ class Connection:
         label: str,
         writes: bool,
         timeout: float | None,
+        requires: tuple[int, str] | None = None,
     ) -> Any:
         """Send ``message(id, timeout_ms)`` under one deadline and await its
-        reply, retrying a ``rate_limited`` refusal once (see ``execute``)."""
+        reply, retrying a ``rate_limited`` refusal once (see ``execute``).
+        ``requires`` is the engine protocol version the request needs and
+        what needs it."""
         if timeout is None:
             timeout = self._default_timeout
         deadline = None if timeout is None else asyncio.get_running_loop().time() + timeout
         try:
-            return await self._request_once(kind, message, label, writes, deadline)
+            return await self._request_once(kind, message, label, writes, deadline, requires)
         except RateLimited:
             remaining = self._remaining(deadline)
             if remaining is not None and remaining <= _RATE_LIMIT_WINDOW:
                 raise
             await asyncio.sleep(_RATE_LIMIT_WINDOW)
-            return await self._request_once(kind, message, label, writes, deadline)
+            return await self._request_once(kind, message, label, writes, deadline, requires)
 
     async def _request_once(
         self,
@@ -650,8 +673,16 @@ class Connection:
         label: str,
         writes: bool,
         deadline: float | None,
+        requires: tuple[int, str] | None,
     ) -> Any:
         await self._ensure_open(deadline, label)
+        if requires is not None and (self._protocol_version or 0) < requires[0]:
+            # An older engine would refuse the frame or misread it.
+            version, what = requires
+            raise ConnectionError(
+                f"The engine speaks /ws protocol {self._protocol_version}; {what} need "
+                f"version {version}. Upgrade the engine."
+            )
         slots, _, _ = self._primitives()
         try:
             await slots.acquire(self._remaining(deadline))

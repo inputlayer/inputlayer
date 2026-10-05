@@ -458,6 +458,9 @@ pub enum ArithExpr {
         left: Box<ArithExpr>,
         right: Box<ArithExpr>,
     },
+    /// Parameter reference `$name`, bound to a number before evaluation
+    /// (see [`Term::Param`]).
+    Param(String),
 }
 
 impl ArithExpr {
@@ -487,7 +490,7 @@ impl ArithExpr {
             ArithExpr::Variable(name) => {
                 vars.insert(name.clone());
             }
-            ArithExpr::Constant(_) | ArithExpr::FloatConstant(_) => {}
+            ArithExpr::Constant(_) | ArithExpr::FloatConstant(_) | ArithExpr::Param(_) => {}
             ArithExpr::Binary { left, right, .. } => {
                 left.collect_variables(vars);
                 right.collect_variables(vars);
@@ -702,6 +705,10 @@ pub enum Term {
     FieldAccess(Box<Term>, String),
     /// Record pattern for destructuring in atom arguments: `{ id: x, name: y }`
     RecordPattern(Vec<(String, Term)>),
+    /// Parameter reference `$name`: a value sent beside the program text and
+    /// bound by [`crate::params::bind_statements`] before the program runs.
+    /// Nothing evaluates an unbound one.
+    Param(String),
 }
 
 impl Term {
@@ -1329,6 +1336,7 @@ impl std::fmt::Display for ArithExpr {
             ArithExpr::Variable(name) => write!(f, "{name}"),
             ArithExpr::Constant(val) => write!(f, "{val}"),
             ArithExpr::FloatConstant(bits) => write!(f, "{:?}", f64::from_bits(*bits)),
+            ArithExpr::Param(name) => write!(f, "${name}"),
             ArithExpr::Binary { op, left, right } => {
                 let parent_prec = op.precedence();
 
@@ -1478,6 +1486,7 @@ impl std::fmt::Display for Term {
                     .collect();
                 write!(f, "{{ {} }}", formatted.join(", "))
             }
+            Term::Param(name) => write!(f, "${name}"),
         }
     }
 }
