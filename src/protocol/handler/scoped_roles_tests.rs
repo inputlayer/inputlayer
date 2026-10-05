@@ -238,6 +238,59 @@ async fn scoped_key_lists_only_its_own_kgs_acl() {
     assert!(!listed.contains("bob"), "{listed}");
 }
 
+/// `.status` as `principal` on `kg`, its lines joined.
+async fn status(handler: &Handler, principal: Option<&Principal>, kg: &str) -> String {
+    let result = handler
+        .execute_program(None, Some(kg.to_string()), ".status".to_string(), principal)
+        .await
+        .unwrap();
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    result
+        .rows
+        .iter()
+        .map(|row| match &row.values[0] {
+            WireValue::String(line) => line.clone(),
+            other => panic!("expected a message, got {other:?}"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[tokio::test]
+async fn status_shows_only_the_knowledge_graphs_a_caller_can_see() {
+    let (handler, _tmp) = fixture().await;
+    handler
+        .handle_user_create("bob", "bob-password", "viewer")
+        .unwrap();
+    admin(&handler, ".kg acl grant other bob viewer")
+        .await
+        .unwrap();
+    let bob = handler.authenticate_user("bob", "bob-password").unwrap();
+    let key = create_key(&handler, "reader role viewer on shop").await;
+    let reader = handler.authenticate_api_key(&key).unwrap();
+    let root = handler
+        .authenticate_user("admin", "admin-password")
+        .unwrap();
+    let all = handler.get_storage().list_knowledge_graphs().len();
+    assert!(all > 2, "{all}");
+
+    for (who, principal, kg) in [("bob", &bob, "other"), ("scoped viewer key", &reader, KG)] {
+        let shown = status(&handler, Some(principal), kg).await;
+        assert!(shown.contains("Knowledge graphs: 1"), "{who}: {shown}");
+        assert!(!shown.contains("Total queries"), "{who}: {shown}");
+    }
+    for shown in [
+        status(&handler, Some(&root), KG).await,
+        status(&handler, None, KG).await,
+    ] {
+        assert!(
+            shown.contains(&format!("Knowledge graphs: {all}")),
+            "{shown}"
+        );
+        assert!(shown.contains("Total queries: "), "{shown}");
+    }
+}
+
 #[tokio::test]
 async fn writer_key_writes_any_facts_but_no_policy() {
     let (handler, _tmp) = fixture().await;
