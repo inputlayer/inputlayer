@@ -223,10 +223,7 @@ fn rules_at_the_limits_survive_a_restart() {
     on_engine_threads(async {
         let temp = TempDir::new().expect("create temp dir");
         let depth = DEFAULT_MAX_NESTING_DEPTH;
-        let wide = format!(
-            "r(Y), {}",
-            vec!["Y > -9"; 510].join(", ")
-        );
+        let wide = format!("r(Y), {}", vec!["Y > -9"; 510].join(", "));
         {
             let handler = open(temp.path());
             ok(&handler, "+r(-3)").await;
