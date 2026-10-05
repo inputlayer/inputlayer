@@ -109,6 +109,13 @@ inputlayer-ws-protocol = { path = "ws-protocol", version = "0.1.0" }
 # Shared registry + WS client (il CLI, gateway)
 inputlayer-ontology-client = { path = "ontology-client", version = "0.1.0" }
 
+# The global allocator under the metered one (src/execution/memory.rs):
+# glibc's malloc kept freed memory in its per-thread arenas, so a server under
+# sustained load grew without bound (#376). jemalloc does not build for MSVC.
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.6"
+tikv-jemalloc-sys = "0.6"
+
 [dev-dependencies]
 tempfile = "3.0"
 proptest = "1.4"

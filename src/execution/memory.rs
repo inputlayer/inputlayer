@@ -1,10 +1,11 @@
 //! Per-thread heap accounting for the per-query memory limit and the
 //! server's query memory budget.
 //!
-//! [`MeteredAllocator`], the process's global allocator, forwards to the
-//! system allocator and keeps a running count of the bytes each thread has
-//! allocated minus the bytes it has freed. The count is a plain thread-local
-//! cell: no lock and no atomic on the allocation path.
+//! [`MeteredAllocator`], the process's global allocator, forwards to
+//! jemalloc (the system allocator where jemalloc does not build) and keeps
+//! a running count of the bytes each thread has allocated minus the bytes
+//! it has freed. The count is a plain thread-local cell: no lock and no
+//! atomic on the allocation path.
 //!
 //! A request's computation runs on the threads evaluating it (Differential
 //! Dataflow executes in place), so the change in their counts since the
@@ -16,8 +17,17 @@
 //!
 //! [`RequestControl::charge_memory`]: super::RequestControl::charge_memory
 
-use std::alloc::{GlobalAlloc, Layout, System};
+use std::alloc::{GlobalAlloc, Layout};
 use std::cell::Cell;
+
+// jemalloc, not glibc's malloc: glibc keeps the memory each thread freed in
+// that thread's arena, so a server whose many threads allocate in turn grew
+// without bound under sustained load (#376), and capping its arenas cost
+// about 40% throughput.
+#[cfg(target_env = "msvc")]
+use std::alloc::System as Inner;
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc as Inner;
 
 thread_local! {
     /// Bytes allocated minus bytes freed by this thread since it started.
@@ -43,21 +53,32 @@ pub fn thread_net_bytes() -> i64 {
 pub const RELEASE_AFTER_PEAK_BYTES: i64 = 64 << 20;
 
 /// Return the heap memory the process has freed to the operating system.
-/// The system allocator keeps freed memory for reuse, so without this a
-/// server that once ran a query to its memory limit stays that large after
-/// the query ended. It walks the whole heap: call it only after a
-/// computation that held more than [`RELEASE_AFTER_PEAK_BYTES`].
+/// The allocator returns freed memory gradually (jemalloc after about ten
+/// seconds unused), so without this a server that once ran a query to its
+/// memory limit stays that large for a while after the query ended. It
+/// walks every arena: call it only after a computation that held more than
+/// [`RELEASE_AFTER_PEAK_BYTES`].
 pub fn release_freed_memory() {
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    {
-        extern "C" {
-            fn malloc_trim(pad: usize) -> std::ffi::c_int;
-        }
-        // SAFETY: glibc's `malloc_trim` takes no pointers and only returns
-        // free pages of the allocator's own heaps; it is thread-safe.
-        unsafe {
-            malloc_trim(0);
-        }
+    #[cfg(not(target_env = "msvc"))]
+    purge_all_arenas();
+}
+
+/// Have jemalloc return every arena's unused pages to the operating system
+/// now; jemalloc's status code (0 on success).
+#[cfg(not(target_env = "msvc"))]
+fn purge_all_arenas() -> std::ffi::c_int {
+    // `MALLCTL_ARENAS_ALL` (4096) names every arena.
+    let name = b"arena.4096.purge\0";
+    // SAFETY: a NUL-terminated name, and this control takes no old or new
+    // value; jemalloc's controls are thread-safe.
+    unsafe {
+        tikv_jemalloc_sys::mallctl(
+            name.as_ptr().cast(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            0,
+        )
     }
 }
 
@@ -104,17 +125,18 @@ fn read_limit(file: &std::path::Path) -> Option<u64> {
     (limit < 1 << 60).then_some(limit)
 }
 
-/// The system allocator, metering each thread's net allocation.
+/// jemalloc (or the system allocator), metering each thread's net
+/// allocation.
 pub struct MeteredAllocator;
 
-// SAFETY: every call forwards unchanged to `System`, which upholds the
-// `GlobalAlloc` contract; the accounting only touches a thread-local cell and
-// never allocates.
+// SAFETY: every call forwards unchanged to the inner allocator, which
+// upholds the `GlobalAlloc` contract; the accounting only touches a
+// thread-local cell and never allocates.
 unsafe impl GlobalAlloc for MeteredAllocator {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: forwarded with the caller's guarantees.
-        let ptr = unsafe { System.alloc(layout) };
+        let ptr = unsafe { Inner.alloc(layout) };
         if !ptr.is_null() {
             charge(layout.size() as i64);
         }
@@ -124,7 +146,7 @@ unsafe impl GlobalAlloc for MeteredAllocator {
     #[inline]
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         // SAFETY: forwarded with the caller's guarantees.
-        let ptr = unsafe { System.alloc_zeroed(layout) };
+        let ptr = unsafe { Inner.alloc_zeroed(layout) };
         if !ptr.is_null() {
             charge(layout.size() as i64);
         }
@@ -134,14 +156,14 @@ unsafe impl GlobalAlloc for MeteredAllocator {
     #[inline]
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         // SAFETY: forwarded with the caller's guarantees.
-        unsafe { System.dealloc(ptr, layout) };
+        unsafe { Inner.dealloc(ptr, layout) };
         charge(-(layout.size() as i64));
     }
 
     #[inline]
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         // SAFETY: forwarded with the caller's guarantees.
-        let new = unsafe { System.realloc(ptr, layout, new_size) };
+        let new = unsafe { Inner.realloc(ptr, layout, new_size) };
         if !new.is_null() {
             charge(new_size as i64 - layout.size() as i64);
         }
@@ -162,6 +184,13 @@ mod tests {
         drop(held);
         let after = thread_net_bytes() - before;
         assert!(after < 1 << 10, "refunded to {after}");
+    }
+
+    #[cfg(not(target_env = "msvc"))]
+    #[test]
+    fn freed_memory_is_purged_from_every_arena() {
+        drop(vec![0u8; 64 << 20]);
+        assert_eq!(purge_all_arenas(), 0);
     }
 
     #[test]
