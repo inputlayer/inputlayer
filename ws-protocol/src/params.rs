@@ -19,11 +19,14 @@
 //! `null` (what JavaScript's `JSON.stringify` makes of `NaN` and the
 //! infinities), integers outside int64, a bare number that is integral and
 //! at least 2^63 in magnitude (an int that does not fit, or a float written
-//! without a fraction: send `{"float": ...}`), `{"float": n}` for an integer
-//! `n` that no f64 equals, `{"int": ...}` with a fraction, objects that are
-//! not one known type tag, a parameter given twice, and names that are not
+//! without a fraction: send `{"float": ...}`), a bare negative zero (`-0`
+//! and `-0.0` read alike: send `0` for an int or `{"float": -0.0}` for a
+//! float), `{"float": n}` for an integer `n` within int64 or u64 range that
+//! no f64 equals, `{"int": ...}` with a fraction, objects that are not one
+//! known type tag, a parameter given twice, and names that are not
 //! identifiers (`[A-Za-z_][A-Za-z0-9_]*`, at most [`MAX_PARAM_NAME_LEN`]
-//! bytes).
+//! bytes). `{"float": n}` for a larger integer binds the f64 nearest `n`, as
+//! the same float literal in IQL would.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -233,9 +236,12 @@ impl Serialize for ParamValue {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
             Self::Int(n) => serializer.serialize_i64(*n),
-            // A bare integral float of 2^63 or more reads back as ambiguous;
-            // the explicit form keeps every float a float.
-            Self::Float(f) if f.fract() == 0.0 && f.abs() >= TWO_POW_63 => {
+            // A bare integral float of 2^63 or more, or a negative zero,
+            // reads back as ambiguous; the explicit form keeps every float a
+            // float.
+            Self::Float(f)
+                if is_negative_zero(*f) || (f.fract() == 0.0 && f.abs() >= TWO_POW_63) =>
+            {
                 let mut map = serializer.serialize_map(Some(1))?;
                 map.serialize_entry("float", f)?;
                 map.end()
@@ -331,6 +337,12 @@ impl<'de> Visitor<'de> for Bare {
                  or {{\"int\": \"<digits>\"}} for an int within int64"
             )));
         }
+        if is_negative_zero(v) {
+            return Err(E::custom(
+                "a bare negative zero is ambiguous: send 0 for an int, \
+                 or {\"float\": -0.0} for a float",
+            ));
+        }
         float(v)
     }
 
@@ -386,6 +398,10 @@ fn null<E: de::Error>() -> E {
         "null is not a value (JSON.stringify writes NaN and the infinities as null); \
          parameters are finite numbers, strings, booleans or vectors",
     )
+}
+
+fn is_negative_zero(v: f64) -> bool {
+    v == 0.0 && v.is_sign_negative()
 }
 
 fn int_from_u64<E: de::Error>(v: u64) -> Result<ParamValue, E> {
@@ -471,6 +487,7 @@ impl<'de> Visitor<'de> for Typed {
     fn visit_f64<E: de::Error>(self, v: f64) -> Result<ParamValue, E> {
         match self {
             Self::Float => float(v),
+            Self::Int if is_negative_zero(v) => Ok(ParamValue::Int(0)),
             Self::Int => Err(E::custom(format!(
                 "{v} is not an integer: an int has no fraction or exponent"
             ))),
@@ -526,8 +543,8 @@ mod tests {
         assert_eq!(one("-7").unwrap(), ParamValue::Int(-7));
         assert_eq!(one("1.0").unwrap(), ParamValue::Float(1.0));
         assert_eq!(one("1e-3").unwrap(), ParamValue::Float(1e-3));
-        assert_eq!(one("-0.0").unwrap(), ParamValue::Float(-0.0));
-        assert_ne!(one("-0.0").unwrap(), ParamValue::Float(0.0));
+        assert_eq!(one("0").unwrap(), ParamValue::Int(0));
+        assert_eq!(one("0.0").unwrap(), ParamValue::Float(0.0));
         assert_eq!(one(r#""S-77""#).unwrap(), ParamValue::String("S-77".into()));
         assert_eq!(one("true").unwrap(), ParamValue::Bool(true));
         assert_eq!(
@@ -550,6 +567,13 @@ mod tests {
         assert_eq!(one(r#"{"float": 1}"#).unwrap(), ParamValue::Float(1.0));
         assert_eq!(one(r#"{"float": 1e20}"#).unwrap(), ParamValue::Float(1e20));
         assert_eq!(one(r#"{"int": 5}"#).unwrap(), ParamValue::Int(5));
+        assert_eq!(one(r#"{"int": -0}"#).unwrap(), ParamValue::Int(0));
+        assert_eq!(one(r#"{"float": -0.0}"#).unwrap(), ParamValue::Float(-0.0));
+        assert_ne!(one(r#"{"float": -0.0}"#).unwrap(), ParamValue::Float(0.0));
+        assert_eq!(
+            one(r#"{"float": 18446744073709551617}"#).unwrap(),
+            ParamValue::Float(18_446_744_073_709_551_616.0)
+        );
         assert_eq!(
             one(r#"{"int": "9007199254740993"}"#).unwrap(),
             ParamValue::Int(9_007_199_254_740_993)
@@ -584,6 +608,9 @@ mod tests {
             ("-9223372036854775809", "too large for an int"),
             ("100000000000000000000", "too large for an int"),
             ("1e19", "too large for an int"),
+            ("-0", "negative zero is ambiguous"),
+            ("-0.0", "negative zero is ambiguous"),
+            ("-0e0", "negative zero is ambiguous"),
             (r#"{"float": 9007199254740993}"#, "no exact float"),
             (r#"{"int": 1.5}"#, "not an integer"),
             (r#"{"int": 5.0}"#, "not an integer"),

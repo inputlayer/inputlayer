@@ -64,9 +64,9 @@ class TestCollectParams:
         when = datetime(2026, 10, 10, tzinfo=timezone.utc)
         with collect_params() as params:
             text = " ".join(
-                encode(v) for v in [True, 'a"b', 42, 0.1, 2.0, 1e20, when, [0.5, 2], -(2**63)]
+                encode(v) for v in [True, 'a"b', 42, 0.1, 2.0, 1e20, when, [0.5, 2], -(2**63), -0.0]
             )
-        assert text == "$p0 $p1 $p2 $p3 $p4 $p5 $p6 $p7 $p8"
+        assert text == "$p0 $p1 $p2 $p3 $p4 $p5 $p6 $p7 $p8 $p9"
         assert params == {
             "p0": True,
             "p1": 'a"b',
@@ -77,10 +77,12 @@ class TestCollectParams:
             "p6": 1_791_590_400_000,
             "p7": [0.5, 2.0],
             "p8": -(2**63),
+            "p9": {"float": -0.0},
         }
         # JSON keeps every float a float, and every int an int.
         assert json.loads(json.dumps(params)) == params
         assert json.dumps(params["p4"]) == "2.0"
+        assert json.dumps(params["p9"]) == '{"float": -0.0}'
 
     def test_equal_literals_share_one_name(self) -> None:
         with collect_params() as params:

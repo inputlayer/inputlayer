@@ -88,7 +88,7 @@ async fn every_value_type_round_trips_exactly() {
     let h = handler(&dir);
     let p = params(json!({
         "min": i64::MIN, "max": i64::MAX,
-        "tenth": 0.1, "tiny": 5e-324, "neg_zero": -0.0, "big": {"float": 1e300},
+        "tenth": 0.1, "tiny": 5e-324, "neg_zero": {"float": -0.0}, "big": {"float": 1e300},
         "uni": "é \u{1F600} \u{0} \t", "yes": true, "no": false,
         "v": [0.5, -2, 1e-3],
     }));

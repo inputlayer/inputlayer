@@ -109,14 +109,18 @@ def params_of(iql: str, params: dict[str, Any]) -> dict[str, Any]:
 def wire_value(value: Any) -> Any:
     """The ``params`` value for *value*, whose literal compiled: the type its
     literal denotes, exactly. A float JSON would read back as ambiguous (an
-    integral value of 2^63 or more) takes the explicit ``{"float": x}`` form."""
+    integral value of 2^63 or more, or a negative zero) takes the explicit
+    ``{"float": x}`` form."""
     if isinstance(value, (str, bool)):
         return value
     if isinstance(value, numbers.Integral):
         return int(value)
     if isinstance(value, numbers.Real):
         f = float(value)
-        return {"float": f} if f.is_integer() and abs(f) >= 2.0**63 else f
+        ambiguous = (f.is_integer() and abs(f) >= 2.0**63) or (
+            f == 0.0 and math.copysign(1.0, f) < 0
+        )
+        return {"float": f} if ambiguous else f
     if isinstance(value, datetime):
         return datetime_to_ms(value)
     if isinstance(value, (list, tuple)):
