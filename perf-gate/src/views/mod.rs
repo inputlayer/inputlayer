@@ -497,6 +497,7 @@ struct Arrival {
 /// From a write sent at `start` to the last of its waiters' delta
 /// `arrivals`, which may come before the write's reply: `None` when a delta
 /// did not arrive in time, `Some(None)` without waiters.
+#[allow(clippy::option_option)]
 fn write_to_delta(
     start: Instant,
     arrivals: impl IntoIterator<Item = Option<Instant>>,
