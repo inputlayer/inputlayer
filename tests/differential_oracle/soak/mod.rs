@@ -260,10 +260,9 @@ pub async fn run(server: &str, config: Config) -> Report {
     let engine = builder.start().await.expect("start the engine");
 
     // The knowledge graph and every rule, before anything else runs.
-    let mut admin = WsClient::connect(&engine, "default")
+    WsClient::connect(&engine, "default")
         .await
-        .expect("connect admin");
-    admin
+        .expect("connect admin")
         .commit(&format!(".kg create {KG}"))
         .await
         .expect("create the knowledge graph");
@@ -278,6 +277,7 @@ pub async fn run(server: &str, config: Config) -> Report {
         let revision = result.revision.expect("a rule install names its revision");
         setup.push((revision, program));
     }
+    setup_client.close().await;
 
     let shared = Arc::new(Shared {
         ws_url: engine.ws_url(KG),
@@ -373,7 +373,11 @@ pub async fn run(server: &str, config: Config) -> Report {
     let write_secs = write_started.elapsed().as_secs_f64();
 
     // Everything committed; every consumer must now settle on this revision.
-    let final_revision = match admin.read(&[("final", "?edge(X, Y)")]).await {
+    let final_read = match WsClient::connect(&engine, KG).await {
+        Ok(mut client) => client.read(&[("final", "?edge(X, Y)")]).await,
+        Err(e) => Err(e),
+    };
+    let final_revision = match final_read {
         Ok(snapshot) => snapshot.revision,
         Err(e) => {
             shared.fail(format!("final read: {e}"));
@@ -400,7 +404,11 @@ pub async fn run(server: &str, config: Config) -> Report {
     shared.aborted.store(true, Ordering::SeqCst);
 
     // The engine must still answer after all of it.
-    if let Err(e) = admin.ping().await {
+    let health = match WsClient::connect(&engine, KG).await {
+        Ok(mut client) => client.ping().await,
+        Err(e) => Err(e),
+    };
+    if let Err(e) = health {
         shared.fail(format!("the engine stopped answering: {e}"));
     }
     sampling.store(false, Ordering::SeqCst);
