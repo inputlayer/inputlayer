@@ -128,6 +128,19 @@ struct CachedPlan {
     compiled: CompiledProgram,
     /// The relations in the program's dependency closure: its inputs.
     relations: Vec<String>,
+    /// Whether the plan evaluates persistent rules (see [`Combined`]).
+    evaluates_rules: bool,
+}
+
+/// A query program with the persistent rules it depends on.
+struct Combined {
+    program: Program,
+    /// The relations in the program's dependency closure: its inputs.
+    relations: Vec<String>,
+    /// Whether the closure holds a persistent rule, so running the program
+    /// evaluates deployed rules from the base facts: one rule evaluation
+    /// ([`crate::execution::ViewCounters::record_rule_evaluation`]) per run.
+    evaluates_rules: bool,
 }
 
 impl PersistentRules {
@@ -282,7 +295,7 @@ impl KnowledgeGraphSnapshot {
 
     /// `program`'s rules plus the persistent rules it depends on, and the
     /// relations in its dependency closure.
-    fn combine(&self, query: Program, rule_set: RuleSet) -> Result<(Program, Vec<String>), String> {
+    fn combine(&self, query: Program, rule_set: RuleSet) -> Result<Combined, String> {
         let persistent: &[Rule] = match rule_set {
             RuleSet::QueryOnly => &[],
             RuleSet::WithPersistent => self.persistent.rules.as_ref().map_err(Clone::clone)?,
@@ -294,15 +307,20 @@ impl KnowledgeGraphSnapshot {
         }
         closure.close_over(persistent);
 
-        let mut combined = Program::new();
-        combined.rules = persistent
+        let mut program = Program::new();
+        program.rules = persistent
             .iter()
             .filter(|rule| closure.contains(&rule.head.relation))
             .cloned()
-            .chain(query.rules)
             .collect();
+        let evaluates_rules = !program.rules.is_empty();
+        program.rules.extend(query.rules);
         let relations = closure.relations().map(str::to_string).collect();
-        Ok((combined, relations))
+        Ok(Combined {
+            program,
+            relations,
+            evaluates_rules,
+        })
     }
 
     /// This snapshot's data for `relations` (those it has).
@@ -328,9 +346,9 @@ impl KnowledgeGraphSnapshot {
         output: Output,
         session_facts: Vec<(String, Tuple)>,
         timing_mode: TimingMode,
-    ) -> Result<(IQLEngine, Program), String> {
-        let (combined, relations) = self.combine(query, rule_set)?;
-        let mut inputs = self.inputs(relations.iter().map(String::as_str));
+    ) -> Result<(IQLEngine, Combined), String> {
+        let combined = self.combine(query, rule_set)?;
+        let mut inputs = self.inputs(combined.relations.iter().map(String::as_str));
         for (relation, tuple) in session_facts {
             inputs.entry(relation).or_default().push(tuple);
         }
@@ -387,8 +405,11 @@ impl KnowledgeGraphSnapshot {
         let session_fact_count = session_facts.len();
         let (mut engine, combined) =
             self.prepare(query, rule_set, output, session_facts, timing_mode)?;
-        let rules = combined.rules.len();
-        let result = engine.execute_program_profiled(combined);
+        let rules = combined.program.rules.len();
+        if combined.evaluates_rules {
+            crate::execution::view_counters().record_rule_evaluation();
+        }
+        let result = engine.execute_program_profiled(combined.program);
         info!(
             rules,
             session_facts = session_fact_count,
@@ -544,13 +565,14 @@ impl KnowledgeGraphSnapshot {
         let (plan, compiled_now) = match self.persistent.plan(program, &self.optimization) {
             Some(plan) => (plan, false),
             None => {
-                let (combined, relations) = self.combine(query()?, RuleSet::WithPersistent)?;
+                let combined = self.combine(query()?, RuleSet::WithPersistent)?;
                 let mut engine = self.new_engine();
                 engine.set_timing_mode(timing_mode);
                 let plan = Arc::new(CachedPlan {
                     optimization: self.optimization.clone(),
-                    compiled: engine.compile_program(combined)?,
-                    relations,
+                    compiled: engine.compile_program(combined.program)?,
+                    relations: combined.relations,
+                    evaluates_rules: combined.evaluates_rules,
                 });
                 self.persistent.remember(program, Arc::clone(&plan));
                 (plan, true)
@@ -560,6 +582,9 @@ impl KnowledgeGraphSnapshot {
         let mut engine = self.new_engine();
         engine.set_timing_mode(timing_mode);
         engine.set_inputs(self.inputs(plan.relations.iter().map(String::as_str)));
+        if plan.evaluates_rules {
+            crate::execution::view_counters().record_rule_evaluation();
+        }
         let (tuples, _, mut timing) = engine.execute_compiled_profiled(&plan.compiled)?;
         let executing = executing.elapsed();
         if let (true, Some(timing)) = (compiled_now, timing.as_mut()) {
