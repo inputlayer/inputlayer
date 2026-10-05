@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use inputlayer_ws_protocol::{
-    ErrorCode, RequestId, ResultFrame, ServerFrame, SessionMetadata, Subscribed,
+    ErrorCode, Params, RequestId, ResultFrame, ServerFrame, SessionMetadata, Subscribed,
 };
 use tracing::{info, warn};
 
@@ -27,22 +27,32 @@ const INLINE_FRAME_ROWS: usize = 256;
 /// Maximum characters of a program logged as a preview.
 const LOG_PREVIEW_CHARS: usize = 80;
 
-/// Run `program` in `session_id` as `auth` for the request `id`, under
-/// `control`; returns its reply frames.
+/// Run `program` with `params` in `session_id` as `auth` for the request
+/// `id`, under `control`; returns its reply frames. The request log records
+/// how many parameters it had, not their values.
 pub(super) async fn execute(
     handler: Arc<Handler>,
     session_id: String,
     id: Option<RequestId>,
     program: String,
+    params: Params,
     auth: Principal,
     control: Arc<RequestControl>,
 ) -> Vec<String> {
     let start = Instant::now();
     let program_len = program.len();
     let program_preview = log_preview(&program);
-    info!(program_len, program_preview = %program_preview, "ws_execute_start");
+    let param_count = params.len();
+    info!(program_len, param_count, program_preview = %program_preview, "ws_execute_start");
     let result = handler
-        .execute_program_status(Some(&session_id), None, program, Some(&auth), &control)
+        .execute_program_with_params(
+            Some(&session_id),
+            None,
+            program,
+            &params,
+            Some(&auth),
+            &control,
+        )
         .await;
     let elapsed_ms = start.elapsed().as_millis() as u64;
     let slow_query_ms = handler.config().storage.performance.slow_query_log_ms;

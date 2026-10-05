@@ -124,6 +124,7 @@ mod ir_builder; // AST -> IR construction
 mod join_planning; // Join order optimization
 mod magic_sets; // Magic Sets demand-driven rewriting for recursive queries
 mod optimizer; // Basic IR optimizations
+pub mod params; // Parameterised programs: `$name` values bound out of band
 pub mod parser; // IQL parsing & AST construction
 pub mod rule_catalog; // Rule catalog for persistent rules
 pub mod semiring_types; // Diff type abstraction: BooleanDiff, MinDiff, MaxDiff

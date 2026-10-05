@@ -265,7 +265,8 @@ fn duplicates_and_changes_that_cancel_out_write_nothing() {
 /// over `r` would), staged on `snapshot`.
 fn reads_r(snapshot: &Arc<KnowledgeGraphSnapshot>) -> WriteProgram {
     let mut staged = program(vec![vec![delete("r", vec![t(1)])]]);
-    staged.read(snapshot, &snapshot.rules, "q(X, Y) <- r(X, Y)");
+    let query = crate::parser::parse_program("q(X, Y) <- r(X, Y)").unwrap();
+    staged.read(snapshot, &snapshot.rules, &query);
     staged
 }
 

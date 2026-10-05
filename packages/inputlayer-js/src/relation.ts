@@ -22,6 +22,7 @@ import { ColumnProxy, wrap } from './proxy.js';
 import { RelationRef } from './proxy.js';
 import { anyExpr, type AnyExpr, type Expr } from './ast.js';
 import { CompileError } from './errors.js';
+import type { ParamValue, Params } from './protocol.js';
 
 /** Column type shorthand map for the schema definition DSL. */
 export type ColumnTypes = Record<string, IQLType>;
@@ -159,11 +160,81 @@ const I64_MIN = -(2n ** 63n);
 const I64_MAX = 2n ** 63n - 1n;
 
 /**
- * Compile a value to its IQL literal representation. `type` is the column's
- * type when known: an `int` or `timestamp` column refuses a number past
+ * Compile a value to its IQL representation. `type` is the column's type
+ * when known: an `int` or `timestamp` column refuses a number past
  * Number.MAX_SAFE_INTEGER, which has already lost digits (pass a BigInt).
+ *
+ * Inside {@link withParams} the value is sent beside the program and this
+ * returns its `$name` reference; otherwise it returns the value's literal.
  */
 export function compileValue(value: unknown, type?: string): string {
+  const literal = compileLiteral(value, type);
+  return activeParams === undefined ? literal : activeParams.reference(literal, value, type);
+}
+
+/** The values of the program being compiled inside `withParams`, if any. */
+let activeParams: ParamSink | undefined;
+
+/**
+ * Compile a program with its values out of band: every value `compile`
+ * passes through {@link compileValue} becomes a `$pN` reference, and the
+ * values are returned as the request's `params`. The engine binds them to
+ * the parsed program, so no value is ever IQL syntax.
+ */
+export function withParams<T>(compile: () => T): { result: T; params: Params } {
+  const outer = activeParams;
+  const sink = new ParamSink();
+  activeParams = sink;
+  try {
+    return { result: compile(), params: sink.params };
+  } finally {
+    activeParams = outer;
+  }
+}
+
+/** Collects a program's values, each distinct value once. */
+class ParamSink {
+  readonly params: Params = {};
+  /** Name of each value, keyed by its literal (equal literals, equal values). */
+  private readonly names = new Map<string, string>();
+
+  reference(literal: string, value: unknown, type?: string): string {
+    let name = this.names.get(literal);
+    if (name === undefined) {
+      name = `p${this.names.size}`;
+      this.params[name] = wireValue(value, type);
+      this.names.set(literal, name);
+    }
+    return `$${name}`;
+  }
+}
+
+/**
+ * The wire form of a value whose literal compiled: the same type the
+ * literal denotes, exactly. JSON writes `2.0` as `2`, so an integral float
+ * and an int past 2^53 take the explicit `{float}` and `{int}` forms.
+ */
+function wireValue(value: unknown, type?: string): ParamValue {
+  if (value === null || value === undefined) {
+    throw new CompileError(
+      `${value} is not a value: IQL has no null`,
+      'leave the column out, or pass a value',
+    );
+  }
+  if (typeof value === 'boolean' || typeof value === 'string') return value;
+  if (value instanceof Timestamp) return wireValue(value.ms, 'int');
+  if (value instanceof Date) return wireValue(value.getTime(), 'int');
+  if (typeof value === 'bigint') return { int: value.toString() };
+  if (typeof value === 'number') {
+    if (Number.isSafeInteger(value)) return value;
+    return Number.isInteger(value) ? { float: value } : value;
+  }
+  if (Array.isArray(value)) return value.map((v) => v as number);
+  throw new TypeError(`Cannot send value of type ${typeof value}: ${String(value)}`);
+}
+
+/** {@link compileValue}'s literal, never a parameter: for IQL that takes no parameters. */
+export function compileLiteral(value: unknown, type?: string): string {
   if (value === null || value === undefined) {
     return 'null';
   }
@@ -171,11 +242,11 @@ export function compileValue(value: unknown, type?: string): string {
     return value ? 'true' : 'false';
   }
   if (value instanceof Timestamp) {
-    return compileValue(value.ms, 'int');
+    return compileLiteral(value.ms, 'int');
   }
   if (value instanceof Date) {
     // Timestamps are stored as int Unix milliseconds.
-    return compileValue(value.getTime(), 'int');
+    return compileLiteral(value.getTime(), 'int');
   }
   if (typeof value === 'bigint') {
     if (value < I64_MIN || value > I64_MAX) {

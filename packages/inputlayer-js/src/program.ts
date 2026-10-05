@@ -26,6 +26,7 @@ import {
 import { CompileError, InternalError } from './errors.js';
 import { columnToVariable } from './naming.js';
 import { any, compileValue, type RelationDef } from './relation.js';
+import type { Params } from './protocol.js';
 import type { Fact } from './types.js';
 
 /** Token relation: one row while a guarded program runs, none after. */
@@ -44,7 +45,7 @@ type Statement =
   | { kind: 'retract'; rel: RelationDef; fact: Fact }
   | { kind: 'retractKey'; rel: RelationDef; key: Fact }
   | { kind: 'schema'; rel: RelationDef }
-  | { kind: 'rule'; text: string }
+  | { kind: 'rule'; headName: string; headColumns: string[]; clause: RuleClause }
   | { kind: 'clearRule'; name: string };
 
 /** A compiled program and how to read its reply. */
@@ -144,7 +145,7 @@ function plainStatement(s: Statement): string {
     case 'schema':
       return compileSchema(s.rel);
     case 'rule':
-      return s.text;
+      return compileRule(s.headName, s.headColumns, s.clause, true);
     case 'clearRule':
       return `.rule clear ${s.name}`;
     default:
@@ -221,7 +222,10 @@ export class Program {
   /** Add persistent rule clauses in the program (unconditional: needs the abort form). */
   defineRules(headName: string, headColumns: string[], clauses: RuleClause[]): this {
     for (const clause of clauses) {
-      this.statements.push({ kind: 'rule', text: compileRule(headName, headColumns, clause, true) });
+      // Compiled now to refuse a bad clause at once; again at commit, where
+      // its values become parameters.
+      compileRule(headName, headColumns, clause, true);
+      this.statements.push({ kind: 'rule', headName, headColumns, clause });
     }
     return this;
   }
@@ -251,7 +255,10 @@ export class Program {
     return this.guards.length > 0;
   }
 
-  /** The IQL this program sends (with a fresh token id each call). */
+  /**
+   * The program as IQL, with a fresh token id each call and values written
+   * as literals. What `commit()` sends carries the values as parameters.
+   */
   iql(opts?: { strict?: boolean }): string {
     return this.compile(opts?.strict ?? true).iql;
   }
@@ -329,8 +336,10 @@ export interface ProgramResult {
   inserted: number;
   /** Facts removed by the program's writes. */
   deleted: number;
-  /** The program that was sent. */
+  /** The program that was sent: its values are `$name` references. */
   iql: string;
+  /** The values sent with it, by name. */
+  params: Params;
 }
 
 /** Outcome of `kg.claim()`. */

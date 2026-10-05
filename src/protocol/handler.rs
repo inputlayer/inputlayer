@@ -91,6 +91,7 @@ fn term_to_value(term: &Term) -> Result<Value, String> {
             Err("Cannot insert field access - use constants only".to_string())
         }
         Term::BoolConstant(b) => Ok(Value::Bool(*b)),
+        Term::Param(name) => Err(crate::params::unbound(name)),
         Term::RecordPattern(_) => {
             Err("Cannot insert record pattern - use constants only".to_string())
         }
@@ -2549,17 +2550,17 @@ impl QueryJob {
 
         // Phase 2: Execute statements (all guaranteed to parse successfully)
         let mut messages = Vec::new();
-        // The query to run after the statements, with its statement index.
-        let mut query_to_execute: Option<(usize, String)> = None;
+        // The query to run after the statements, with its statement index:
+        // the parsed (and bound) goal, or why a generated one did not parse.
+        let mut query_to_execute: Option<(usize, Result<statement::QueryGoal, String>)> = None;
         let mut current_stmt = String::new();
         // Track KG switch for WS session binding update
         let mut switched_kg_result: Option<String> = None;
         // Collect session facts (non-persisted) to temporarily insert before query
         // Format: (relation_name, tuple_values)
         let mut session_fact_tuples: Vec<(String, Tuple)> = Vec::new();
-        // Collect session rules to prepend to queries
-        let mut session_rules: Vec<String> = Vec::new();
-        // Parsed session rules for validation (arity/aggregation compatibility)
+        // Session rules, evaluated with the query (and checked against each
+        // other for arity/aggregation compatibility)
         let mut session_rules_parsed: Vec<crate::ast::Rule> = Vec::new();
         let mut errors: Vec<StatementError> = Vec::new();
         let mut stmt_index: usize;
@@ -2693,16 +2694,14 @@ impl QueryJob {
                                     continue;
                                 }
 
-                                let rule_text = format_rule_text(&rule);
-                                session_rules.push(rule_text.clone());
-                                session_rules_parsed.push(rule.clone());
                                 messages.push(format!(
                                     "Session rule added for '{}'.",
                                     rule.head.relation
                                 ));
+                                session_rules_parsed.push(rule);
                             }
-                            statement::Statement::Query(_) => {
-                                query_to_execute = Some((stmt_index, stmt_text.to_string()));
+                            statement::Statement::Query(goal) => {
+                                query_to_execute = Some((stmt_index, Ok(goal)));
                             }
                             statement::Statement::DeleteRelationOrRule(name) => {
                                 queue!(WriteStatement::Catalog(CatalogStatement::DropRule(name)));
@@ -2876,8 +2875,10 @@ impl QueryJob {
                                                     // Execute query to get data (limit 10)
                                                     let query_text =
                                                         format!("?{name}({})", vars.join(", "));
-                                                    query_to_execute =
-                                                        Some((stmt_index, query_text));
+                                                    query_to_execute = Some((
+                                                        stmt_index,
+                                                        generated_query(&query_text),
+                                                    ));
                                                     messages.push(format!("Relation '{name}': {arity} columns, {total_count} total tuples"));
                                                 }
                                             }
@@ -2944,7 +2945,8 @@ impl QueryJob {
                                     MetaCommand::RuleQuery(name) => {
                                         // Execute as a query - delegate to query path
                                         let query_text = format!("?{name}(X, Y)");
-                                        query_to_execute = Some((stmt_index, query_text));
+                                        query_to_execute =
+                                            Some((stmt_index, generated_query(&query_text)));
                                     }
                                     MetaCommand::RuleShowDef(name) => {
                                         match storage.describe_rule_in(kg, &name) {
@@ -3377,7 +3379,7 @@ impl QueryJob {
                 program_len,
                 stmt_exec_ms,
                 session_facts = session_fact_tuples.len(),
-                session_rules = session_rules.len(),
+                session_rules = session_rules_parsed.len(),
                 "query_statement_exec_complete"
             );
         }
@@ -3441,10 +3443,7 @@ impl QueryJob {
             });
         }
 
-        let (query_index, program_text) = match query_to_execute {
-            Some((index, query)) => (Some(index), query),
-            None => (None, program_text),
-        };
+        let query_index = query_to_execute.as_ref().map(|(index, _)| *index);
         // A failed query is a failure of its statement; the statements before
         // it keep their results.
         macro_rules! fail_query {
@@ -3468,22 +3467,32 @@ impl QueryJob {
             }};
         }
 
-        // Transform ?shorthand query syntax into __query__(...) <- ... rule
-        let transform = match transform_query_shorthand(&program_text) {
-            Ok(transform) => transform,
-            Err(e) => fail_query!(ErrorCode::Validation, e),
+        // The program evaluated: the session rules, then the query's
+        // `__query__(...) <- ...` rule (with no query, the program's own
+        // rules). Built from the parsed statements, so their constants,
+        // bound parameters included, are never re-parsed.
+        let mut query_program = crate::ast::Program {
+            rules: session_rules_parsed,
         };
-        let query_program = transform.query;
-        let order_by = transform.order_by;
-        let query_limit = transform.limit;
-        let query_offset = transform.offset;
-        // Prepend session rules to the query program
-        let query_program = if session_rules.is_empty() {
-            query_program
-        } else {
-            let rules_text = session_rules.join("\n");
-            format!("{rules_text}\n{query_program}")
+        let (order_by, query_limit, query_offset) = match query_to_execute {
+            Some((_, Ok(goal))) => {
+                let plan = plan_query(&goal);
+                query_program.rules.push(plan.rule);
+                (plan.order_by, plan.limit, plan.offset)
+            }
+            Some((_, Err(e))) => fail_query!(ErrorCode::Validation, e),
+            None => match crate::parser::parse_program(&program_text) {
+                Ok(program) => {
+                    query_program.rules.extend(program.rules);
+                    (Vec::new(), None, None)
+                }
+                Err(e) => fail_query!(
+                    ErrorCode::Validation,
+                    format!("Query execution failed: {e}")
+                ),
+            },
         };
+        let query_rule = query_program.rules.last().cloned();
 
         // Get a snapshot of the KG data under the lock (O(1) Arc clone),
         // then RELEASE the storage lock before the heavy DD computation.
@@ -3491,7 +3500,9 @@ impl QueryJob {
         // (e.g. .kg drop), parking_lot's write-preferring policy would otherwise
         // block ALL new readers while waiting for long-running DD computations.
         // Look up registered schema column names before releasing the lock
-        let schema_col_names: Option<Vec<String>> = find_query_source_relation(&query_program)
+        let schema_col_names: Option<Vec<String>> = query_rule
+            .as_ref()
+            .and_then(query_source_relation)
             .and_then(|rel| storage.get_schema_in(&kg_name, &rel).ok().flatten())
             .map(|s| s.columns.iter().map(|c| c.name.clone()).collect());
 
@@ -3522,21 +3533,31 @@ impl QueryJob {
         let has_session_facts = !session_fact_tuples.is_empty();
         let timing_mode = self.config.storage.performance.timing_mode;
         let run = || {
-            if has_session_facts {
-                snapshot.execute_with_session_facts_profiled(
-                    &query_program,
+            match &self.cache_plan {
+                // A standing query's plan is kept under its text; the miss
+                // compiles the parsed program, never that text.
+                Some(cache_plan) if !has_session_facts => {
+                    let key: Vec<String> = query_program
+                        .rules
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect();
+                    snapshot
+                        .execute_program_with_rules_cached(
+                            &key.join("\n"),
+                            query_program,
+                            timing_mode,
+                        )
+                        .map(|(tuples, timing, run)| {
+                            let _ = cache_plan.set(run);
+                            (tuples, timing)
+                        })
+                }
+                _ => snapshot.execute_program_with_session_facts_profiled(
+                    query_program,
                     session_fact_tuples,
                     timing_mode,
-                )
-            } else if let Some(cache_plan) = &self.cache_plan {
-                snapshot
-                    .execute_with_rules_tuples_cached(&query_program, timing_mode)
-                    .map(|(tuples, timing, run)| {
-                        let _ = cache_plan.set(run);
-                        (tuples, timing)
-                    })
-            } else {
-                snapshot.execute_with_rules_tuples_profiled(&query_program, timing_mode)
+                ),
             }
         };
         let needs_full = needs_full_result(&order_by, query_offset);
@@ -3593,14 +3614,9 @@ impl QueryJob {
         // Fall back to query variable names only when no schema exists.
         let schema: Vec<ColumnDef> = if let Some(first) = results.first() {
             let arity = first.values().len();
-            let col_names = if let Some(ref names) = schema_col_names {
-                if names.len() == arity {
-                    names.clone()
-                } else {
-                    extract_column_names_from_query(&query_program, arity)
-                }
-            } else {
-                extract_column_names_from_query(&query_program, arity)
+            let col_names = match schema_col_names {
+                Some(ref names) if names.len() == arity => names.clone(),
+                _ => query_column_names(query_rule.as_ref(), arity),
             };
 
             first
@@ -3744,24 +3760,36 @@ impl Handler {
         // Slow path: combine ephemeral + persistent data
         // Get ephemeral facts and rules from session
         let session_facts = self.sessions.get_session_facts(session_id)?;
-        let rule_texts: Vec<String> = self
+        let session_rules: Vec<crate::ast::Rule> = self
             .sessions
-            .with_session(session_id, |session| session.rule_texts().to_vec())?;
+            .with_session(session_id, |session| session.rules().to_vec())?;
 
-        // Apply same preprocessing as the fast path: strip comments + transform ?shorthand
-        let preprocessed = strip_comments(&program);
-        let transform = transform_query_shorthand(&preprocessed)?;
-        let preprocessed = transform.query;
-        let order_by = transform.order_by;
-        let query_limit = transform.limit;
-        let query_offset = transform.offset;
-        // Build combined program: ephemeral rules + preprocessed query
-        // Keep `preprocessed` for the persistent-only baseline (provenance diff)
-        let combined_program = if rule_texts.is_empty() {
-            preprocessed.clone()
-        } else {
-            let rules_prefix = rule_texts.join("\n");
-            format!("{rules_prefix}\n{preprocessed}")
+        // The query's own program, as the fast path builds it: a single
+        // query evaluates as parsed (and bound), never re-parsed; anything
+        // else is transformed from its text as before.
+        let (query, order_by, query_limit, query_offset) = match statements.as_deref() {
+            Some([statement::Statement::Query(goal)]) => {
+                let plan = plan_query(goal);
+                let query = crate::ast::Program {
+                    rules: vec![plan.rule],
+                };
+                (query, plan.order_by, plan.limit, plan.offset)
+            }
+            _ => {
+                let transform = transform_query_shorthand(&strip_comments(&program))?;
+                let query = crate::parser::parse_program(&transform.query)
+                    .map_err(|e| ProgramError::from(format!("Query execution failed: {e}")))?;
+                (query, transform.order_by, transform.limit, transform.offset)
+            }
+        };
+        let query_rule = query.rules.last().cloned();
+        // Combined program: ephemeral rules + the query. `query` alone is the
+        // persistent-only baseline (provenance diff).
+        let combined_program = crate::ast::Program {
+            rules: session_rules
+                .into_iter()
+                .chain(query.rules.clone())
+                .collect(),
         };
 
         self.inc_query_count();
@@ -3775,7 +3803,9 @@ impl Handler {
             storage
                 .ensure_knowledge_graph(&kg)
                 .map_err(|e| format!("Knowledge graph not found: {e}"))?;
-            let names: Option<Vec<String>> = find_query_source_relation(&preprocessed)
+            let names: Option<Vec<String>> = query_rule
+                .as_ref()
+                .and_then(query_source_relation)
                 .and_then(|rel| storage.get_schema_in(&kg, &rel).ok().flatten())
                 .map(|s| s.columns.iter().map(|c| c.name.clone()).collect());
             let snap = storage.get_snapshot_for(&kg).map_err(|e| e.to_string())?;
@@ -3784,8 +3814,6 @@ impl Handler {
 
         // Offload CPU-bound DD computation to the blocking thread pool, under
         // a compute permit and the request's deadline (same as query_program).
-        let combined_program_clone = combined_program;
-        let preprocessed_clone = preprocessed.clone();
         let timing_mode = self.config.storage.performance.timing_mode;
         let timing_histograms = Arc::clone(&self.timing_histograms);
         let needs_full = needs_full_result(&order_by, query_offset);
@@ -3793,8 +3821,8 @@ impl Handler {
             supervise::run_blocking(&self.query_semaphore, control, move || {
                 // Run session query on snapshot (lock-free) with profiling
                 let run = || {
-                    snapshot.execute_with_session_facts_profiled(
-                        &combined_program_clone,
+                    snapshot.execute_program_with_session_facts_profiled(
+                        combined_program,
                         session_facts,
                         timing_mode,
                     )
@@ -3822,9 +3850,7 @@ impl Handler {
                 let baseline: HashSet<Tuple> = if results.is_empty() {
                     HashSet::new()
                 } else {
-                    match crate::without_result_cap(|| {
-                        snapshot.execute_with_rules_tuples(&preprocessed_clone)
-                    }) {
+                    match crate::without_result_cap(|| snapshot.execute_program_with_rules(query)) {
                         Ok(tuples) => tuples.into_iter().collect(),
                         Err(e) => {
                             warn!(error = %e, "Provenance baseline query failed - all tuples tagged as ephemeral");
@@ -3872,14 +3898,9 @@ impl Handler {
 
         let schema: Vec<ColumnDef> = if let Some(first) = results.first() {
             let arity = first.values().len();
-            let col_names = if let Some(ref names) = schema_col_names {
-                if names.len() == arity {
-                    names.clone()
-                } else {
-                    extract_column_names_from_query(&preprocessed, arity)
-                }
-            } else {
-                extract_column_names_from_query(&preprocessed, arity)
+            let col_names = match schema_col_names {
+                Some(ref names) if names.len() == arity => names.clone(),
+                _ => query_column_names(query_rule.as_ref(), arity),
             };
 
             first
@@ -4063,9 +4084,33 @@ impl Handler {
         auth: Option<&crate::auth::Principal>,
         control: &Arc<RequestControl>,
     ) -> Result<QueryResult, ProgramError> {
+        let params = crate::params::Params::new();
+        self.execute_program_with_params(
+            session_id,
+            knowledge_graph,
+            program,
+            &params,
+            auth,
+            control,
+        )
+        .await
+    }
+
+    /// `execute_program_status` for a parameterised program: `params` are
+    /// bound to its `$name` references on the parsed statements, so no value
+    /// passes through the parser (see [`crate::params`]).
+    pub async fn execute_program_with_params(
+        &self,
+        session_id: Option<&SessionId>,
+        knowledge_graph: Option<String>,
+        program: String,
+        params: &crate::params::Params,
+        auth: Option<&crate::auth::Principal>,
+        control: &Arc<RequestControl>,
+    ) -> Result<QueryResult, ProgramError> {
         let single_statement = program_statement_count(&program) == 1;
         let result = self
-            .run_execute_program(session_id, knowledge_graph, program, auth, control)
+            .run_execute_program(session_id, knowledge_graph, program, params, auth, control)
             .await?;
         // A stop that won the race discards a result that changed nothing; a
         // later one is too late.
@@ -4168,18 +4213,16 @@ impl Handler {
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         program: String,
+        params: &crate::params::Params,
         auth: Option<&crate::auth::Principal>,
         control: &Arc<RequestControl>,
     ) -> Result<QueryResult, ProgramError> {
-        // Input size validation (protects parsing and downstream handlers)
+        // Input size validation (protects parsing and downstream handlers).
+        // Parameters count toward it: they are the program's values.
         let max_bytes = self.config.storage.performance.max_query_size_bytes;
-        if max_bytes > 0 && program.len() > max_bytes {
-            return Err(format!(
-                "Program too large: {} bytes (max {})",
-                program.len(),
-                max_bytes
-            )
-            .into());
+        let size = program.len() + params.size_bytes();
+        if max_bytes > 0 && size > max_bytes {
+            return Err(format!("Program too large: {size} bytes (max {max_bytes})").into());
         }
 
         let trimmed = program.trim();
@@ -4231,8 +4274,9 @@ impl Handler {
             }
         }
 
-        // Parsed once: these exact statements are authorized and executed.
-        let statements = parse_program(&program).ok();
+        // Parsed and bound once: these exact statements are authorized and
+        // executed.
+        let statements = parse_bound_program(&program, params)?;
         let stmts = statements.as_deref().unwrap_or_default();
         self.authorize_program(effective_auth, current_kg, stmts)?;
         if control.precondition().is_some()
@@ -4982,6 +5026,7 @@ impl Handler {
             session_id,
             Some(kg.clone()),
             program,
+            &crate::params::Params::new(),
             auth,
             &self.request_control(None),
         ))
@@ -5044,6 +5089,7 @@ impl Handler {
                 "+pack_meta(name: string, version: string, digest: string)\n\
              +pack_item(pack: string, kind: string, item: string)"
                     .to_string(),
+                &crate::params::Params::new(),
                 auth,
                 &self.request_control(None),
             ),
@@ -5071,6 +5117,7 @@ impl Handler {
             session_id,
             Some(kg.clone()),
             record,
+            &crate::params::Params::new(),
             auth,
             &self.request_control(None),
         ))
@@ -5172,6 +5219,7 @@ impl Handler {
                 session_id,
                 Some(kg.clone()),
                 program,
+                &crate::params::Params::new(),
                 auth,
                 &self.request_control(None),
             ))
@@ -5222,6 +5270,7 @@ impl Handler {
                 "-pack_item(P, K, I) <- pack_item(P, K, I), P = \"{name}\"\n\
                  -pack_meta(N, V, D) <- pack_meta(N, V, D), N = \"{name}\""
             ),
+            &crate::params::Params::new(),
             auth,
             &self.request_control(None),
         ))
@@ -5294,6 +5343,7 @@ impl Handler {
                 session_id,
                 Some(kg.clone()),
                 program,
+                &crate::params::Params::new(),
                 auth,
                 &self.request_control(None),
             ))
@@ -5442,112 +5492,141 @@ impl Handler {
 /// Also extracts `:asc`/`:desc` sort annotations from query head variables,
 /// e.g. `?rel(X, Score:desc)` → sort by column 1 descending.
 pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTransform, String> {
+    let passthrough = || QueryTransform {
+        query: program_text.to_string(),
+        order_by: vec![],
+        limit: None,
+        offset: None,
+        columns: vec![],
+    };
     let trimmed = program_text.trim();
-    if let Some(after_q) = trimmed.strip_prefix('?') {
-        let after_q = after_q.trim_start();
-        if !after_q.starts_with(|c: char| c.is_alphabetic() || c == '_') {
-            return Ok(QueryTransform {
-                query: program_text.to_string(),
-                order_by: vec![],
-                limit: None,
-                offset: None,
-                columns: vec![],
-            });
-        }
-        let query_text = after_q;
-        let goal = statement::parse_query(query_text)
-            .map_err(|e| format!("Failed to parse query: {e}"))?;
+    let Some(after_q) = trimmed.strip_prefix('?') else {
+        return Ok(passthrough());
+    };
+    let after_q = after_q.trim_start();
+    if !after_q.starts_with(|c: char| c.is_alphabetic() || c == '_') {
+        return Ok(passthrough());
+    }
+    let goal =
+        statement::parse_query(after_q).map_err(|e| format!("Failed to parse query: {e}"))?;
+    let plan = plan_query(&goal);
+    let columns = plan
+        .rule
+        .head
+        .args
+        .iter()
+        .filter_map(|term| term.as_variable().map(str::to_string))
+        .collect();
+    Ok(QueryTransform {
+        query: plan.rule.to_string(),
+        order_by: plan.order_by,
+        limit: plan.limit,
+        offset: plan.offset,
+        columns,
+    })
+}
 
-        let mut head_vars = Vec::new();
-        let mut extra_constraints = Vec::new();
+/// The goal of a `?name(...)` query the engine generated for a meta command
+/// (`.rel <name>`, `.rule <name>`).
+fn generated_query(text: &str) -> Result<statement::QueryGoal, String> {
+    let goal = text.strip_prefix('?').unwrap_or(text);
+    statement::parse_query(goal).map_err(|e| format!("Failed to parse query: {e}"))
+}
 
-        let transformed_args: Vec<String> = goal
-            .goal
+/// A parsed `?` query as the rule that evaluates it, with its ordering and
+/// paging.
+pub(crate) struct QueryPlan {
+    /// `__query__(vars) <- goal, body`: the goal's constants become fresh
+    /// variables constrained to them.
+    pub rule: crate::ast::Rule,
+    /// Column-index-based sort specification, from `:asc`/`:desc` annotations.
+    pub order_by: Vec<(usize, SortDirection)>,
+    /// Maximum number of rows to return.
+    pub limit: Option<usize>,
+    /// Number of rows to skip before applying limit.
+    pub offset: Option<usize>,
+}
+
+/// The rule evaluating `goal`, built from its syntax tree: the query runs as
+/// parsed (and bound), never re-parsed from text.
+pub(crate) fn plan_query(goal: &statement::QueryGoal) -> QueryPlan {
+    use crate::ast::{Atom, BodyPredicate, ComparisonOp, Rule};
+
+    let mut head_vars = Vec::new();
+    let mut extra_constraints = Vec::new();
+
+    let goal_atom = goal.goal.as_ref().map(|atom| {
+        let args = atom
+            .args
             .iter()
-            .flat_map(|g| g.args.iter())
             .enumerate()
-            .map(|(i, term)| match term {
-                Term::Variable(v) => {
-                    head_vars.push(v.clone());
-                    v.clone()
-                }
-                Term::Constant(_)
-                | Term::FloatConstant(_)
-                | Term::BoolConstant(_)
-                | Term::StringConstant(_) => {
-                    let t = format!("_c{i}");
-                    head_vars.push(t.clone());
-                    extra_constraints.push(format!("{t} = {term}"));
-                    t
-                }
-                Term::VectorLiteral(_) => {
-                    // Vector literals can't be used in comparison constraints
-                    // (parser doesn't support [1,2,3] in comparison context).
+            .map(|(i, term)| {
+                let var = match term {
+                    Term::Variable(v) => v.clone(),
+                    Term::Constant(_)
+                    | Term::FloatConstant(_)
+                    | Term::BoolConstant(_)
+                    | Term::StringConstant(_)
+                    // Unbound, it is refused where the rule is built.
+                    | Term::Param(_) => {
+                        let var = format!("_c{i}");
+                        extra_constraints.push(BodyPredicate::Comparison(
+                            Term::Variable(var.clone()),
+                            ComparisonOp::Equal,
+                            term.clone(),
+                        ));
+                        var
+                    }
+                    // Vector literals can't be used in comparison constraints.
                     // Use a fresh variable - returns all rows for this position.
-                    let t = format!("_v{i}");
-                    head_vars.push(t.clone());
-                    t
-                }
-                Term::Placeholder => {
-                    let t = format!("_p{i}");
-                    head_vars.push(t.clone());
-                    t
-                }
-                _ => {
-                    // For complex terms (Arithmetic, FunctionCall, etc.),
-                    // use a fresh variable. The parser may not support these
-                    // in comparison constraints, so don't add constraints.
-                    let t = format!("_t{i}");
-                    head_vars.push(t.clone());
-                    t
-                }
+                    Term::VectorLiteral(_) => format!("_v{i}"),
+                    Term::Placeholder => format!("_p{i}"),
+                    // Complex terms (arithmetic, function calls, ...) get a
+                    // fresh, unconstrained variable.
+                    Term::Aggregate(..)
+                    | Term::Arithmetic(_)
+                    | Term::FunctionCall(..)
+                    | Term::FieldAccess(..)
+                    | Term::RecordPattern(_) => format!("_t{i}"),
+                };
+                head_vars.push(var.clone());
+                Term::Variable(var)
             })
             .collect();
+        BodyPredicate::Positive(Atom::new(atom.relation.clone(), args))
+    });
 
-        let mut body_parts: Vec<String> = goal
-            .goal
-            .iter()
-            .map(|g| format!("{}({})", g.relation, transformed_args.join(", ")))
-            .collect();
+    for pred in &goal.body {
+        extract_predicate_vars(pred, &mut head_vars);
+    }
 
-        for pred in &goal.body {
-            body_parts.push(format_body_pred(pred));
-            extract_predicate_vars(pred, &mut head_vars);
-        }
+    let body = goal_atom
+        .into_iter()
+        .chain(goal.body.iter().cloned())
+        .chain(extra_constraints)
+        .collect();
 
-        body_parts.extend(extra_constraints);
-
-        // Map sort annotations (variable names) to column indices in head_vars
-        let order_by: Vec<(usize, SortDirection)> = goal
-            .order_by
-            .iter()
-            .filter_map(|(var_name, dir)| {
-                head_vars
-                    .iter()
-                    .position(|v| v == var_name)
-                    .map(|idx| (idx, *dir))
-            })
-            .collect();
-
-        Ok(QueryTransform {
-            query: format!(
-                "__query__({}) <- {}",
-                head_vars.join(", "),
-                body_parts.join(", ")
-            ),
-            order_by,
-            limit: goal.limit,
-            offset: goal.offset,
-            columns: head_vars,
+    // Map sort annotations (variable names) to column indices in head_vars
+    let order_by: Vec<(usize, SortDirection)> = goal
+        .order_by
+        .iter()
+        .filter_map(|(var_name, dir)| {
+            head_vars
+                .iter()
+                .position(|v| v == var_name)
+                .map(|idx| (idx, *dir))
         })
-    } else {
-        Ok(QueryTransform {
-            query: program_text.to_string(),
-            order_by: vec![],
-            limit: None,
-            offset: None,
-            columns: vec![],
-        })
+        .collect();
+
+    let head = Atom::new(
+        "__query__".to_string(),
+        head_vars.into_iter().map(Term::Variable).collect(),
+    );
+    QueryPlan {
+        rule: Rule::new(head, body),
+        order_by,
+        limit: goal.limit,
+        offset: goal.offset,
     }
 }
 
@@ -5601,6 +5680,14 @@ fn join_continuation_lines(program: &str) -> String {
 /// Split a program into statements the way `QueryJob` executes it: comments
 /// stripped, continuation lines joined, one statement per non-empty line.
 fn parse_program(program: &str) -> Result<Vec<statement::Statement>, Vec<ValidationError>> {
+    parse_program_lines(program)
+        .map(|statements| statements.into_iter().map(|(_, stmt)| stmt).collect())
+}
+
+/// `parse_program`, with each statement's 1-based line number.
+fn parse_program_lines(
+    program: &str,
+) -> Result<Vec<(usize, statement::Statement)>, Vec<ValidationError>> {
     let mut statements = Vec::new();
     let mut errors = Vec::new();
     let text = join_continuation_lines(&strip_comments(program));
@@ -5610,7 +5697,7 @@ fn parse_program(program: &str) -> Result<Vec<statement::Statement>, Vec<Validat
             continue;
         }
         match statement::parse_statement(line) {
-            Ok(stmt) => statements.push(stmt),
+            Ok(stmt) => statements.push((line_num + 1, stmt)),
             Err(error) => errors.push(ValidationError {
                 line: line_num + 1,
                 statement_index: statements.len() + errors.len(),
@@ -5623,6 +5710,60 @@ fn parse_program(program: &str) -> Result<Vec<statement::Statement>, Vec<Validat
     } else {
         Err(errors)
     }
+}
+
+/// Parse `program` and bind `params` into its statements: the statements
+/// that are then authorized and executed. `Ok(None)` when it does not parse,
+/// which the executor reports.
+///
+/// Every `$name` the statements reference is replaced by its value on the
+/// syntax tree (see [`crate::params`]); a reference without a value, or one
+/// that cannot stand where it is, fails its statement, and a parameter the
+/// program never references fails the program. Nothing runs then.
+fn parse_bound_program(
+    program: &str,
+    params: &crate::params::Params,
+) -> Result<Option<Vec<statement::Statement>>, ProgramError> {
+    let Ok(statements) = parse_program_lines(program) else {
+        return Ok(None);
+    };
+    // A program without `$` holds no parameter reference.
+    if params.is_empty() && !program.contains('$') {
+        return Ok(Some(statements.into_iter().map(|(_, stmt)| stmt).collect()));
+    }
+    let mut used = std::collections::BTreeSet::new();
+    let mut errors = Vec::new();
+    let mut bound = Vec::with_capacity(statements.len());
+    for (statement_index, (line, mut stmt)) in statements.into_iter().enumerate() {
+        if let Err(error) = crate::params::bind_statement(&mut stmt, params, &mut used) {
+            errors.push(ValidationError {
+                line,
+                statement_index,
+                error,
+            });
+        }
+        bound.push(stmt);
+    }
+    if !errors.is_empty() {
+        let errors_json = serde_json::to_string(&errors).unwrap_or_default();
+        return Err(ProgramError {
+            message: format!("{VALIDATION_ERROR_PREFIX}{errors_json}"),
+            code: Some(ErrorCode::Validation),
+        });
+    }
+    let unused = crate::params::unused(params, &used);
+    if !unused.is_empty() {
+        let names: Vec<String> = unused.iter().map(|name| format!("${name}")).collect();
+        return Err(ProgramError {
+            message: format!(
+                "Parameters not referenced by the program: {}. \
+                 Every parameter sent must appear in the program as $name.",
+                names.join(", ")
+            ),
+            code: Some(ErrorCode::Validation),
+        });
+    }
+    Ok(Some(bound))
 }
 
 /// Whether every statement of `program`, split the way it executes, is a
@@ -5699,16 +5840,6 @@ fn format_rule_text(rule: &crate::ast::Rule) -> String {
     rule.to_string()
 }
 
-/// Format a body predicate as IQL text (uses BodyPredicate's Display impl)
-fn format_body_pred(pred: &crate::ast::BodyPredicate) -> String {
-    pred.to_string()
-}
-
-/// Format a term as IQL text (uses Term's Display impl)
-fn format_term(term: &Term) -> String {
-    term.to_string()
-}
-
 /// Statements in `program`, counted the way `parse_program` splits them.
 /// A program's final result: an error if `auth` was revoked meanwhile, or
 /// when the program was one failed statement.
@@ -5738,20 +5869,20 @@ fn program_statement_count(program: &str) -> usize {
         .count()
 }
 
+/// `query_column_names` of the last rule of `program`, if it parses.
+pub(crate) fn extract_column_names_from_query(program: &str, arity: usize) -> Vec<String> {
+    let parsed = crate::parser::parse_program(program).ok();
+    query_column_names(parsed.as_ref().and_then(|p| p.rules.last()), arity)
+}
+
 /// Extract meaningful column names from a query's head variables.
 ///
-/// Parses the query program and inspects the last rule's head atom arguments
-/// to derive column names. Falls back to `col0, col1, ...` if parsing fails
-/// or arity doesn't match.
-pub(crate) fn extract_column_names_from_query(program: &str, arity: usize) -> Vec<String> {
-    let parsed = match crate::parser::parse_program(program) {
-        Ok(p) => p,
-        Err(_) => return (0..arity).map(|i| format!("col{i}")).collect(),
-    };
-
-    let rule = match parsed.rules.last() {
-        Some(r) => r,
-        None => return (0..arity).map(|i| format!("col{i}")).collect(),
+/// Inspects the query rule's head atom arguments (the last rule of the
+/// evaluated program) to derive column names. Falls back to `col0, col1, ...`
+/// without a rule or when its arity doesn't match.
+fn query_column_names(rule: Option<&crate::ast::Rule>, arity: usize) -> Vec<String> {
+    let Some(rule) = rule else {
+        return (0..arity).map(|i| format!("col{i}")).collect();
     };
 
     let head_args = &rule.head.args;
@@ -5810,15 +5941,18 @@ pub(crate) fn extract_column_names_from_query(program: &str, arity: usize) -> Ve
         .collect()
 }
 
-/// Find the source relation for a query.
+/// `query_source_relation` of the last rule of `program`.
+fn find_query_source_relation(program: &str) -> Option<String> {
+    let parsed = crate::parser::parse_program(program).ok()?;
+    query_source_relation(parsed.rules.last()?)
+}
+
+/// Find the source relation for the query rule `rule`.
 ///
 /// For `__query__` shorthand queries, returns the first positive body atom's relation.
 /// For named head relations, returns the head relation name.
 /// Used to look up registered schemas in the SchemaCatalog.
-fn find_query_source_relation(program: &str) -> Option<String> {
-    let parsed = crate::parser::parse_program(program).ok()?;
-    let rule = parsed.rules.last()?;
-
+fn query_source_relation(rule: &crate::ast::Rule) -> Option<String> {
     if rule.head.relation == "__query__" {
         // Shorthand query: find the first positive body atom
         for pred in &rule.body {
@@ -9111,8 +9245,10 @@ fn extract_arith_vars(expr: &crate::ast::ArithExpr, vars: &mut Vec<String>) {
             extract_arith_vars(left, vars);
             extract_arith_vars(right, vars);
         }
-        // Constants - no variables
-        crate::ast::ArithExpr::Constant(_) | crate::ast::ArithExpr::FloatConstant(_) => {}
+        // Constants and parameters - no variables
+        crate::ast::ArithExpr::Constant(_)
+        | crate::ast::ArithExpr::FloatConstant(_)
+        | crate::ast::ArithExpr::Param(_) => {}
     }
 }
 

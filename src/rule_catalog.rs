@@ -615,6 +615,7 @@ impl RuleCatalog {
         let name = &rule_def.name;
         let rule = rule_def.rule.clone();
         let ast_rule = rule.to_rule();
+        crate::params::refuse_unbound(&ast_rule)?;
 
         // Validate single-rule safety constraints (self-negation, head safety, range restriction)
         validate_rule(&ast_rule, name)?;

@@ -80,7 +80,33 @@ class _Plain:
     text: str
 
 
-_Statement = _Insert | _Retract | _RetractKey | _Plain
+@dataclass(frozen=True)
+class _RuleClause:
+    """A persistent rule clause, compiled with the program so its values
+    become the program's parameters: unconditional."""
+
+    head: str
+    columns: tuple[str, ...]
+    clause: Any
+
+    def lines(self) -> list[str]:
+        """The clause, after the constant rows a negated atom binds through."""
+        compiled = compile_rule_clause(
+            self.head,
+            list(self.columns),
+            self.clause.select_map,
+            self.clause.relations,
+            self.clause.condition,
+            persistent=True,
+        )
+        return [*compiled.constants, compiled.clause]
+
+
+_Statement = _Insert | _Retract | _RetractKey | _Plain | _RuleClause
+
+
+def _plain_lines(s: _Plain | _RuleClause) -> list[str]:
+    return [s.text] if isinstance(s, _Plain) else s.lines()
 
 
 def _row_values(fact: Relation) -> list[str]:
@@ -183,8 +209,10 @@ class ProgramResult:
     inserted: int
     #: Facts removed by the program's writes.
     deleted: int
-    #: The program that was sent.
+    #: The program that was sent: its values are ``$name`` references.
     iql: str
+    #: The values sent with it, by name.
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 class Program:
@@ -265,17 +293,11 @@ class Program:
         """Add persistent rule clauses in the program (unconditional: needs the abort form)."""
         for target in targets:
             for clause in target.rules:
-                compiled = compile_rule_clause(
-                    Relation._resolve_name(target),
-                    Relation._get_columns(target),
-                    clause.select_map,
-                    clause.relations,
-                    clause.condition,
-                    persistent=True,
+                rule = _RuleClause(
+                    Relation._resolve_name(target), tuple(Relation._get_columns(target)), clause
                 )
-                self._statements.extend(
-                    _Plain(text) for text in [*compiled.constants, compiled.clause]
-                )
+                rule.lines()  # refuse a bad clause now, not at commit
+                self._statements.append(rule)
         return self
 
     def clear_rule(self, name: str | type) -> Program:
@@ -301,14 +323,16 @@ class Program:
     @property
     def has_rules_or_schema(self) -> bool:
         """True when the program holds statements a token cannot condition."""
-        return any(isinstance(s, _Plain) for s in self._statements)
+        return any(isinstance(s, (_Plain, _RuleClause)) for s in self._statements)
 
     @property
     def guarded(self) -> bool:
         return bool(self._guards)
 
     def iql(self, *, strict: bool = True) -> str:
-        """The IQL this program sends (with a fresh token id each call)."""
+        """The program as IQL, with a fresh token id each call and values
+        written as literals. What ``commit()`` sends carries the values as
+        parameters."""
         return self.compile(strict).iql
 
     def compile(self, strict: bool, token: str | None = None) -> CompiledProgram:
@@ -321,8 +345,8 @@ class Program:
             lines: list[str] = []
             writes: list[int] = []
             for s in self._statements:
-                if isinstance(s, _Plain):
-                    lines.append(s.text)
+                if isinstance(s, (_Plain, _RuleClause)):
+                    lines.extend(_plain_lines(s))
                     continue
                 for line in _write_statements(s):
                     writes.append(len(lines))
@@ -360,8 +384,8 @@ class Program:
                 f"{TXN_PENDING}(K), K = {tok}, !{TXN}(K)"
             )
         for s in self._statements:
-            if isinstance(s, _Plain):
-                lines.append(s.text)
+            if isinstance(s, (_Plain, _RuleClause)):
+                lines.extend(_plain_lines(s))
                 continue
             for line in _write_statements(s, token_atom):
                 writes.append(len(lines))

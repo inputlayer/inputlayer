@@ -37,7 +37,7 @@ import {
 } from './ast.js';
 import { CompileError } from './errors.js';
 import { columnToVariable, snakeToCamel } from './naming.js';
-import { RelationDef, compileValue, resolveRelationName, getColumns, getColumnTypes } from './relation.js';
+import { RelationDef, compileLiteral, compileValue, resolveRelationName, getColumns, getColumnTypes } from './relation.js';
 import { RelationRef } from './proxy.js';
 import type { ColumnProxy } from './proxy.js';
 import type { Fact } from './types.js';
@@ -182,8 +182,9 @@ function compileAggExpr(agg: AggExpr, env: VarEnv): string {
   }
   const parts: string[] = [];
 
+  // An aggregate's settings (top_k's k, a threshold) are syntax, not values.
   for (const p of agg.params) {
-    parts.push(compileValue(p));
+    parts.push(compileLiteral(p));
   }
 
   for (const pt of agg.passthrough) {

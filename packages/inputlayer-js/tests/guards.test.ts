@@ -123,8 +123,15 @@ describe('non-finite numbers', () => {
   const Scored = relation('Attempt', { order: 'int', tool: 'string', score: 'float' });
   const refusing = () => {
     const sent: string[] = [];
-    const conn = { execute: async (iql: string) => { sent.push(iql); return { columns: [], rows: [] }; } };
-    return { sent, kg: new KnowledgeGraph('kg', conn as unknown as Connection) };
+    const params: unknown[] = [];
+    const conn = {
+      execute: async (iql: string, opts?: { params?: unknown }) => {
+        sent.push(iql);
+        params.push(opts?.params);
+        return { columns: [], rows: [] };
+      },
+    };
+    return { sent, params, kg: new KnowledgeGraph('kg', conn as unknown as Connection) };
   };
 
   it('kg.retract(Attempt, {order: NaN}) raises CompileError and sends nothing', async () => {
@@ -154,12 +161,15 @@ describe('non-finite numbers', () => {
   });
 
   it('keeps large finite floats, and refuses an unsafe number only in an int column', async () => {
-    const { sent, kg } = refusing();
+    const { sent, params, kg } = refusing();
     await kg.insert(Scored, { order: 1, tool: 't', score: 1e20 });
-    expect(sent).toEqual(['+attempt(1, "t", 1e+20)']);
+    expect(sent).toEqual(['+attempt($p0, $p1, $p2)']);
+    // An integral float keeps its type: JSON alone would send 1e20 as an int.
+    expect(params).toEqual([{ p0: 1, p1: 't', p2: { float: 1e20 } }]);
     await expect(kg.retract(Scored, { order: 2 ** 53 + 2 })).rejects.toThrow(/BigInt/);
     await kg.delete(Scored, { order: 9007199254740993n, tool: 't', score: 0.5 });
-    expect(sent[1]).toBe('-attempt(9007199254740993, "t", 0.5)');
+    expect(sent[1]).toBe('-attempt($p0, $p1, $p2)');
+    expect(params[1]).toEqual({ p0: { int: '9007199254740993' }, p1: 't', p2: 0.5 });
   });
 
   it('claim() reports a lost race when the holder holds a value past the encoder range', async () => {

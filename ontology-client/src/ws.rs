@@ -9,6 +9,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use inputlayer_ws_protocol::{ClientFrame, FrameClass, RequestId, ServerFrame};
+pub use inputlayer_ws_protocol::{ParamValue, Params};
 use tokio_tungstenite::tungstenite;
 
 /// A failed statement of a multi-statement program.
@@ -121,10 +122,17 @@ impl Engine {
 
     /// Execute a (possibly multi-statement) program and return the final result.
     pub async fn execute(&mut self, program: &str) -> Result<QueryResult> {
+        self.execute_with(program, &Params::new()).await
+    }
+
+    /// Execute `program` with `params` bound to its `$name` references. The
+    /// values travel beside the text, so no value is ever IQL syntax.
+    pub async fn execute_with(&mut self, program: &str, params: &Params) -> Result<QueryResult> {
         self.last_id += 1;
         self.send(ClientFrame::Execute {
             id: Some(RequestId::from(self.last_id)),
             program: program.to_string(),
+            params: params.clone(),
             timeout_ms: None,
             expect_revision: None,
             expect_relations: None,

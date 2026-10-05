@@ -33,7 +33,7 @@ from inputlayer._ast import (
     Column as AstColumn,
 )
 from inputlayer._literal import encode as encode_literal
-from inputlayer._literal import ms_to_datetime
+from inputlayer._literal import literal, ms_to_datetime
 from inputlayer._naming import column_to_variable
 from inputlayer.exceptions import CompileError, InternalError
 from inputlayer.types import python_type_to_iql, schema_type
@@ -46,7 +46,8 @@ if TYPE_CHECKING:
 
 
 def compile_value(value: Any) -> str:
-    """Compile a Python value to its IQL literal (the R-LIT encoder)."""
+    """Compile a Python value to IQL: its literal (the R-LIT encoder), or inside
+    :func:`inputlayer._literal.collect_params` a ``$pN`` parameter reference."""
     return encode_literal(value)
 
 
@@ -172,9 +173,9 @@ def _compile_agg_expr(agg: AggExpr, env: _VarEnv, *, count_var: str | None = Non
     func = agg.func
     parts: list[str] = []
 
-    # Params first (k, threshold, radius, etc.)
+    # Params first (k, threshold, radius, etc.): syntax, never parameters
     for p in agg.params:
-        parts.append(compile_value(p))
+        parts.append(literal(p))
 
     # Passthrough columns
     for pt in agg.passthrough:
@@ -1426,8 +1427,8 @@ def _limit_atom(limit: int | None, offset: int | None) -> list[str]:
             return []
         limit = MAX_LIMIT
     if offset:
-        return [f"limit({encode_literal(limit)}, {encode_literal(offset)})"]
-    return [f"limit({encode_literal(limit)})"]
+        return [f"limit({literal(limit)}, {literal(offset)})"]
+    return [f"limit({literal(limit)})"]
 
 
 def _unique(items: Any) -> list[str]:

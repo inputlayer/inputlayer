@@ -9,6 +9,7 @@
 
 use crate::batch::{dedupe_ids, ledger_rows, take_retractions};
 use crate::engine_pool::{EnginePool, PooledEngine};
+use crate::iql::{Program, Stmt};
 use crate::ledger::{self, PriorState};
 use crate::mapper::{map_extraction, MapOutcome};
 use crate::ontology::{LoadedOntology, RETRACTIONS};
@@ -283,7 +284,7 @@ pub async fn evaluate(
     // A retraction of an object in this same batch (chat re-extracts the
     // whole conversation, so the revised claim reappears): never insert it.
     let target_ids: HashSet<&str> = targets.iter().map(|(t, _)| t.as_str()).collect();
-    let mut facts: Vec<(Option<String>, String)> = Vec::new();
+    let mut facts: Vec<(Option<String>, Stmt)> = Vec::new();
     let mut in_batch: HashSet<String> = HashSet::new();
     for (statement, owner) in statements.into_iter().zip(owners) {
         match owner {
@@ -308,7 +309,8 @@ pub async fn evaluate(
 
     // Retractions against earlier requests replay the target's ledgered
     // statements, negated. Unknown targets are dropped, never guessed.
-    let mut program: Vec<String> = Vec::new();
+    // Every value in the program is a parameter (see `crate::iql`).
+    let mut program = Program::new();
     let mut retracted: Vec<String> = Vec::new();
     for (target, named) in &targets {
         let prior = if ledgered {
@@ -322,42 +324,57 @@ pub async fn evaluate(
             ));
             continue;
         }
-        program.extend(prior.iter().map(|stmt| format!("-{stmt}")));
+        for stmt in &prior {
+            program.push(&Stmt::from_parts(
+                format!("-{}", stmt.iql()),
+                stmt.params().clone(),
+            ))?;
+        }
         if ledgered {
-            program.extend(ledger::owner_deletes(prefix, target));
+            for stmt in ledger::owner_deletes(prefix, target) {
+                program.push(&stmt)?;
+            }
         }
         retracted.push(named.clone());
     }
-    program.push(format!(
-        "+il_conversation[({}, {})]",
-        ledger::literal(prefix),
-        ledger::literal(&format!("{}@{}", ontology.name, ontology.version))
-    ));
+    program.push(
+        &Stmt::new()
+            .text("+il_conversation[(")
+            .value(ledger::encode(prefix))
+            .text(", ")
+            .value(ledger::encode(&format!(
+                "{}@{}",
+                ontology.name, ontology.version
+            )))
+            .text(")]"),
+    )?;
     if let Mode::Turn { .. } = request.mode {
         for (offset, (role, content)) in request.messages.iter().enumerate() {
-            program.push(ledger::message_insert(
+            program.push(&ledger::message_insert(
                 prefix,
                 request.first_index + offset,
                 role,
                 content,
-            ));
+            ))?;
         }
     }
     for row in &rows {
-        program.push(ledger::row_insert(prefix, row));
+        program.push(&ledger::row_insert(prefix, row))?;
     }
     if ledgered {
         for (owner, statement) in &facts {
             if let Some(owner) = owner {
-                program.push(ledger::fact_insert(prefix, owner, statement));
+                program.push(&ledger::fact_insert(prefix, owner, statement))?;
             }
         }
     }
-    let statements: Vec<String> = facts.into_iter().map(|(_, s)| s).collect();
-    program.extend(statements.iter().cloned());
+    let statements: Vec<Stmt> = facts.into_iter().map(|(_, s)| s).collect();
+    for statement in &statements {
+        program.push(statement)?;
+    }
 
     let write = engine
-        .execute(&program.join("\n"))
+        .run_program(&program)
         .await
         .context("storing extracted tuples")?;
     let problems = write.soft_errors();
@@ -375,13 +392,14 @@ pub async fn evaluate(
     let engine_ms = started.elapsed().as_millis();
 
     // Translation provenance for the events stream: statement + the quote
-    // fields of the row it came from are already inside the statement
-    // literals; expose the statements verbatim.
-    let tuples: Vec<Value> = statements.iter().map(|s| json!(s)).collect();
+    // fields of the row it came from; the statements as people read them,
+    // values written as literals (display only, never executed).
+    let shown: Vec<String> = statements.iter().map(Stmt::display).collect();
+    let tuples: Vec<Value> = shown.iter().map(|s| json!(s)).collect();
     let trace = request.want_trace.then(|| {
         json!({
             "extraction": extraction,
-            "statements": statements,
+            "statements": shown,
             "retracted": retracted,
             "kg": kg,
             "conversation": prefix,
@@ -410,16 +428,19 @@ pub async fn evaluate(
 async fn retract_conversation(
     engine: &mut PooledEngine<'_>,
     prefix: &str,
-    statements: &[String],
+    statements: &[Stmt],
 ) -> Vec<String> {
     let mut notes = Vec::new();
-    let marker = format!("\"{prefix}:");
-    let mut retract = String::new();
+    let marker = format!("{prefix}:");
+    let mut retract = Program::new();
     let mut skipped = 0usize;
     for statement in statements {
-        match statement.strip_prefix('+') {
-            Some(rest) if statement.contains(&marker) => {
-                retract.push_str(&format!("-{rest}\n"));
+        match statement.negated() {
+            Some(delete) if statement.strings().any(|s| s.starts_with(&marker)) => {
+                if let Err(err) = retract.push(&delete) {
+                    notes.push(format!("one-shot retraction failed: {err}"));
+                    return notes;
+                }
             }
             _ => skipped += 1,
         }
@@ -430,10 +451,18 @@ async fn retract_conversation(
              conversation-scoped (shared or ontology-level facts are never retracted)"
         ));
     }
-    retract.push_str(&format!(
-        "-il_conversation(I, O) <- il_conversation(I, O), I = \"{prefix}\"\n"
-    ));
-    match engine.execute(&retract).await {
+    let conv = ledger::encode(prefix);
+    let conversation = Stmt::new()
+        .text("-il_conversation(")
+        .value(conv.clone())
+        .text(", O) <- il_conversation(")
+        .value(conv)
+        .text(", O)");
+    if let Err(err) = retract.push(&conversation) {
+        notes.push(format!("one-shot retraction failed: {err}"));
+        return notes;
+    }
+    match engine.run_program(&retract).await {
         Ok(result) => {
             for problem in result.soft_errors() {
                 notes.push(format!("one-shot retraction incomplete: {problem}"));

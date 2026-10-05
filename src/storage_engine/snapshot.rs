@@ -303,8 +303,7 @@ impl KnowledgeGraphSnapshot {
 
     /// `program`'s rules plus the persistent rules it depends on, and the
     /// relations in its dependency closure.
-    fn combine(&self, program: &str, rule_set: RuleSet) -> Result<(Program, Vec<String>), String> {
-        let query = crate::parser::parse_program(program)?;
+    fn combine(&self, query: Program, rule_set: RuleSet) -> Result<(Program, Vec<String>), String> {
         let persistent: &[Rule] = match rule_set {
             RuleSet::QueryOnly => &[],
             RuleSet::WithPersistent => self.persistent.rules.as_ref().map_err(Clone::clone)?,
@@ -345,13 +344,13 @@ impl KnowledgeGraphSnapshot {
     /// snapshot itself is never modified.
     fn prepare(
         &self,
-        program: &str,
+        query: Program,
         rule_set: RuleSet,
         output: Output,
         session_facts: Vec<(String, Tuple)>,
         timing_mode: TimingMode,
     ) -> Result<(IQLEngine, Program), String> {
-        let (combined, relations) = self.combine(program, rule_set)?;
+        let (combined, relations) = self.combine(query, rule_set)?;
         let mut inputs = self.inputs(relations.iter().map(String::as_str));
         for (relation, tuple) in session_facts {
             inputs.entry(relation).or_default().push(tuple);
@@ -392,20 +391,64 @@ impl KnowledgeGraphSnapshot {
         session_facts: Vec<(String, Tuple)>,
         timing_mode: TimingMode,
     ) -> Result<(Vec<Tuple>, RelationMap, Option<TimingBreakdown>), String> {
+        let query = crate::parser::parse_program(program)?;
+        self.run_program(query, rule_set, output, session_facts, timing_mode)
+    }
+
+    /// `run` for an already parsed program.
+    fn run_program(
+        &self,
+        query: Program,
+        rule_set: RuleSet,
+        output: Output,
+        session_facts: Vec<(String, Tuple)>,
+        timing_mode: TimingMode,
+    ) -> Result<(Vec<Tuple>, RelationMap, Option<TimingBreakdown>), String> {
         let start = Instant::now();
         let session_fact_count = session_facts.len();
         let (mut engine, combined) =
-            self.prepare(program, rule_set, output, session_facts, timing_mode)?;
+            self.prepare(query, rule_set, output, session_facts, timing_mode)?;
         let rules = combined.rules.len();
         let result = engine.execute_program_profiled(combined);
         info!(
-            program_len = program.len(),
             rules,
             session_facts = session_fact_count,
             elapsed_ms = start.elapsed().as_millis() as u64,
             "snapshot_execute"
         );
         result
+    }
+
+    /// Evaluate the parsed `query` with persistent rules, returning
+    /// arbitrary-arity tuples. Callers that build or bind a program as a
+    /// syntax tree evaluate it here, without writing it back into IQL text.
+    pub fn execute_program_with_rules(&self, query: Program) -> Result<Vec<Tuple>, String> {
+        self.run_program(
+            query,
+            RuleSet::WithPersistent,
+            Output::Result,
+            Vec::new(),
+            TimingMode::Off,
+        )
+        .map(|(tuples, _, _)| tuples)
+    }
+
+    /// [`Self::execute_with_session_facts_profiled`] for a parsed `query`;
+    /// no session facts evaluates with persistent rules only.
+    pub fn execute_program_with_session_facts_profiled(
+        &self,
+        query: Program,
+        session_facts: Vec<(String, Tuple)>,
+        timing_mode: TimingMode,
+    ) -> Result<(Vec<Tuple>, Option<TimingBreakdown>), String> {
+        self.run_program(
+            query,
+            RuleSet::WithPersistent,
+            Output::Result,
+            session_facts,
+            timing_mode,
+        )
+        .map(|(tuples, _, timing)| (tuples, timing))
     }
 
     /// Execute a query (without persistent rules) returning binary tuples
@@ -494,11 +537,37 @@ impl KnowledgeGraphSnapshot {
         program: &str,
         timing_mode: TimingMode,
     ) -> Result<(Vec<Tuple>, Option<TimingBreakdown>, CachedRun), String> {
+        self.execute_cached(
+            program,
+            || crate::parser::parse_program(program),
+            timing_mode,
+        )
+    }
+
+    /// [`Self::execute_with_rules_tuples_cached`] for the parsed `query`,
+    /// whose plan is kept under `key` (its text): a miss compiles `query`
+    /// itself, never `key`.
+    pub fn execute_program_with_rules_cached(
+        &self,
+        key: &str,
+        query: Program,
+        timing_mode: TimingMode,
+    ) -> Result<(Vec<Tuple>, Option<TimingBreakdown>, CachedRun), String> {
+        self.execute_cached(key, || Ok(query), timing_mode)
+    }
+
+    /// Run the plan kept under `key`, compiling `query` into it on a miss.
+    fn execute_cached(
+        &self,
+        program: &str,
+        query: impl FnOnce() -> Result<Program, String>,
+        timing_mode: TimingMode,
+    ) -> Result<(Vec<Tuple>, Option<TimingBreakdown>, CachedRun), String> {
         let start = Instant::now();
         let (plan, compiled_now) = match self.persistent.plan(program, &self.optimization) {
             Some(plan) => (plan, false),
             None => {
-                let (combined, relations) = self.combine(program, RuleSet::WithPersistent)?;
+                let (combined, relations) = self.combine(query()?, RuleSet::WithPersistent)?;
                 let mut engine = self.new_engine();
                 engine.set_timing_mode(timing_mode);
                 let plan = Arc::new(CachedPlan {
