@@ -110,7 +110,7 @@ if [ -z "$ATTACH" ]; then
     # The host-side runner, started detached. Positional arguments: the
     # clone, the state directory, the stamp, the commit, the lock wait, the
     # benchmark script and its latest-run link, then the script's own.
-    "${SSH[@]}" "mkdir -p $STATE && cat > $STATE/run.sh" <<'REMOTE'
+    "${SSH[@]}" "mkdir -p $STATE && cat > $STATE/$STAMP.run.sh" <<'REMOTE'
 #!/usr/bin/env bash
 set -uo pipefail
 DIR=$1 STATE=$2 STAMP=$3 SHA=$4 WAIT_LOCK=$5 SCRIPT=$6 LATEST=$7
@@ -192,7 +192,7 @@ finish "$STATUS"
 REMOTE
 
     echo "=== $HOST: run $STAMP ($SCRIPT ${GATE_ARGS[*]}) ==="
-    "${SSH[@]}" "setsid nohup bash $STATE/run.sh $DIR $STATE $STAMP $SHA $WAIT_LOCK $SCRIPT $LATEST ${GATE_ARGS[*]} < /dev/null > /dev/null 2>&1 &"
+    "${SSH[@]}" "setsid nohup bash $STATE/$STAMP.run.sh $DIR $STATE $STAMP $SHA $WAIT_LOCK $SCRIPT $LATEST ${GATE_ARGS[*]} < /dev/null > /dev/null 2>&1 &"
 else
     STAMP=$ATTACH
 fi
@@ -207,9 +207,12 @@ STATUS=$("${SSH[@]}" "cat $STATE/$STAMP.status")
 
 OUT=$ROOT/target/perf-gate/remote/$STAMP
 mkdir -p "$OUT"
-scp -q "$HOST:$STATE/$STAMP.bench.txt" "$OUT/bench.txt"
-scp -q "$HOST:$STATE/$STAMP.log" "$OUT/gate.log"
-RUN_DIR=$(sed -n 's/^run dir: //p' "$OUT/bench.txt")
+scp -q "$HOST:$STATE/$STAMP.bench.txt" "$OUT/bench.txt" 2> /dev/null || true
+scp -q "$HOST:$STATE/$STAMP.log" "$OUT/gate.log" 2> /dev/null || true
+RUN_DIR=""
+if [ -s "$OUT/bench.txt" ]; then
+    RUN_DIR=$(sed -n 's/^run dir: //p' "$OUT/bench.txt")
+fi
 if [ -n "$RUN_DIR" ]; then
     # The gate's files, or the session benchmark's (result.json, summary.md).
     for f in run.json report.md verdict.json summary.md result.json; do

@@ -328,6 +328,13 @@ fn verdict(record: &Record, args: &SessionsArgs) -> bool {
                 );
                 passed = false;
             }
+            if run.late_deltas > 0 {
+                eprintln!(
+                    "FAIL over budget at {} sessions: {} write-to-delta probe(s) arrived after the probe timeout",
+                    run.sessions, run.late_deltas
+                );
+                passed = false;
+            }
         }
     }
     passed
