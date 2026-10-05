@@ -172,9 +172,11 @@ debug unit stage runs every other workspace test without the scenarios binary.
   aggregate (`Size::Vector` adds embeddings, the `emb_idx` HNSW index and the
   `near` rule; `Size::Lab` is about a million `link` edges for the benchmark
   host). Its anchors (order `o-42`, chains `i0`-`i4` and `i5`-`i9`) are
-  documented on the function. The `harness` scenario prints the `Size::Small`
-  install time; the 200 ms target is enforced only in the perf tier on the
-  benchmark host, never as a wall-clock assert in a PR or coverage run.
+  documented on the function. The `Size::Small` install time is measured and
+  reported by the harness (`shop_pack_installs_and_derives_its_anchors` prints
+  it; visible with `--nocapture`, as in `make e2e-reactive`). Nothing enforces
+  the 200 ms budget yet: the perf-tier fixture tracked in #347 will, on the
+  benchmark host. No PR or coverage run asserts on wall-clock time.
 
 ### Reactive agent path
 
