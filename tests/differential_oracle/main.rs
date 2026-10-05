@@ -16,6 +16,10 @@
 //!
 //! Scale the random run with `INPUTLAYER_ORACLE_SEEDS=<n>` (default 12) and
 //! reproduce one seed with `INPUTLAYER_ORACLE_SEED=<seed>`.
+//!
+//! [`soak`] holds a real server under sustained concurrent writers, rule
+//! changes and many (fast, slow, stalled, grouped) subscribers to the same
+//! reference, at every revision any of them observes.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -30,6 +34,7 @@ mod oracle;
 mod recompute;
 mod reference;
 mod scenarios;
+mod soak;
 mod subscription;
 
 use adapter::Adapter;
@@ -193,4 +198,23 @@ fn unsupported_constructs_are_reported_not_compared() {
 #[test]
 fn iql_corpus_agrees_with_spec_and_reference() {
     corpus::check_all();
+}
+
+/// Concurrent writers, rule churn and many subscribers against one server,
+/// every observation checked against the reference at its revision. A smoke
+/// by default; `scripts/soak.sh` runs the sustained soak.
+#[test]
+fn concurrent_soak_agrees_with_reference() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+    let report = runtime.block_on(soak::run(
+        env!("CARGO_BIN_EXE_inputlayer-server"),
+        soak::Config::from_env(),
+    ));
+    report.write();
+    let summary = report.summary();
+    println!("{summary}");
+    assert!(report.all_failures().is_empty(), "{summary}");
 }

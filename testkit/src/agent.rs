@@ -212,6 +212,38 @@ impl Agent {
         &self.client
     }
 
+    /// The connection underneath, for requests of the agent's own.
+    pub fn client_mut(&mut self) -> &mut WsClient {
+        &mut self.client
+    }
+
+    /// The next delta of any subscription if its first frame arrives within
+    /// `within`, applied as [`Self::next_delta`] applies it; `None` otherwise.
+    pub async fn next_any_delta(&mut self, within: Duration) -> Checked<Option<Delta>> {
+        let waiting = self
+            .pending
+            .iter()
+            .find(|(_, frames)| !frames.is_empty())
+            .map(|(id, _)| id.clone());
+        if let Some(id) = waiting {
+            return self.next_delta(&id).await.map(Some);
+        }
+        let deadline = tokio::time::Instant::now() + within;
+        let id = loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let Some(frame) = self.client.poll_push(remaining).await? else {
+                return Ok(None);
+            };
+            if frame.kind().starts_with("subscription_") {
+                let id = subscription_of(&frame);
+                self.pending.entry(id.clone()).or_default().push_back(frame);
+                break id;
+            }
+            self.route(frame);
+        };
+        self.next_delta(&id).await.map(Some)
+    }
+
     /// Wait for the next delta of `id`, whole, and apply it to its view. A
     /// streamed delta applies only once its end frame confirms it complete.
     pub async fn next_delta(&mut self, id: &str) -> Checked<Delta> {

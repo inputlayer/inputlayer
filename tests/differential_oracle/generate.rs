@@ -40,7 +40,7 @@ impl Rng {
 const NODES: i64 = 5;
 
 /// Rule definitions by name; each name has interchangeable variants.
-const RULES: &[(&str, &[&[&str]])] = &[
+pub const RULES: &[(&str, &[&[&str]])] = &[
     (
         "reach",
         &[
