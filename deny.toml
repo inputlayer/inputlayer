@@ -1,30 +1,38 @@
 # cargo-deny configuration
 # Run: cargo deny check
-# CI: cargo deny check advisories sources licenses bans
+# CI: cargo deny check advisories sources licenses bans (the supply-chain job in .github/workflows/ci.yml)
+
+[graph]
+all-features = true
 
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
-yanked = "warn"
-notice = "warn"
+# Every vulnerability advisory fails the check; unmaintained, unsound and
+# yanked crates fail too unless listed in `ignore` with a reason.
+unmaintained = "all"
+yanked = "deny"
+ignore = [
+    # bincode 1.x: the project stopped development; 1.3.3 has no known
+    # vulnerability. timely (the dataflow runtime) and hnsw_rs serialize with
+    # it, so it stays until they move off it; our own direct use is only a
+    # From<bincode::Error> conversion.
+    { id = "RUSTSEC-2025-0141", reason = "bincode 1.3.3 unmaintained, no known vulnerability; required by timely and hnsw_rs" },
+    # paste: a compile-time macro crate with no runtime code; only pulled in
+    # by columnation (differential-dataflow, timely) and parquet.
+    { id = "RUSTSEC-2024-0436", reason = "paste is an unmaintained proc-macro with no runtime code; transitive via columnation and parquet only" },
+]
 
 [licenses]
-unlicensed = "deny"
 allow = [
     "MIT",
     "Apache-2.0",
     "Elastic-2.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
-    "ISC",
     "Zlib",
     "Unicode-3.0",
-    "Unicode-DFS-2016",
     "BSL-1.0",
     "CC0-1.0",
-    "OpenSSL",
     "0BSD",
-    "MPL-2.0",
 ]
 confidence-threshold = 0.8
 
@@ -33,7 +41,7 @@ multiple-versions = "warn"
 wildcards = "allow"
 
 [sources]
-unknown-registry = "warn"
-unknown-git = "warn"
+unknown-registry = "deny"
+unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = []

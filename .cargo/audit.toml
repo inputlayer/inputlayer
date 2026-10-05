@@ -1,0 +1,9 @@
+# cargo-audit configuration. CI runs `cargo audit --deny warnings`, so every
+# advisory fails the check unless it is ignored here. Keep this list equal to
+# [advisories].ignore in deny.toml, which records the reason for each entry.
+
+[advisories]
+ignore = [
+    "RUSTSEC-2025-0141", # bincode unmaintained (timely, hnsw_rs)
+    "RUSTSEC-2024-0436", # paste unmaintained (columnation, parquet)
+]

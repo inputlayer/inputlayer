@@ -53,6 +53,8 @@ jobs:
               - 'config.toml'
               - 'clippy.toml'
               - 'Makefile'
+              - 'deny.toml'
+              - '.cargo/audit.toml'
               - '.github/workflows/ci.yml'
             python:
               - 'packages/inputlayer-py/**'
@@ -124,6 +126,59 @@ jobs:
 
       - name: Run Clippy
         run: make lint
+
+  # Supply chain: licenses, sources, banned crates and RustSec advisories.
+  # No Cargo.lock is committed, so both tools check what a fresh resolve
+  # pulls in today. Ignored advisories carry their reason in deny.toml.
+  supply-chain:
+    name: Supply chain (cargo deny, cargo audit)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CARGO_DENY_VERSION: 0.20.2
+      CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+      CARGO_AUDIT_VERSION: 0.22.2
+      CARGO_AUDIT_SHA256: 7fb9497f8594b389e5fce5ef9b92db08432996895b2e0c5a0167a69ed445c428
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deny and cargo-audit
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          cd "$RUNNER_TEMP"
+          deny="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl"
+          curl -sSfL -o deny.tar.gz \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${deny}.tar.gz"
+          echo "${CARGO_DENY_SHA256}  deny.tar.gz" | sha256sum -c -
+          tar xzf deny.tar.gz
+          install "${deny}/cargo-deny" "$HOME/.local/bin/"
+          audit="cargo-audit-x86_64-unknown-linux-musl-v${CARGO_AUDIT_VERSION}"
+          curl -sSfL -o audit.tgz \
+            "https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv${CARGO_AUDIT_VERSION}/${audit}.tgz"
+          echo "${CARGO_AUDIT_SHA256}  audit.tgz" | sha256sum -c -
+          tar xzf audit.tgz
+          install "${audit}/cargo-audit" "$HOME/.local/bin/"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve dependencies
+        run: |
+          cargo generate-lockfile
+          cargo generate-lockfile --manifest-path perf-gate/Cargo.toml
+
+      - name: cargo deny
+        run: |
+          cargo deny --locked check advisories sources licenses bans
+          cargo deny --manifest-path perf-gate/Cargo.toml --locked check advisories sources licenses bans
+
+      - name: cargo audit
+        run: |
+          cargo audit --deny warnings
+          cargo audit --deny warnings --file perf-gate/Cargo.lock
 
   # Skipped when the full suite covers this commit (a PR labeled `release`,
   # or one from a release/** branch of this repo), since its test job runs
