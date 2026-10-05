@@ -4,35 +4,22 @@
 //! no read is served from a view. Once queries read maintained views (#315)
 //! these expectations flip: reads count as `view_reads` and evaluate nothing.
 
-use std::time::Duration;
-
 use inputlayer_testkit::fixture::reachability_chain;
-use inputlayer_testkit::{Agent, Checked, Engine, WsClient};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use inputlayer_testkit::{Agent, Checked, Counters, Engine, WsClient};
 
 use crate::engine;
 
 const KG: &str = "views";
 
-/// The view counters at one scrape.
+/// The view counters' change between two scrapes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Counters {
+struct Work {
     rule_evaluations: u64,
     view_reads: u64,
     view_maintenance_us: u64,
 }
 
-impl Counters {
-    /// Work done since `before`.
-    fn since(self, before: Self) -> Self {
-        Self {
-            rule_evaluations: self.rule_evaluations - before.rule_evaluations,
-            view_reads: self.view_reads - before.view_reads,
-            view_maintenance_us: self.view_maintenance_us - before.view_maintenance_us,
-        }
-    }
-
+impl Work {
     fn evaluations(rule_evaluations: u64) -> Self {
         Self {
             rule_evaluations,
@@ -40,54 +27,30 @@ impl Counters {
             view_maintenance_us: 0,
         }
     }
-}
 
-/// Scrape `/metrics/prometheus` with the engine's admin key.
-async fn scrape(engine: &Engine) -> Counters {
-    let mut stream = TcpStream::connect(("127.0.0.1", engine.port()))
-        .await
-        .expect("connect for metrics");
-    let request = format!(
-        "GET /metrics/prometheus HTTP/1.0\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\n\r\n",
-        engine.api_key()
-    );
-    stream
-        .write_all(request.as_bytes())
-        .await
-        .expect("send metrics request");
-    let mut response = String::new();
-    tokio::time::timeout(
-        Duration::from_secs(10),
-        stream.read_to_string(&mut response),
-    )
-    .await
-    .expect("metrics within 10 s")
-    .expect("read metrics");
-    assert!(
-        response.starts_with("HTTP/1.0 200") || response.starts_with("HTTP/1.1 200"),
-        "{response}"
-    );
-    let counter = |name: &str| -> u64 {
-        response
-            .lines()
-            .find_map(|line| line.strip_prefix(&format!("{name} ")))
-            .unwrap_or_else(|| panic!("{name} is not exported"))
-            .trim()
-            .parse()
-            .expect("a whole-number counter")
-    };
-    Counters {
-        rule_evaluations: counter("inputlayer_rule_evaluations_total"),
-        view_reads: counter("inputlayer_view_reads_total"),
-        view_maintenance_us: counter("inputlayer_view_maintenance_us_total"),
+    /// Work done since the scrape `before`.
+    async fn since(engine: &Engine, before: &Counters) -> Checked<Self> {
+        let delta = Counters::delta(before, &scrape(engine).await);
+        Ok(Self {
+            rule_evaluations: Counters::require("rule_evaluations", delta.rule_evaluations)?,
+            view_reads: Counters::require("view_reads", delta.view_reads)?,
+            view_maintenance_us: Counters::require(
+                "view_maintenance_us",
+                delta.view_maintenance_us,
+            )?,
+        })
     }
 }
 
+async fn scrape(engine: &Engine) -> Counters {
+    engine.metrics().await.expect("scrape metrics")
+}
+
 /// Run `query` and return the counters' change over it.
-async fn read(engine: &Engine, client: &mut WsClient, query: &str) -> Checked<Counters> {
+async fn read(engine: &Engine, client: &mut WsClient, query: &str) -> Checked<Work> {
     let before = scrape(engine).await;
     client.query(query).await?;
-    Ok(scrape(engine).await.since(before))
+    Work::since(engine, &before).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -116,7 +79,7 @@ async fn every_read_of_a_deployed_rule_evaluates_it_once() -> Checked<()> {
     for (case, query, evaluations) in cases {
         assert_eq!(
             read(&engine, &mut reader, query).await?,
-            Counters::evaluations(evaluations),
+            Work::evaluations(evaluations),
             "{case}: {query}"
         );
     }
@@ -125,11 +88,11 @@ async fn every_read_of_a_deployed_rule_evaluates_it_once() -> Checked<()> {
         for _ in 0..3 {
             reader.query("?reach(0, X)").await?;
         }
-        scrape(&engine).await.since(before)
+        Work::since(&engine, &before).await?
     };
     assert_eq!(
         repeated,
-        Counters::evaluations(3),
+        Work::evaluations(3),
         "a repeated read evaluates again"
     );
     Ok(())
@@ -150,8 +113,8 @@ async fn a_read_on_a_session_with_session_facts_evaluates_once() -> Checked<()> 
     let result = reader.query("?hop2(0, Z)").await?;
     assert!(!result.rows.is_empty(), "the read has results");
     assert_eq!(
-        scrape(&engine).await.since(before),
-        Counters::evaluations(1),
+        Work::since(&engine, &before).await?,
+        Work::evaluations(1),
         "the provenance baseline is part of the read, not another evaluation"
     );
     Ok(())
@@ -167,8 +130,8 @@ async fn a_subscription_evaluates_its_deployed_rule_on_every_relevant_commit() -
     let before = scrape(&engine).await;
     agent.subscribe("r", "?reach(0, X)").await?;
     assert_eq!(
-        scrape(&engine).await.since(before),
-        Counters::evaluations(1),
+        Work::since(&engine, &before).await?,
+        Work::evaluations(1),
         "subscribing evaluates the rule for the snapshot"
     );
 
@@ -177,8 +140,8 @@ async fn a_subscription_evaluates_its_deployed_rule_on_every_relevant_commit() -
         writer.commit(edge).await?;
         agent.next_delta("r").await?;
         assert_eq!(
-            scrape(&engine).await.since(before),
-            Counters::evaluations(1),
+            Work::since(&engine, &before).await?,
+            Work::evaluations(1),
             "{edge}: the refresh evaluates the rule again"
         );
     }

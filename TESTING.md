@@ -168,7 +168,7 @@ workspace test without the scenarios binary.
   (`queries`, `rule_evaluations`, `view_reads`, `subscription_evaluations`,
   `view_maintenance_us`); a counter the engine does not export is `None`, and
   `Counters::require` turns it into `Violation::NotMeasurable`, so an assertion
-  on it is an expected failure until the counter lands (V1 #308), never a skip.
+  on it fails (or is an expected failure under `KnownDefect`), never a skip.
 - `Engine::create_user`, `grant` and `create_api_key` (a key limited to a role
   on one knowledge graph and optionally to relations) with
   `WsClient::connect_with_key` give scenarios scoped agents besides the
