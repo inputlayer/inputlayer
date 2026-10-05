@@ -35,6 +35,8 @@ const TRIANGLES: &str = "?edge(X, Y), edge(Y, Z), edge(Z, X)";
 const LONG_QUERY: Duration = Duration::from_millis(500);
 /// Writer commit to the subscriber's delta, while its own query runs.
 const DELTA_BUDGET: Duration = Duration::from_millis(1_000);
+/// CPU budget of the server, split between requests and standing queries.
+const COMPUTE_PERMITS: usize = 4;
 
 struct Server {
     handler: Arc<Handler>,
@@ -58,7 +60,13 @@ async fn start_server(configure: impl FnOnce(&mut Config)) -> Server {
     config.http.rate_limit.ws_max_messages_per_sec = 0;
     config.http.gui.enabled = false;
     configure(&mut config);
-    let handler = Arc::new(Handler::from_config(config).unwrap());
+    // Whatever the host's cores, a request runs beside a long query: the
+    // default half share leaves requests two of these.
+    let handler = Arc::new(
+        Handler::from_config(config)
+            .unwrap()
+            .with_compute_permits(COMPUTE_PERMITS),
+    );
     handler.bootstrap_auth().unwrap();
     for kg in [KG, OTHER_KG] {
         handler.get_storage().create_knowledge_graph(kg).unwrap();
