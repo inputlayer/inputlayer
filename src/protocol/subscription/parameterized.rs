@@ -41,7 +41,7 @@
 //! `max_result_rows` allows. A lifted query computes every binding's rows,
 //! subscribed or not, and every view waits for it. A family therefore never
 //! shares while its views' own evaluations fit on the standing-query permits
-//! (as many as compute permits) at once, and otherwise shares only while a
+//! (their share of the compute permits) at once, and otherwise shares only while a
 //! round is, on average, no slower than those evaluations run in parallel on
 //! the permits. Costs leave out waiting for a permit and compiling a plan,
 //! and a view's own cost counts only evaluations that reused a compiled plan.
@@ -89,7 +89,7 @@ const PARAM_PREFIX: &str = "_L";
 /// Commits before a family that stopped sharing tries again.
 const PROBE_AFTER: u64 = 256;
 
-/// Fewest compute permits with which families probe: with fewer, a probe
+/// Fewest standing-query permits with which families probe: with fewer, a probe
 /// would take CPU views need, so families share without one.
 const MIN_PERMITS_FOR_PROBES: usize = 3;
 
@@ -521,17 +521,17 @@ struct Judged {
 }
 
 impl Family {
-    /// Whether views should read rounds now: more bindings than compute
-    /// permits, and sharing pays.
+    /// Whether views should read rounds now: more bindings than
+    /// standing-query permits, and sharing pays.
     fn shares(&self) -> bool {
         self.outnumbers_permits() && self.sharing.load(Ordering::Relaxed)
     }
 
-    /// Whether the family has more bindings than compute permits. With no
+    /// Whether the family has more bindings than standing-query permits. With no
     /// more, its views' own evaluations all run at once, and a round, which
     /// computes every binding's rows, is no faster.
     fn outnumbers_permits(&self) -> bool {
-        self.bindings.load(Ordering::Relaxed) > self.handler.compute_permits().max(1)
+        self.bindings.load(Ordering::Relaxed) > self.handler.standing_permits().max(1)
     }
 
     fn join(&self, binding: &Binding) {
@@ -705,7 +705,7 @@ impl Family {
         };
         if let Some(shared) = shared {
             let bindings = self.bindings.load(Ordering::Relaxed) as u64;
-            let permits = self.handler.compute_permits() as u64;
+            let permits = self.handler.standing_permits() as u64;
             let keeps = self.handler.shares_regardless_of_cost()
                 || keeps_sharing(shared, own, bindings, permits);
             if !keeps {
@@ -788,7 +788,7 @@ impl Family {
     /// Note a view's own evaluation on `snapshot`: its cost when it reused a
     /// compiled plan (`None` when it compiled one). Whether to probe: no
     /// parameter binds recursion under `snapshot`'s rules, the own cost is
-    /// known, there are more bindings than compute permits, and the family
+    /// known, there are more bindings than standing-query permits, and the family
     /// never shared or enough own evaluations passed since it stopped.
     fn record_own(&self, cost: Option<Duration>, snapshot: &KnowledgeGraphSnapshot) -> bool {
         let rules = snapshot.persistent_rules();
@@ -818,9 +818,9 @@ impl Family {
     /// one probe at a time, under the server's probe permit: the guard
     /// judging it decides whether views share, and views that then share at
     /// its revision read it, while a round judged too slow is let go. With
-    /// too few compute permits to spare the CPU, share without one.
+    /// too few standing-query permits to spare the CPU, share without one.
     fn probe(family: &Arc<Family>, snapshot: Arc<KnowledgeGraphSnapshot>) {
-        if family.handler.compute_permits() < MIN_PERMITS_FOR_PROBES {
+        if family.handler.standing_permits() < MIN_PERMITS_FOR_PROBES {
             family.start_sharing(snapshot.persistent_rules());
             return;
         }

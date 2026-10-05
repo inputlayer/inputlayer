@@ -57,7 +57,7 @@ pub async fn start_server_adjusted(
     config.http.gui.enabled = false;
     configure(&mut config);
     let handler = Handler::from_config(config).unwrap();
-    let permits = handler.compute_permits().max(4);
+    let permits = handler.compute_permits().max(8);
     let handler = Arc::new(adjust(handler.with_compute_permits(permits)));
     handler.bootstrap_auth().unwrap();
     handler.get_storage().create_knowledge_graph(KG).unwrap();

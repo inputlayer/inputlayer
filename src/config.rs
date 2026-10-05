@@ -441,12 +441,25 @@ pub struct SubscriptionsConfig {
     /// by itself.
     #[serde(default = "default_true")]
     pub share_parameterized: bool,
+
+    /// Share of the compute permits (one per core not reserved for I/O) that
+    /// runs standing-query evaluations, in (0, 1); requests get the rest.
+    /// Neither queues behind the other, but both share the CPU. Each side
+    /// gets at least one permit, so a server with one compute permit runs
+    /// one of each.
+    #[serde(default = "default_evaluation_share")]
+    pub evaluation_share: f64,
+}
+
+fn default_evaluation_share() -> f64 {
+    0.5
 }
 
 impl Default for SubscriptionsConfig {
     fn default() -> Self {
         Self {
             share_parameterized: true,
+            evaluation_share: default_evaluation_share(),
         }
     }
 }
@@ -1085,6 +1098,13 @@ impl Config {
             self.http.rate_limit.subscription_coalesce_ms = MAX_SUBSCRIPTION_COALESCE_MS;
         }
 
+        let share = self.subscriptions.evaluation_share;
+        if !(share > 0.0 && share < 1.0) {
+            return Err(format!(
+                "subscriptions.evaluation_share must be between 0 and 1 (exclusive), got {share}"
+            ));
+        }
+
         // ws_auth_timeout_ms=0 would reject every WebSocket client
         if self.http.ws_auth_timeout_ms == 0 {
             tracing::warn!("ws_auth_timeout_ms = 0 is invalid, auto-correcting to 5000");
@@ -1540,6 +1560,18 @@ mod tests {
         assert!(err.contains("follower must be durable"), "{err}");
         // A primary may still trade durability for latency.
         config.replication.role = ReplicationRole::Primary;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_evaluation_share_outside_zero_to_one_is_refused() {
+        for share in [0.0, 1.0, -0.5, 1.5, f64::NAN] {
+            let mut config = Config::default();
+            config.subscriptions.evaluation_share = share;
+            assert!(config.validate().is_err(), "{share}");
+        }
+        let mut config = Config::default();
+        config.subscriptions.evaluation_share = 0.25;
         assert!(config.validate().is_ok());
     }
 
