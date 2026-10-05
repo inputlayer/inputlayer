@@ -117,7 +117,10 @@ const SHARED_SLOWDOWN: u64 = 2;
 fn keeps_sharing(shared_us: u64, own_us: u64, bindings: u64, permits: u64) -> bool {
     let parallel = own_us.saturating_mul(bindings.div_ceil(permits.max(1)).max(1));
     let combined = own_us.saturating_mul(bindings) / SHARED_WORK_DIVISOR;
-    shared_us <= parallel.max(combined).min(parallel.saturating_mul(SHARED_SLOWDOWN))
+    shared_us
+        <= parallel
+            .max(combined)
+            .min(parallel.saturating_mul(SHARED_SLOWDOWN))
 }
 
 /// Fold `cost` into the running `average` of costs in microseconds (0: none

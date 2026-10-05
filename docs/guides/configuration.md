@@ -231,7 +231,7 @@ notification_buffer_size = 4096
 # Standing queries that differ only in bound constants (?speech("s-1", ...) and
 # ?speech("s-2", ...)) share their evaluations, one at a time; each subscriber
 # still gets exactly its own rows. Turns itself off per query shape when sharing
-# is slower.
+# does not pay off (see the WebSocket API guide).
 share_parameterized = true
 ```
 
