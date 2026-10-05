@@ -217,12 +217,6 @@ impl Agent {
         &mut self.client
     }
 
-    /// Forget the change notifications received so far, e.g. to bound memory
-    /// while writers commit for a long time.
-    pub fn clear_notices(&mut self) {
-        self.notices.clear();
-    }
-
     /// The next delta of any subscription if its first frame arrives within
     /// `within`, applied as [`Self::next_delta`] applies it; `None` otherwise.
     pub async fn next_any_delta(&mut self, within: Duration) -> Checked<Option<Delta>> {
