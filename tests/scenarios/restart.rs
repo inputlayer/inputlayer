@@ -68,6 +68,10 @@ async fn s12_restart_mid_scenario_preserves_revisions() -> Checked<()> {
 
     // Resubscribe: the pre-crash views plus the committed claim.
     let snapshot = agent.subscribe("mine", MINE).await?.revision;
+    assert!(
+        snapshot > claimed_at,
+        "the first revision after the restart exceeds the last one before it"
+    );
     assert_eq!(agent.view("mine").rows, mine_before);
     agent.subscribe("offers", OFFERS).await?;
     assert_eq!(
@@ -173,7 +177,7 @@ async fn s12_restart_mid_scenario_preserves_revisions() -> Checked<()> {
         .client_mut()
         .try_execute_expecting(claim_i4, &bare)
         .await?;
-    refused(reply, "precondition_failed", "revision")?;
+    refused(reply, "precondition_failed", "predates")?;
     agent
         .view("offers")
         .assert_matches(&fresh(&mut auditor, OFFERS).await?)?;

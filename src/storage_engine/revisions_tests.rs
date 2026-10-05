@@ -106,3 +106,49 @@ fn a_bound_that_cannot_be_raised_refuses_writes_and_is_never_passed() {
     assert!(revision > bound);
     assert!(revision <= recorded(&dir), "{revision} is not reserved");
 }
+
+#[test]
+fn a_closed_engine_is_dropped_without_writing_its_bound() {
+    let counter = Counter::new();
+    let (closed, open) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+    let reservation = counter.open(closed.path(), false).unwrap();
+    let _open = counter.open(open.path(), false).unwrap();
+    let removed = closed.path().to_path_buf();
+    drop(reservation);
+    drop(closed);
+
+    counter.last.fetch_add(BLOCK, Ordering::SeqCst);
+    counter.reserve_ahead().unwrap();
+    assert!(!removed.exists(), "a closed engine's directory was recreated");
+    let revision = counter.next();
+    assert!(revision <= recorded(&open), "{revision} is not reserved");
+}
+
+#[test]
+fn an_engine_closing_while_bounds_are_raised_fails_no_write() {
+    for _ in 0..50 {
+        let counter = Counter::new();
+        let (closing, open) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+        let reservation = counter.open(closing.path(), false).unwrap();
+        let _open = counter.open(open.path(), false).unwrap();
+        counter.last.fetch_add(BLOCK, Ordering::SeqCst);
+
+        let raised = std::sync::atomic::AtomicBool::new(false);
+        let result = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                // Until the raise holds this engine's reservation.
+                while Arc::strong_count(&reservation) == 1 && !raised.load(Ordering::SeqCst) {
+                    std::hint::spin_loop();
+                }
+                drop(reservation);
+                drop(closing);
+            });
+            let result = counter.reserve_ahead();
+            raised.store(true, Ordering::SeqCst);
+            result
+        });
+        result.unwrap();
+        let revision = counter.next();
+        assert!(revision <= recorded(&open), "{revision} is not reserved");
+    }
+}
