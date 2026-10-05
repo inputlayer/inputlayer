@@ -30,6 +30,8 @@ impl StorageEngine {
     /// delta is written as one WAL record at one logical time, applied, and
     /// published as one snapshot, so readers see the program's rules and data
     /// together. An empty delta writes and publishes nothing.
+    /// The commit reports the revision its effect is visible at
+    /// ([`ProgramCommit::revision`]).
     ///
     /// `control`, the request's deadline and cancellation, enters its commit
     /// under the lock just before the WAL write: a request stopped before then
@@ -94,6 +96,7 @@ impl StorageEngine {
                 statements,
                 relations: Vec::new(),
                 base,
+                revision: db.snapshot.load().revision,
             });
         }
         if let Some(control) = control {
@@ -122,10 +125,14 @@ impl StorageEngine {
                 warn!(kg = %kg, time, error = %e, "catalog_wal_prune_failed");
             }
         }
+        let relations = relations.map_err(CommitError::Unknown)?;
+        // Still under the write lock, so this is the snapshot just published.
+        let revision = db.snapshot.load().revision;
         Ok(ProgramCommit {
             statements,
-            relations: relations.map_err(CommitError::Unknown)?,
+            relations,
             base,
+            revision,
         })
     }
 }

@@ -183,6 +183,36 @@ async fn test_rebuild_drops_tombstones() {
 }
 
 #[tokio::test]
+async fn test_index_commands_name_the_revision_they_publish() {
+    let temp = TempDir::new().unwrap();
+    let handler = handler_at(temp.path());
+    let mut revision = 0;
+    for line in SETUP.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        revision = exec(&handler, line).await.revision.unwrap();
+    }
+    let noop = r#"+docs[(1, "x", [1.0, 0.0, 0.0])]"#;
+    for command in [
+        ".index create doc_idx on docs(emb)",
+        ".index rebuild doc_idx",
+        ".index drop doc_idx",
+    ] {
+        let published = exec(&handler, command).await.revision.expect(command);
+        assert!(
+            published > revision,
+            "{command}: {published} after {revision}"
+        );
+        // A write that changes nothing names the current revision.
+        assert_eq!(
+            exec(&handler, noop).await.revision,
+            Some(published),
+            "{command}"
+        );
+        revision = published;
+    }
+    assert_eq!(exec(&handler, ".index list").await.revision, None);
+}
+
+#[tokio::test]
 async fn test_index_survives_restart_and_matches_current_data() {
     let temp = TempDir::new().unwrap();
     {

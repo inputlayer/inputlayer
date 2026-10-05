@@ -10,6 +10,7 @@ use crate::ast::{
     AggregateFunc, ArithExpr, ArithOp, Atom, BodyPredicate, BuiltinFunc, ComparisonOp, Program,
     Rule, Term,
 };
+use crate::size_limits;
 pub use lexer::strip_block_comments;
 use lexer::{find_outside_strings, find_top_level, is_string_literal, split_top_level, Angles};
 
@@ -194,6 +195,7 @@ fn try_parse_hnsw_nearest(s: &str) -> Result<Option<BodyPredicate>, String> {
     if k == 0 {
         return Err("hnsw_nearest: k must be >= 1".into());
     }
+    size_limits::check("hnsw_nearest: k", k, size_limits::MAX_HNSW_K)?;
 
     // Arg 3: id_var (must be a variable)
     let id_var = args[3].trim().to_string();
@@ -214,9 +216,18 @@ fn try_parse_hnsw_nearest(s: &str) -> Result<Option<BodyPredicate>, String> {
     // Arg 5 (optional): ef_search override
     let ef_search = if args.len() == 6 {
         let ef_str = args[5].trim();
-        Some(ef_str.parse::<usize>().map_err(|_| {
-            format!("hnsw_nearest: ef_search must be a positive integer, got '{ef_str}'")
-        })?)
+        let ef = ef_str
+            .parse::<usize>()
+            .ok()
+            .filter(|&ef| ef > 0)
+            .ok_or_else(|| {
+                format!("hnsw_nearest: ef_search must be a positive integer, got '{ef_str}'")
+            })?;
+        Some(size_limits::check(
+            "hnsw_nearest: ef_search",
+            ef,
+            size_limits::MAX_EF_SEARCH,
+        )?)
     } else {
         None
     };
@@ -316,6 +327,9 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
             match func_lower.as_str() {
                 "top_k" => {
                     if let Some(func) = AggregateFunc::parse_top_k(params) {
+                        if let AggregateFunc::TopK { k, .. } = &func {
+                            size_limits::check("top_k: k", *k, size_limits::MAX_TOP_K)?;
+                        }
                         // For ranking aggregates, the "var" field is used to identify the group
                         // We'll use an empty string and rely on the aggregate's internal fields
                         return Ok(Term::Aggregate(func, String::new()));
@@ -324,6 +338,9 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
                 }
                 "top_k_threshold" => {
                     if let Some(func) = AggregateFunc::parse_top_k_threshold(params) {
+                        if let AggregateFunc::TopKThreshold { k, .. } = &func {
+                            size_limits::check("top_k_threshold: k", *k, size_limits::MAX_TOP_K)?;
+                        }
                         return Ok(Term::Aggregate(func, String::new()));
                     }
                     return Err(format!("Invalid top_k_threshold parameters: {params}"));
@@ -350,6 +367,7 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
             if let Some(builtin) = BuiltinFunc::parse(func_name) {
                 let args_str = &s[paren_pos + 1..s.len() - 1];
                 let args = parse_function_args(args_str)?;
+                check_size_args(&builtin, &args)?;
                 return Ok(Term::FunctionCall(builtin, args));
             }
             // If not a known function, fall through to check if it could be something else
@@ -411,6 +429,25 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
     }
 
     Err(format!("Invalid term: '{s}'"))
+}
+
+/// Reject a literal size argument of a built-in over its bound. A size bound
+/// to a variable is bounded where the function runs.
+fn check_size_args(func: &BuiltinFunc, args: &[Term]) -> Result<(), String> {
+    let num_probes = match func {
+        BuiltinFunc::LshProbes => args.get(2),
+        BuiltinFunc::LshMultiProbe => args.get(3),
+        _ => None,
+    };
+    if let Some(Term::Constant(n)) = num_probes {
+        let n = usize::try_from(*n).unwrap_or(0);
+        size_limits::check(
+            &format!("{}: num_probes", func.as_str()),
+            n,
+            size_limits::MAX_LSH_PROBES,
+        )?;
+    }
+    Ok(())
 }
 
 /// Parse a vector literal like [1.0, 2.0, 3.0]
@@ -1573,6 +1610,45 @@ mod tests {
     }
 
     // === HNSW nearest neighbor parsing tests ===
+
+    #[test]
+    fn test_parse_rejects_sizes_over_their_bounds() {
+        use crate::size_limits::{MAX_EF_SEARCH, MAX_HNSW_K, MAX_LSH_PROBES, MAX_TOP_K};
+        let huge = 300_000_000_000_000_000_i64;
+        let hnsw = |k: String, ef: &str| {
+            parse_rule(&format!(
+                r#"r(Id, D) <- hnsw_nearest("i", [1.0], {k}, Id, D{ef})"#
+            ))
+        };
+        assert!(hnsw(MAX_HNSW_K.to_string(), "").is_ok());
+        let err = hnsw((MAX_HNSW_K + 1).to_string(), "").unwrap_err();
+        assert!(err.contains("hnsw_nearest: k must be at most"), "{err}");
+        assert!(hnsw(huge.to_string(), "").is_err());
+        assert!(hnsw("5".into(), &format!(", {MAX_EF_SEARCH}")).is_ok());
+        let err = hnsw("5".into(), &format!(", {}", MAX_EF_SEARCH + 1)).unwrap_err();
+        assert!(
+            err.contains("hnsw_nearest: ef_search must be at most"),
+            "{err}"
+        );
+        assert!(hnsw("5".into(), ", 0").is_err());
+
+        assert!(parse_term(&format!("top_k<{MAX_TOP_K}, S>")).is_ok());
+        let err = parse_term(&format!("top_k<{}, S>", MAX_TOP_K + 1)).unwrap_err();
+        assert!(err.contains("top_k: k must be at most"), "{err}");
+        let err = parse_term(&format!("top_k_threshold<{huge}, 0.5, S>")).unwrap_err();
+        assert!(err.contains("top_k_threshold: k must be at most"), "{err}");
+
+        assert!(parse_term(&format!("lsh_probes(0, 62, {MAX_LSH_PROBES})")).is_ok());
+        let err = parse_term(&format!("lsh_probes(0, 4, {huge})")).unwrap_err();
+        assert!(
+            err.contains("lsh_probes: num_probes must be at most"),
+            "{err}"
+        );
+        let err = parse_term(&format!("lsh_multi_probe(V, 0, 8, {huge})")).unwrap_err();
+        assert!(err.contains("lsh_multi_probe: num_probes"), "{err}");
+        // A size from a variable is bounded where the function runs.
+        assert!(parse_term("lsh_probes(0, 4, N)").is_ok());
+    }
 
     #[test]
     fn test_parse_hnsw_nearest_vector_literal() {

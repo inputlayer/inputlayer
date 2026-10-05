@@ -293,3 +293,34 @@ fn test_hnsw_concurrent_search_during_inserts() {
     reader.join().unwrap();
     assert_eq!(index.len(), 3000);
 }
+
+/// Regression: an unchecked `ef` sized `hnsw_rs`'s candidate heaps and
+/// aborted the process; `k * 4` overflowed for Manhattan.
+#[test]
+fn test_hnsw_search_bounds_huge_k_and_ef() {
+    let rows = random_rows(1500, 8, 7);
+    for metric in [DistanceMetric::Euclidean, DistanceMetric::Manhattan] {
+        let index = HnswIndex::build(config(metric), rows.clone()).unwrap();
+        let (_, q) = &rows[0];
+        let top = index.search(q, 5, Some(usize::MAX), index.epoch()).unwrap();
+        assert_eq!(top.len(), 5);
+        let all = index.search(q, usize::MAX, None, index.epoch()).unwrap();
+        assert!(all.len() > 1400 && all.len() <= 1500, "{}", all.len());
+    }
+}
+
+/// A definition saved before the parameters were bounded still builds:
+/// `hnsw_rs` would exit the process on m > 256.
+#[test]
+fn test_hnsw_build_clamps_unbounded_saved_parameters() {
+    let saved = HnswConfig {
+        m: 100_000,
+        ef_construction: usize::MAX,
+        ef_search: usize::MAX,
+        metric: DistanceMetric::Euclidean,
+    };
+    let rows = random_rows(1100, 4, 9);
+    let index = HnswIndex::build(saved, rows.clone()).unwrap();
+    let (_, q) = &rows[3];
+    assert_eq!(index.search(q, 3, None, index.epoch()).unwrap().len(), 3);
+}

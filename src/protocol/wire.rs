@@ -335,6 +335,15 @@ pub struct QueryResult {
     /// Fact statements the program committed, with their effective counts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub statements: Vec<StatementCounts>,
+    /// Revision the program's committed writes are visible at: the revision
+    /// standing-query pushes carry. Present only when the program changed
+    /// persistent state of a knowledge graph: committed fact, schema and rule
+    /// writes, `.rel drop`, `.clear prefix`, `.index create|drop|rebuild`,
+    /// `.kg create` and `.ontology install|remove|upgrade`; with several, the
+    /// last one's. Session schemas, facts and rules, queries, and writes that
+    /// were rolled back carry none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
 }
 
 /// Provenance and audit metadata for a query result
@@ -385,6 +394,7 @@ impl QueryResult {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         }
     }
 
@@ -402,6 +412,7 @@ impl QueryResult {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         }
     }
 
@@ -425,6 +436,7 @@ impl QueryResult {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         }
     }
 }
@@ -707,6 +719,7 @@ mod tests {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         };
         assert_eq!(result.rows.len(), 0);
         assert_eq!(result.schema.len(), 1);

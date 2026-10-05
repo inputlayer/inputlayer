@@ -177,6 +177,12 @@ Only a program that writes persistent state (facts, schemas or rules) can carry 
 }
 ```
 
+The reply to a program that changed persistent state of a knowledge graph also carries `revision`: the knowledge graph revision the program's changes are visible at, the same revision [standing-query pushes](#standing-queries) carry. A delta at that revision or later reflects them. The statements that carry it are committed fact, schema and rule writes, `.rel drop`, `.clear prefix`, `.index create`, `.index drop`, `.index rebuild`, `.kg create` (the new graph's first revision) and `.ontology install`, `remove` and `upgrade`; a program with several names the last one's. A write that changed nothing (inserting a fact that is present, for example) names the current revision, which already holds its effect. Queries without writes, programs whose writes were rolled back, `.kg use`, `.kg drop`, and session-scoped schemas, facts and rules carry no `revision`. Like push revisions, it is comparable only within one knowledge graph and one `stream_epoch`.
+
+```json
+{"type": "result", "columns": ["message"], "rows": [["Inserted 1 fact(s) into 'eta'."]], "revision": 1731, "errors": []}
+```
+
 ### Error Response
 
 ```json

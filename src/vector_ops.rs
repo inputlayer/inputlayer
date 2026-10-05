@@ -17,6 +17,8 @@ use std::sync::{Arc, OnceLock};
 
 use parking_lot::RwLock;
 
+use crate::size_limits::{lsh_probe_count, MAX_LSH_BITS, MAX_TOP_K};
+
 // Orderable Float Wrapper for BinaryHeap
 /// Wrapper for f64 that implements Ord for use in `BinaryHeap`.
 /// NaN values are treated as less than all other values.
@@ -692,7 +694,7 @@ pub fn lsh_bucket_int8(v: &[i8], table_idx: i64, num_hyperplanes: usize) -> i64 
         return 0;
     }
 
-    let num_bits = num_hyperplanes.min(62);
+    let num_bits = num_hyperplanes.min(MAX_LSH_BITS);
     let hyperplanes = get_or_create_hyperplanes(table_idx, num_bits, v.len());
 
     let mut bucket: i64 = 0;
@@ -911,7 +913,7 @@ fn generate_hyperplanes(
     num_hyperplanes: usize,
     dimension: usize,
 ) -> CachedHyperplanes {
-    let num_bits = num_hyperplanes.min(62);
+    let num_bits = num_hyperplanes.min(MAX_LSH_BITS);
     let mut data = Vec::with_capacity(num_bits * dimension);
 
     for h in 0..num_bits {
@@ -1040,7 +1042,7 @@ pub fn lsh_bucket(v: &[f32], table_idx: i64, num_hyperplanes: usize) -> i64 {
         return 0;
     }
 
-    let num_bits = num_hyperplanes.min(62);
+    let num_bits = num_hyperplanes.min(MAX_LSH_BITS);
     let hyperplanes = get_or_create_hyperplanes(table_idx, num_bits, v.len());
     compute_bucket_from_hyperplanes(v, &hyperplanes)
 }
@@ -1129,8 +1131,8 @@ pub fn lsh_probes(bucket: i64, num_hyperplanes: usize, num_probes: usize) -> Vec
         return Vec::new();
     }
 
-    let num_bits = num_hyperplanes.min(62);
-    let mut probes = Vec::with_capacity(num_probes);
+    let num_bits = num_hyperplanes.min(MAX_LSH_BITS);
+    let mut probes = Vec::with_capacity(num_probes.min(lsh_probe_count(num_bits)));
     probes.push(bucket);
 
     if probes.len() >= num_probes {
@@ -1204,7 +1206,7 @@ pub fn lsh_bucket_with_distances(
         return (0, Vec::new());
     }
 
-    let num_bits = num_hyperplanes.min(62);
+    let num_bits = num_hyperplanes.min(MAX_LSH_BITS);
     let hyperplanes = get_or_create_hyperplanes(table_idx, num_bits, v.len());
 
     let mut bucket: i64 = 0;
@@ -1239,7 +1241,7 @@ pub fn lsh_bucket_with_distances_int8(
         return (0, Vec::new());
     }
 
-    let num_bits = num_hyperplanes.min(62);
+    let num_bits = num_hyperplanes.min(MAX_LSH_BITS);
     let hyperplanes = get_or_create_hyperplanes(table_idx, num_bits, v.len());
 
     let mut bucket: i64 = 0;
@@ -1298,7 +1300,7 @@ pub fn lsh_probes_ranked(bucket: i64, boundary_distances: &[f64], num_probes: us
         return Vec::new();
     }
 
-    let num_bits = boundary_distances.len().min(62);
+    let num_bits = boundary_distances.len().min(MAX_LSH_BITS);
 
     if num_bits == 0 {
         return vec![bucket];
@@ -1315,7 +1317,7 @@ pub fn lsh_probes_ranked(bucket: i64, boundary_distances: &[f64], num_probes: us
 
     let sorted_indices: Vec<usize> = indexed_distances.iter().map(|(i, _)| *i).collect();
 
-    let mut probes = Vec::with_capacity(num_probes);
+    let mut probes = Vec::with_capacity(num_probes.min(lsh_probe_count(num_bits)));
     probes.push(bucket);
 
     if probes.len() >= num_probes {
@@ -1451,12 +1453,19 @@ where
     if k == 0 {
         return Vec::new();
     }
+    // The heap holds at most k + 1 items, and never more than the input has.
+    let capacity = items
+        .size_hint()
+        .1
+        .map_or(k, |n| k.min(n))
+        .min(MAX_TOP_K)
+        .saturating_add(1);
 
     if descending {
         // Top k largest: use min-heap (via Reverse) to track largest items
         // We keep the k largest seen so far; when full, evict the smallest
         let mut heap: BinaryHeap<Reverse<HeapEntry<ScoredItem<T>>>> =
-            BinaryHeap::with_capacity(k + 1);
+            BinaryHeap::with_capacity(capacity);
 
         for item in items {
             let score = OrdF64(item.score);
@@ -1481,7 +1490,7 @@ where
     } else {
         // Top k smallest: use max-heap to track smallest items
         // We keep the k smallest seen so far; when full, evict the largest
-        let mut heap: BinaryHeap<HeapEntry<ScoredItem<T>>> = BinaryHeap::with_capacity(k + 1);
+        let mut heap: BinaryHeap<HeapEntry<ScoredItem<T>>> = BinaryHeap::with_capacity(capacity);
 
         for item in items {
             let score = OrdF64(item.score);
@@ -3184,6 +3193,22 @@ mod tests {
             let diff = probe ^ bucket;
             assert_eq!(diff.count_ones(), 1);
         }
+    }
+
+    /// Regression: a huge `num_probes` or `k` sized the allocation and
+    /// aborted the process.
+    #[test]
+    fn test_huge_sizes_allocate_only_what_is_produced() {
+        assert_eq!(lsh_probes(0, 62, usize::MAX).len(), 39_774);
+        assert_eq!(lsh_probes(0, 4, 300_000_000_000_000_000).len(), 15);
+        assert_eq!(lsh_probes_ranked(0, &[0.1, 0.2, 0.3], usize::MAX).len(), 8);
+        assert_eq!(lsh_multi_probe(&[1.0, 0.5], 0, 2, usize::MAX).len(), 4);
+        let items = (0..5).map(|i| ScoredItem {
+            item: i,
+            score: f64::from(i),
+        });
+        assert_eq!(top_k(items.clone(), usize::MAX, true).len(), 5);
+        assert_eq!(top_k(items, usize::MAX, false).len(), 5);
     }
 
     #[test]
