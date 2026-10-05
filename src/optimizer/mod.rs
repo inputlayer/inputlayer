@@ -365,11 +365,18 @@ impl Optimizer {
                                 right_keys,
                                 output_schema,
                             }
-                        } else if refs_right && !refs_left {
+                        } else if let Some(adjusted_predicate) = (refs_right && !refs_left)
+                            .then(|| {
+                                Self::right_input_predicate(
+                                    &predicate,
+                                    left_cols,
+                                    &right,
+                                    &right_keys,
+                                )
+                            })
+                            .flatten()
+                        {
                             // Predicate only references right side - push down to right
-                            // Need to adjust column indices
-                            let adjusted_predicate =
-                                Self::adjust_predicate_columns(&predicate, -(left_cols as i32));
                             IRNode::Join {
                                 left,
                                 right: Box::new(IRNode::Filter {
@@ -522,65 +529,28 @@ impl Optimizer {
         }
     }
 
-    /// Adjust column indices in a predicate by an offset
-    fn adjust_predicate_columns(predicate: &Predicate, offset: i32) -> Predicate {
-        let adjust = |col: usize| -> usize { ((col as i32) + offset) as usize };
-
-        match predicate {
-            Predicate::ColumnEqConst(col, val) => Predicate::ColumnEqConst(adjust(*col), *val),
-            Predicate::ColumnNeConst(col, val) => Predicate::ColumnNeConst(adjust(*col), *val),
-            Predicate::ColumnLtConst(col, val) => Predicate::ColumnLtConst(adjust(*col), *val),
-            Predicate::ColumnLeConst(col, val) => Predicate::ColumnLeConst(adjust(*col), *val),
-            Predicate::ColumnGtConst(col, val) => Predicate::ColumnGtConst(adjust(*col), *val),
-            Predicate::ColumnGeConst(col, val) => Predicate::ColumnGeConst(adjust(*col), *val),
-            // String predicates
-            Predicate::ColumnEqStr(col, val) => Predicate::ColumnEqStr(adjust(*col), val.clone()),
-            Predicate::ColumnNeStr(col, val) => Predicate::ColumnNeStr(adjust(*col), val.clone()),
-            Predicate::ColumnLtStr(col, val) => Predicate::ColumnLtStr(adjust(*col), val.clone()),
-            Predicate::ColumnGtStr(col, val) => Predicate::ColumnGtStr(adjust(*col), val.clone()),
-            Predicate::ColumnLeStr(col, val) => Predicate::ColumnLeStr(adjust(*col), val.clone()),
-            Predicate::ColumnGeStr(col, val) => Predicate::ColumnGeStr(adjust(*col), val.clone()),
-            // Float predicates
-            Predicate::ColumnEqFloat(col, val) => Predicate::ColumnEqFloat(adjust(*col), *val),
-            Predicate::ColumnNeFloat(col, val) => Predicate::ColumnNeFloat(adjust(*col), *val),
-            Predicate::ColumnGtFloat(col, val) => Predicate::ColumnGtFloat(adjust(*col), *val),
-            Predicate::ColumnLtFloat(col, val) => Predicate::ColumnLtFloat(adjust(*col), *val),
-            Predicate::ColumnGeFloat(col, val) => Predicate::ColumnGeFloat(adjust(*col), *val),
-            Predicate::ColumnLeFloat(col, val) => Predicate::ColumnLeFloat(adjust(*col), *val),
-            // Boolean predicates
-            Predicate::ColumnEqBool(col, val) => Predicate::ColumnEqBool(adjust(*col), *val),
-            Predicate::ColumnNeBool(col, val) => Predicate::ColumnNeBool(adjust(*col), *val),
-            Predicate::ColumnsEq(col1, col2) => Predicate::ColumnsEq(adjust(*col1), adjust(*col2)),
-            Predicate::ColumnsNe(col1, col2) => Predicate::ColumnsNe(adjust(*col1), adjust(*col2)),
-            Predicate::ColumnsLt(col1, col2) => Predicate::ColumnsLt(adjust(*col1), adjust(*col2)),
-            Predicate::ColumnsGt(col1, col2) => Predicate::ColumnsGt(adjust(*col1), adjust(*col2)),
-            Predicate::ColumnsLe(col1, col2) => Predicate::ColumnsLe(adjust(*col1), adjust(*col2)),
-            Predicate::ColumnsGe(col1, col2) => Predicate::ColumnsGe(adjust(*col1), adjust(*col2)),
-            Predicate::ColumnCompareArith(col, op, expr, var_map) => {
-                let new_var_map: std::collections::HashMap<String, usize> = var_map
-                    .iter()
-                    .map(|(name, idx)| (name.clone(), adjust(*idx)))
-                    .collect();
-                Predicate::ColumnCompareArith(adjust(*col), op.clone(), expr.clone(), new_var_map)
-            }
-            Predicate::ArithCompareConst(expr, op, val, var_map) => {
-                let new_var_map: std::collections::HashMap<String, usize> = var_map
-                    .iter()
-                    .map(|(name, idx)| (name.clone(), adjust(*idx)))
-                    .collect();
-                Predicate::ArithCompareConst(expr.clone(), op.clone(), *val, new_var_map)
-            }
-            Predicate::And(left, right) => Predicate::And(
-                Box::new(Self::adjust_predicate_columns(left, offset)),
-                Box::new(Self::adjust_predicate_columns(right, offset)),
-            ),
-            Predicate::Or(left, right) => Predicate::Or(
-                Box::new(Self::adjust_predicate_columns(left, offset)),
-                Box::new(Self::adjust_predicate_columns(right, offset)),
-            ),
-            Predicate::True => Predicate::True,
-            Predicate::False => Predicate::False,
-        }
+    /// `predicate` over a join's rows, rewritten over its `right` input, or
+    /// `None` when it cannot be. A join row is the left row followed by the
+    /// right row without its key columns (`right_keys`), so output column
+    /// `left_cols + k` is the k-th non-key column of `right`.
+    fn right_input_predicate(
+        predicate: &Predicate,
+        left_cols: usize,
+        right: &IRNode,
+        right_keys: &[usize],
+    ) -> Option<Predicate> {
+        let mut next = left_cols;
+        let output_col_of: Vec<usize> = (0..right.output_schema().len())
+            .map(|i| {
+                if right_keys.contains(&i) {
+                    usize::MAX
+                } else {
+                    next += 1;
+                    next - 1
+                }
+            })
+            .collect();
+        predicate.adjust_for_projection(&output_col_of)
     }
 
     /// Rule: Eliminate empty unions from the tree
@@ -1742,22 +1712,25 @@ mod tests {
                 }),
                 left_keys: vec![1],
                 right_keys: vec![0],
-                output_schema: vec![
-                    "x".to_string(),
-                    "y".to_string(),
-                    "y".to_string(),
-                    "z".to_string(),
-                ],
+                // A join row is the left row followed by the right row
+                // without its key columns.
+                output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
             }),
-            predicate: Predicate::ColumnLtConst(3, 100), // z < 100, only references right side (col 3)
+            predicate: Predicate::ColumnLtConst(2, 100), // z < 100, only references right side
         };
 
         let optimized = optimizer.pushdown_filters(ir);
 
-        // Should push filter down to right side of join
+        // Should push filter down to right side of join, onto s's z column
         match optimized {
             IRNode::Join { right, .. } => {
-                assert!(matches!(*right, IRNode::Filter { .. }));
+                assert!(matches!(
+                    *right,
+                    IRNode::Filter {
+                        predicate: Predicate::ColumnLtConst(1, 100),
+                        ..
+                    }
+                ));
             }
             _ => panic!("Expected Join with Filter on right"),
         }
@@ -2329,68 +2302,6 @@ mod tests {
     fn test_get_predicate_columns_bool() {
         let cols = Optimizer::get_predicate_columns(&Predicate::ColumnEqBool(1, true));
         assert_eq!(cols, vec![1]);
-    }
-
-    #[test]
-    fn test_adjust_predicate_columns_positive_offset() {
-        let pred = Predicate::ColumnEqConst(2, 42);
-        let adjusted = Optimizer::adjust_predicate_columns(&pred, 3);
-        assert!(matches!(adjusted, Predicate::ColumnEqConst(5, 42)));
-    }
-
-    #[test]
-    fn test_adjust_predicate_columns_negative_offset() {
-        let pred = Predicate::ColumnGtConst(5, 10);
-        let adjusted = Optimizer::adjust_predicate_columns(&pred, -2);
-        assert!(matches!(adjusted, Predicate::ColumnGtConst(3, 10)));
-    }
-
-    #[test]
-    fn test_adjust_predicate_columns_eq() {
-        let pred = Predicate::ColumnsEq(3, 5);
-        let adjusted = Optimizer::adjust_predicate_columns(&pred, -2);
-        assert!(matches!(adjusted, Predicate::ColumnsEq(1, 3)));
-    }
-
-    #[test]
-    fn test_adjust_predicate_columns_and_recursive() {
-        let pred = Predicate::And(
-            Box::new(Predicate::ColumnEqConst(0, 1)),
-            Box::new(Predicate::ColumnGtConst(2, 5)),
-        );
-        let adjusted = Optimizer::adjust_predicate_columns(&pred, 10);
-        match adjusted {
-            Predicate::And(left, right) => {
-                assert!(matches!(*left, Predicate::ColumnEqConst(10, 1)));
-                assert!(matches!(*right, Predicate::ColumnGtConst(12, 5)));
-            }
-            _ => panic!("Expected And"),
-        }
-    }
-
-    #[test]
-    fn test_adjust_predicate_columns_true_false_unchanged() {
-        assert!(matches!(
-            Optimizer::adjust_predicate_columns(&Predicate::True, 5),
-            Predicate::True
-        ));
-        assert!(matches!(
-            Optimizer::adjust_predicate_columns(&Predicate::False, -3),
-            Predicate::False
-        ));
-    }
-
-    #[test]
-    fn test_adjust_predicate_columns_str() {
-        let pred = Predicate::ColumnEqStr(1, "hello".to_string());
-        let adjusted = Optimizer::adjust_predicate_columns(&pred, 2);
-        match adjusted {
-            Predicate::ColumnEqStr(col, val) => {
-                assert_eq!(col, 3);
-                assert_eq!(val, "hello");
-            }
-            _ => panic!("Expected ColumnEqStr"),
-        }
     }
 
     #[test]
