@@ -444,10 +444,9 @@ pub struct SubscriptionsConfig {
 
     /// Share of the compute permits (one per core not reserved for I/O) that
     /// runs standing-query evaluations, in (0, 1); requests get the rest.
-    /// Neither queues behind the other, but both share the CPU. Requests
-    /// keep at least two permits and evaluations one, so a server with two
-    /// compute permits runs three computations at once, and one with a
-    /// single permit runs one of each.
+    /// Neither queues behind the other, but both share the CPU. Each side
+    /// gets at least one permit, so a server with one compute permit runs
+    /// one of each.
     #[serde(default = "default_evaluation_share")]
     pub evaluation_share: f64,
 }

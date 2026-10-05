@@ -199,11 +199,10 @@ pub struct Handler {
     /// Prevents blocking-thread-pool explosion by capping CPU-bound parallelism
     /// at the hardware thread count. Tokio workers queue via async `acquire()`.
     query_semaphore: Arc<tokio::sync::Semaphore>,
-    /// The CPU budget, split between `query_semaphore` and
-    /// `standing_semaphore` (see [`split_compute_permits`]).
+    /// CPU-bound computations that run at once: the width of
+    /// `query_semaphore` plus that of `standing_semaphore`, but for a single
+    /// permit, which both get.
     compute_permits: usize,
-    /// Width of `query_semaphore`.
-    request_permits: usize,
     /// Width of `standing_semaphore`.
     standing_permits: usize,
     /// Permits of standing-query sharing probes, apart from the compute
@@ -1028,23 +1027,16 @@ fn proof_timing(
     })
 }
 
-/// Fewest request permits whenever the budget has two: one long query must
-/// never hold every write and query behind it.
-const MIN_REQUEST_PERMITS: usize = 2;
-
 /// `compute_permits` split into request and standing-query permits:
-/// standing queries get `share` of them, rounded, and requests the rest.
-/// Requests keep at least [`MIN_REQUEST_PERMITS`] and standing queries at
-/// least one, so a budget of 2 runs 2 requests and 1 evaluation. A single
-/// permit cannot be split, so each side gets it.
+/// standing queries get `share` of them, rounded, and requests the rest, each
+/// at least one. A single permit cannot be split, so each side gets it.
 fn split_compute_permits(compute_permits: usize, share: f64) -> (usize, usize) {
     if compute_permits <= 1 {
         return (1, 1);
     }
-    let room = compute_permits.saturating_sub(MIN_REQUEST_PERMITS).max(1);
-    let standing = ((compute_permits as f64 * share).round() as usize).clamp(1, room);
-    let requests = (compute_permits - standing).max(MIN_REQUEST_PERMITS);
-    (requests, standing)
+    let standing =
+        ((compute_permits as f64 * share).round() as usize).clamp(1, compute_permits - 1);
+    (compute_permits - standing, standing)
 }
 
 impl Handler {
@@ -1075,7 +1067,6 @@ impl Handler {
             notifications,
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(request_permits)),
             compute_permits,
-            request_permits,
             standing_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
             standing_semaphore: Arc::new(tokio::sync::Semaphore::new(standing_permits)),
@@ -1104,7 +1095,6 @@ impl Handler {
             query_memory_bytes = handler.config.storage.performance.max_query_memory_bytes,
             total_query_memory_bytes = handler.query_memory.budget(),
             compute_permits = handler.compute_permits,
-            request_permits = handler.request_permits,
             standing_permits = handler.standing_permits,
             "query_memory_limits"
         );
@@ -1137,7 +1127,6 @@ impl Handler {
             notifications,
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(request_permits)),
             compute_permits,
-            request_permits,
             standing_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
             standing_semaphore: Arc::new(tokio::sync::Semaphore::new(standing_permits)),
@@ -1209,17 +1198,10 @@ impl Handler {
     /// The CPU budget: how many CPU-bound computations run at once, split
     /// between requests and standing-query evaluations by
     /// `subscriptions.evaluation_share`, each waiting for a permit of its
-    /// own side. Requests keep at least two permits and evaluations one, so
-    /// a budget of 2 runs one computation more (3), and a budget of 1 runs
-    /// one of each.
+    /// own side. A single permit cannot be split: requests and evaluations
+    /// then get one each.
     pub fn compute_permits(&self) -> usize {
         self.compute_permits
-    }
-
-    /// How many requests compute at once: their share of the compute
-    /// permits.
-    pub fn request_permits(&self) -> usize {
-        self.request_permits
     }
 
     /// How many standing-query evaluations run at once: their share of the
@@ -1231,8 +1213,9 @@ impl Handler {
     /// Every request permit, held until the result drops.
     #[cfg(test)]
     pub(crate) fn hold_request_permits(&self) -> tokio::sync::OwnedSemaphorePermit {
+        let requests = (self.compute_permits - self.standing_permits).max(1);
         Arc::clone(&self.query_semaphore)
-            .try_acquire_many_owned(self.request_permits as u32)
+            .try_acquire_many_owned(requests as u32)
             .unwrap_or_else(|e| panic!("compute permits taken: {e}"))
     }
 
@@ -1245,7 +1228,6 @@ impl Handler {
         self.query_semaphore = Arc::new(tokio::sync::Semaphore::new(requests));
         self.standing_semaphore = Arc::new(tokio::sync::Semaphore::new(standing));
         self.compute_permits = permits;
-        self.request_permits = requests;
         self.standing_permits = standing;
         self
     }
@@ -6103,16 +6085,13 @@ mod tests {
         // (share, compute permits) -> (request permits, standing permits)
         for (share, permits, requests, standing) in [
             (0.5, 1, 1, 1),
-            // Requests keep two whenever the budget has two.
-            (0.5, 2, 2, 1),
-            (0.5, 3, 2, 1),
-            (0.5, 4, 2, 2),
+            (0.5, 2, 1, 1),
             (0.5, 6, 3, 3),
             (0.5, 7, 3, 4),
             (0.25, 8, 6, 2),
             (0.01, 8, 7, 1),
-            (0.99, 8, 2, 6),
-            (0.99, 2, 2, 1),
+            (0.99, 8, 1, 7),
+            (0.99, 2, 1, 1),
         ] {
             let (mut config, _tmp) = make_test_config();
             config.subscriptions.evaluation_share = share;
@@ -6122,7 +6101,6 @@ mod tests {
             let case = format!("share {share} of {permits}");
             assert_eq!(handler.compute_permits(), permits, "{case}");
             assert_eq!(handler.standing_permits(), standing, "{case}");
-            assert_eq!(handler.request_permits(), requests, "{case}");
             assert_eq!(
                 handler.standing_semaphore.available_permits(),
                 standing,
