@@ -72,9 +72,7 @@ class _LoopThread:
             # Python 3.10's concurrent.futures.TimeoutError is not the
             # builtin TimeoutError (they merged in 3.11); raise the builtin
             # so callers catch the same type on every supported version.
-            raise TimeoutError(
-                f"sync call did not complete within {self._timeout}s"
-            ) from e
+            raise TimeoutError(f"sync call did not complete within {self._timeout}s") from e
 
     def shutdown(self) -> None:
         """Stop the background loop and join the thread."""
