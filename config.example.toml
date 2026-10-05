@@ -20,7 +20,8 @@ default_knowledge_graph = "default"
 # Set to true for development, false for production
 auto_create_knowledge_graphs = false
 
-# Knowledge graphs load into memory on first use. Most held at once
+# Knowledge graphs load into memory on first use; after a restart, those that
+# were in memory load in the background. Most held at once
 # (0 = no limit); past it, loading one unloads the least recently used idle ones.
 max_loaded_knowledge_graphs = 0
 

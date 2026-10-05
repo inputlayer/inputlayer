@@ -624,3 +624,133 @@ fn crash_restart_cycles_keep_exactly_the_committed_facts() {
         }
     }
 }
+
+/// Warm every graph the engine recorded as in memory, as the server does
+/// after startup. Returns how many loaded.
+fn warm(storage: &StorageEngine) -> usize {
+    storage
+        .resident_knowledge_graphs()
+        .iter()
+        .filter(|kg| storage.warm_knowledge_graph(kg).unwrap())
+        .count()
+}
+
+#[test]
+fn a_restart_warms_the_knowledge_graphs_that_were_in_memory() {
+    let temp = TempDir::new().unwrap();
+    seed(temp.path());
+
+    let storage = open(temp.path());
+    assert_eq!(storage.resident_knowledge_graphs(), ["a", "b", "default"]);
+    assert_eq!(
+        storage.loaded_knowledge_graph_count(),
+        0,
+        "startup itself loads nothing"
+    );
+    assert_eq!(warm(&storage), 3);
+    let (loads, _) = storage.knowledge_graph_residency_counts();
+    assert_eq!(rows(&storage, "a", "e"), [int(1), int(2), int(3)].into());
+    assert_eq!(
+        storage.knowledge_graph_residency_counts().0,
+        loads,
+        "the first request finds the graph loaded"
+    );
+    assert_eq!(warm(&storage), 0, "a loaded graph is not loaded again");
+}
+
+#[test]
+fn a_restart_leaves_unloaded_and_dropped_knowledge_graphs_dormant() {
+    let temp = TempDir::new().unwrap();
+    seed(temp.path());
+
+    // A restart, then only "a" is used: "b" was never in memory in this run.
+    let storage = open(temp.path());
+    assert_eq!(warm(&storage), 3);
+    assert_eq!(rows(&storage, "a", "e").len(), 3);
+    storage.create_knowledge_graph("c").unwrap();
+    storage.drop_knowledge_graph("c").unwrap();
+    // "b" and "default" go idle and are unloaded; "a" is held.
+    let held = storage.get_snapshot_for("a").unwrap();
+    assert_eq!(storage.unload_idle_knowledge_graphs(Duration::ZERO), 2);
+    drop(held);
+    assert_eq!(storage.resident_knowledge_graphs(), ["a"]);
+    crash(storage);
+
+    let storage = open(temp.path());
+    assert_eq!(storage.resident_knowledge_graphs(), ["a"]);
+    assert_eq!(warm(&storage), 1);
+    assert!(loaded(&storage, "a"));
+    assert!(!loaded(&storage, "b"), "memory holds what it held before");
+    assert_eq!(storage.loaded_knowledge_graph_count(), 1);
+    // "b" still loads on first use, and is warmed after the next restart.
+    assert_eq!(rows(&storage, "b", "e").len(), 3);
+    crash(storage);
+    let storage = open(temp.path());
+    assert_eq!(storage.resident_knowledge_graphs(), ["a", "b"]);
+}
+
+#[test]
+fn a_warm_load_racing_request_loads_unloads_no_other_graph() {
+    let temp = TempDir::new().unwrap();
+    seed(temp.path());
+
+    let storage = open_limited(temp.path(), 2);
+    let slot = storage.slot("a").unwrap();
+    // The warm-up sees room for "a", then waits for its slot while requests
+    // load "b" and "default" up to the limit.
+    let held = slot.state.lock();
+    let warming = Barrier::new(2);
+    std::thread::scope(|scope| {
+        let warm = scope.spawn(|| {
+            warming.wait();
+            storage.warm_knowledge_graph("a").unwrap()
+        });
+        warming.wait();
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(rows(&storage, "b", "e").len(), 3);
+        assert_eq!(rows(&storage, "default", "e").len(), 0);
+        drop(held);
+        assert!(warm.join().unwrap());
+    });
+    assert!(loaded(&storage, "a"));
+    assert!(loaded(&storage, "b"), "warming never unloads a used graph");
+    assert!(loaded(&storage, "default"));
+    assert_eq!(storage.knowledge_graph_residency_counts().1, 0);
+    assert_eq!(storage.resident_knowledge_graphs(), ["a", "b", "default"]);
+}
+
+#[test]
+fn warming_stops_at_the_loaded_limit_and_survives_a_bad_record() {
+    let temp = TempDir::new().unwrap();
+    seed(temp.path());
+
+    let storage = open_limited(temp.path(), 1);
+    assert_eq!(storage.resident_knowledge_graphs(), ["a", "b", "default"]);
+    assert_eq!(rows(&storage, "b", "e").len(), 3);
+    assert!(!storage.warm_knowledge_graph("a").unwrap());
+    assert!(loaded(&storage, "b"), "warming never unloads a used graph");
+    assert!(!loaded(&storage, "a"));
+    assert!(!storage.warm_knowledge_graph("missing").unwrap());
+    // A graph the limit left dormant is no longer recorded as in memory.
+    assert_eq!(storage.resident_knowledge_graphs(), ["b", "default"]);
+    assert!(!storage.warm_knowledge_graph("default").unwrap());
+    assert_eq!(storage.resident_knowledge_graphs(), ["b"]);
+    crash(storage);
+
+    // The next restart warms the graph that was in memory, not a stale name.
+    let storage = open_limited(temp.path(), 1);
+    assert_eq!(storage.resident_knowledge_graphs(), ["b"]);
+    assert_eq!(warm(&storage), 1);
+    assert!(loaded(&storage, "b"));
+    crash(storage);
+
+    // An unreadable record warms nothing; graphs load on first use.
+    let record = temp.path().join("metadata/resident_knowledge_graphs.json");
+    assert!(record.exists());
+    std::fs::write(&record, b"not json").unwrap();
+    let storage = open(temp.path());
+    assert!(storage.resident_knowledge_graphs().is_empty());
+    assert_eq!(warm(&storage), 0);
+    assert_eq!(rows(&storage, "a", "e"), [int(1), int(2), int(3)].into());
+    assert_eq!(storage.resident_knowledge_graphs(), ["a"]);
+}

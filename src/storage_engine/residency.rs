@@ -25,6 +25,14 @@
 //! approximate results), and catalog changes whose save to the catalog files
 //! failed (only a restart replays them from the WAL).
 //!
+//! The names of the loaded KGs are kept in a file, rewritten when a KG loads
+//! that the file lacks, is unloaded or dropped, or is left dormant by the
+//! warm-up at `storage.max_loaded_knowledge_graphs`. After a restart the server
+//! loads the KGs it names in the background ([`StorageEngine::warm_knowledge_graph`]),
+//! so their first request does not wait for the load, startup still reads
+//! metadata only, and memory holds what it held before the restart. A request
+//! for a KG the warm-up has not reached loads it itself.
+//!
 //! The hot path takes no lock: a lookup is a map read, an atomic pointer load
 //! and an atomic store of the access time. Activation, unloading and removal
 //! of one KG are serialized by its slot's mutex. A writer that waited for a
@@ -43,7 +51,8 @@ use arc_swap::ArcSwapOption;
 use parking_lot::lock_api::ArcRwLockWriteGuard;
 use parking_lot::{Mutex, RawRwLock, RwLock};
 use rayon::prelude::*;
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -325,7 +334,7 @@ impl StorageEngine {
         slot.touch(self.clock_now());
         match slot.graph() {
             Some(graph) => Ok(graph),
-            None => self.activate(kg, &slot),
+            None => self.activate(kg, &slot, true),
         }
     }
 
@@ -388,8 +397,14 @@ impl StorageEngine {
 
     /// Load dormant `kg` into `slot`, or return what another activation
     /// loaded. Holds the slot's mutex while loading, so a KG loads once
-    /// however many requests wait for it.
-    fn activate(&self, kg: &str, slot: &KgSlot) -> StorageResult<Arc<RwLock<KnowledgeGraph>>> {
+    /// however many requests wait for it. A load with `trim` then unloads
+    /// other KGs over `storage.max_loaded_knowledge_graphs`.
+    fn activate(
+        &self,
+        kg: &str,
+        slot: &KgSlot,
+        trim: bool,
+    ) -> StorageResult<Arc<RwLock<KnowledgeGraph>>> {
         let mut state = slot.state.lock();
         if let Some(graph) = slot.graph() {
             return Ok(graph);
@@ -413,6 +428,7 @@ impl StorageEngine {
         self.residency_counts
             .activations
             .fetch_add(1, Ordering::Relaxed);
+        self.record_resident(kg, true);
         drop(state);
         info!(
             kg = %kg,
@@ -422,7 +438,9 @@ impl StorageEngine {
             elapsed_ms = start.elapsed().as_millis() as u64,
             "kg_activated"
         );
-        self.unload_over_limit(kg);
+        if trim {
+            self.unload_over_limit(kg);
+        }
         Ok(graph)
     }
 
@@ -545,6 +563,67 @@ impl StorageEngine {
         })
     }
 
+    /// The knowledge graphs to load after a restart: those in memory when
+    /// the engine last ran, sorted by name.
+    pub fn resident_knowledge_graphs(&self) -> Vec<String> {
+        self.resident.lock().iter().cloned().collect()
+    }
+
+    /// Load dormant `kg` ahead of its first request, as the restart warm-up
+    /// does for each of [`Self::resident_knowledge_graphs`]. Returns whether
+    /// it loaded: not when `kg` is loaded already, was dropped, or
+    /// `storage.max_loaded_knowledge_graphs` are loaded. A KG left dormant by
+    /// that limit is no longer recorded as in memory, until a request loads
+    /// it. The warm-up never unloads another KG: a request loading one at the
+    /// same time can leave more than the limit loaded, until the next request
+    /// that loads a KG unloads the excess.
+    ///
+    /// # Errors
+    /// The load failed; the KG's first request retries it.
+    pub fn warm_knowledge_graph(&self, kg: &str) -> StorageResult<bool> {
+        let Ok(slot) = self.slot(kg) else {
+            return Ok(false);
+        };
+        if slot.graph().is_some() {
+            return Ok(false);
+        }
+        let limit = self.config.storage.max_loaded_knowledge_graphs;
+        if limit > 0 && self.loaded_knowledge_graph_count() >= limit {
+            let _state = slot.state.lock();
+            if slot.graph().is_none() {
+                self.record_resident(kg, false);
+            }
+            return Ok(false);
+        }
+        match self.activate(kg, &slot, false) {
+            Ok(_) => Ok(true),
+            Err(StorageError::KnowledgeGraphNotFound(_)) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Record that `kg` is in memory, or no longer is, and save the names
+    /// when that changes them. Called under the slot's mutex when `kg` loads
+    /// or unloads, so the record follows the slot. The file only spares the
+    /// first request after a restart its wait, so a failed save is logged,
+    /// not returned.
+    pub(super) fn record_resident(&self, kg: &str, resident: bool) {
+        let mut names = self.resident.lock();
+        let changed = if resident {
+            !names.contains(kg) && names.insert(kg.to_string())
+        } else {
+            names.remove(kg)
+        };
+        if !changed {
+            return;
+        }
+        // Saved under the mutex, so the file holds the latest names.
+        let path = resident_file(&self.config.storage.data_dir);
+        if let Err(e) = write_resident(&path, &names) {
+            warn!(path = %path.display(), error = %e, "kg_resident_save_failed");
+        }
+    }
+
     /// Unload least recently used KGs until at most
     /// `storage.max_loaded_knowledge_graphs` are loaded, sparing `keep`.
     fn unload_over_limit(&self, keep: &str) {
@@ -645,6 +724,7 @@ impl StorageEngine {
         self.residency_counts
             .unloads
             .fetch_add(1, Ordering::Relaxed);
+        self.record_resident(name, false);
         drop(state);
         // Free the graph outside the slot's mutex.
         drop(graph);
@@ -675,6 +755,32 @@ struct LoadedShard {
     relation: String,
     tuples: Vec<Tuple>,
     fixes: Vec<crate::storage::persist::Update>,
+}
+
+/// The file naming the knowledge graphs in memory.
+fn resident_file(data_dir: &Path) -> PathBuf {
+    data_dir
+        .join("metadata")
+        .join("resident_knowledge_graphs.json")
+}
+
+/// The knowledge graphs that were in memory when the engine last ran. A
+/// missing or unreadable file reads as none: each KG then loads on first use.
+pub(super) fn read_resident(data_dir: &Path) -> BTreeSet<String> {
+    std::fs::read(resident_file(data_dir))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Replace the file at `path` with `names`. Not synced: a process crash
+/// keeps the file, and after power loss a stale or empty one costs only the
+/// warm-up.
+fn write_resident(path: &Path, names: &BTreeSet<String>) -> StorageResult<()> {
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec(names)?)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 /// The revisions of `kg_dir`'s rule and schema catalog files and its rule

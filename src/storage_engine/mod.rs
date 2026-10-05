@@ -188,6 +188,8 @@ pub struct StorageEngine {
     loaded: AtomicUsize,
     /// Knowledge graph loads and unloads since the engine started.
     residency_counts: residency::Counts,
+    /// The knowledge graphs in memory, as last saved for the restart warm-up.
+    resident: parking_lot::Mutex<std::collections::BTreeSet<String>>,
     /// Start of the engine clock that knowledge graph access times count on.
     clock: Instant,
     current_kg: Option<String>,
@@ -287,11 +289,13 @@ impl StorageEngine {
             "persist_open_complete"
         );
 
+        let resident = residency::read_resident(&config.storage.data_dir);
         let mut engine = StorageEngine {
             config,
             knowledge_graphs: DashMap::new(),
             loaded: AtomicUsize::new(0),
             residency_counts: residency::Counts::default(),
+            resident: parking_lot::Mutex::new(resident),
             clock: Instant::now(),
             current_kg: None,
             persist,
@@ -307,6 +311,11 @@ impl StorageEngine {
 
         // Register the knowledge graphs on disk; each loads on first use
         engine.register_knowledge_graphs()?;
+        let known = &engine.knowledge_graphs;
+        engine
+            .resident
+            .get_mut()
+            .retain(|kg| known.contains_key(kg));
 
         // A primary ships every change from here on; a follower takes no
         // client writes from the start.
@@ -461,6 +470,8 @@ impl StorageEngine {
             return Err(e);
         }
 
+        self.record_resident(name, true);
+
         let elapsed_ms = start.elapsed().as_millis() as u64;
         info!(kg = %name, elapsed_ms, "kg_create_complete");
 
@@ -514,6 +525,7 @@ impl StorageEngine {
         // waits for in-flight writes, and writers still holding a handle bail.
         if let Some((_, slot)) = self.knowledge_graphs.remove(name) {
             self.retire_dropped(&slot);
+            self.record_resident(name, false);
             // Retiring waited for every commit to the graph, and later ones
             // fail as not found, so the drop follows all of them in the stream.
             self.replicate(&EngineEvent::DropGraph {
