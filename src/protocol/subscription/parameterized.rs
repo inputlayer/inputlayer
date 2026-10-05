@@ -50,8 +50,8 @@
 //! the lifted query is evaluated at most once per revision. With too few
 //! compute permits for that, a family shares without a probe. It stops when
 //! rounds are slower on average, and probes (or decides) again after some
-//! commits, waiting longer after each failure. While sharing, a view evaluates its
-//! own query now and then to keep that cost current.
+//! commits, waiting longer after each failure. While sharing, a view
+//! evaluates its own query now and then to keep that cost current.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
