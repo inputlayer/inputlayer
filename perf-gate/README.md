@@ -460,7 +460,10 @@ filler rules.
   queries. A shared evaluation counts once, not once per subscriber: the
   unbound view P2's 100 subscribers share, or the shared round of a
   parameterized family of keyed subscribers. So P4 with 10 keyed subscribers
-  shows 11 per write only while each subscriber refreshes on its own. The
+  shows 11 per write only while each subscriber refreshes on its own. A
+  family's cost probe also evaluates the deployed rules and counts once, so
+  keyed phases can show occasional evaluations per write beyond one per
+  refreshed read. The
   columns are empty for a server that does not export the counters.
 
 A delta that does not arrive within 20 s of its write is **late**. A late
