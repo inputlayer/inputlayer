@@ -53,9 +53,10 @@ DIRTY=0
 # Mode flags
 UPDATE_MODE=0
 SKIP_BUILD=0
-# Cargo profile of the server and client binaries (dev, or --debug, uses
-# target/debug: the binaries `cargo test` builds)
+# Cargo profile of the server and client binaries and the target directory
+# it writes them to (--debug: target/debug, the binaries `cargo test` builds)
 PROFILE=release
+PROFILE_DIR=release
 VERBOSE=0
 FILTER=""
 AFFECTED_REF=""
@@ -448,7 +449,7 @@ affected_categories() {
                 categories="16_vectors 30_quantization 31_lsh" ;;
             src/temporal_ops.rs)
                 categories="29_temporal" ;;
-            src/*.rs|src/*/*|Cargo.toml|Cargo.lock|config.toml|ws-protocol/*|scripts/run_snapshot_tests.sh)
+            src/*.rs|src/*/*|Cargo.toml|Cargo.lock|config.toml|ws-protocol/*|ontology-client/*|scripts/run_snapshot_tests.sh)
                 AFFECTED_ALL=1 ;;
             examples/iql/*/*)
                 # A spec changed: run its category
@@ -466,8 +467,7 @@ while [[ $# -gt 0 ]]; do
         -f|--filter)    FILTER="$2"; shift 2 ;;
         -u|--update)    UPDATE_MODE=1; shift ;;
         --skip-build)   SKIP_BUILD=1; shift ;;
-        --profile)      PROFILE="$2"; shift 2 ;;
-        --debug)        PROFILE=dev; shift ;;
+        --debug)        PROFILE=dev; PROFILE_DIR=debug; shift ;;
         --affected)     AFFECTED_REF="$2"; shift 2 ;;
         -j|--jobs)      PARALLEL_JOBS="$2"; shift 2 ;;
         -h|--help)
@@ -479,8 +479,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -u, --update     Update .out files with actual output (forces sequential)"
             echo "  -j, --jobs N     Parallel jobs (default: $PARALLEL_JOBS, 0 or 1 = sequential)"
             echo "  --skip-build     Skip cargo build"
-            echo "  --profile NAME   Cargo profile of the binaries (default: release; dev = target/debug)"
-            echo "  --debug          Same as --profile dev: the binaries cargo test builds"
+            echo "  --debug          Use the target/debug binaries cargo test builds (default: release)"
             echo "  --affected REF   Only run the categories the changes since REF affect"
             echo "  -h, --help       Show this help message"
             exit 0
@@ -508,10 +507,19 @@ if [[ -n "$AFFECTED_REF" ]]; then
         exit 1
     fi
     affected_categories $CHANGED
+    # Keep only categories that still hold a runnable spec (a deleted category,
+    # or one with only _ helpers and _pending_ specs, has nothing to run)
+    RUNNABLE=""
+    for category in $AFFECTED; do
+        if [[ -d "$EXAMPLES_DIR/$category" ]] && [[ -n "$(find "$EXAMPLES_DIR/$category" -name "*.iql" -type f ! -name "_*" ! -name "*_pending_*" | head -1)" ]]; then
+            RUNNABLE="$RUNNABLE $category"
+        fi
+    done
+    AFFECTED="${RUNNABLE# }"
     if [[ "$AFFECTED_ALL" == "1" ]]; then
         echo "Changes since $AFFECTED_REF affect every category - running all snapshot tests."
     elif [[ -z "$AFFECTED" ]]; then
-        echo "No test-relevant changes since $AFFECTED_REF."
+        echo "No runnable specs affected by the changes since $AFFECTED_REF."
         exit 0
     else
         echo "Changes since $AFFECTED_REF affect these categories:"
@@ -544,11 +552,6 @@ if [[ -z "$TARGET_DIR" ]]; then
     TARGET_DIR="$PROJECT_DIR/target"
 fi
 
-# Cargo writes the dev profile to target/debug, every other profile to its name
-PROFILE_DIR="$PROFILE"
-if [[ "$PROFILE" == "dev" ]]; then
-    PROFILE_DIR=debug
-fi
 CLIENT_BIN="$TARGET_DIR/$PROFILE_DIR/inputlayer-client"
 SERVER_BIN="$TARGET_DIR/$PROFILE_DIR/inputlayer-server"
 

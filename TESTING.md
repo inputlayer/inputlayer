@@ -103,8 +103,7 @@ Options:
 | `-v` | Verbose mode with full diffs (forces sequential) |
 | `-u` | Update mode  - regenerate `.iql.out` files |
 | `--skip-build` | Use the binaries already built instead of running `cargo build` |
-| `--profile NAME` | Cargo profile of the binaries to build and run (default `release`; `dev` uses `target/debug`) |
-| `--debug` | Same as `--profile dev`: the `target/debug` binaries `cargo test` builds |
+| `--debug` | Build and run the `target/debug` binaries `cargo test` builds (default: release) |
 | `--affected REF` | Run only the categories the changes since `REF` affect (see [Affected-Only Tests](#affected-only-tests)) |
 
 The PR gate runs `./scripts/run_snapshot_tests.sh --debug --skip-build --affected <base>` right after `make unit-test`, against the binaries that build left in `target/debug`; pushes to `main` run every spec the same way (`.github/workflows/main.yml`).
@@ -304,7 +303,7 @@ File-to-category mapping:
 - `src/vector_ops.rs`, `src/hnsw_index.rs` → `16_vectors`, `30_quantization`, `31_lsh`
 - `src/temporal_ops.rs` → `29_temporal`
 - `examples/iql/<category>/...` → that category
-- any other file under `src/`, `Cargo.toml`, `Cargo.lock`, `config.toml`, `ws-protocol/`, `scripts/run_snapshot_tests.sh` → every spec (a plan or parser change can reach any category; the whole corpus takes about 1.5 min on 4 cores against debug binaries)
+- any other file under `src/`, `Cargo.toml`, `Cargo.lock`, `config.toml`, `ws-protocol/`, `ontology-client/`, `scripts/run_snapshot_tests.sh` → every spec (a plan or parser change can reach any category; the whole corpus takes about 1.5 min on 4 cores against debug binaries)
 - anything else (tests, docs, SDKs) → no specs
 
 ## Makefile Targets
