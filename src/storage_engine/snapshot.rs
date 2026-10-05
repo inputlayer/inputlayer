@@ -8,6 +8,9 @@
 //! - `KnowledgeGraphSnapshot`: immutable; relations share tuples with the
 //!   writer and with other snapshots (see [`Relation`]), so publishing after a
 //!   write costs O(changed chunks), not O(KG)
+//! - Persistent rules are stored definitions, recomputed on read: a snapshot
+//!   holds only base facts, and a read that depends on a rule derives it from
+//!   them in a fresh dataflow (nothing derived is kept between reads)
 //! - Persistent rules are parsed once and shared by every snapshot until they
 //!   change; a query is evaluated with only the rules and relations in its
 //!   dependency closure
@@ -25,7 +28,7 @@ use crate::index_manager::HnswSearchFn;
 use crate::value::{Relation, RelationMap, Tuple};
 use crate::{CompiledProgram, IQLEngine, OptimizationConfig};
 use arc_swap::ArcSwap;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -58,7 +61,7 @@ pub struct KnowledgeGraphSnapshot {
     /// Timestamp when snapshot was created (microseconds since epoch)
     pub timestamp: u64,
 
-    /// Base relation data, including valid materializations of derived relations.
+    /// Base relation data.
     pub input_tuples: Arc<RelationMap>,
 
     /// Persistent rules (AST format)
@@ -67,13 +70,7 @@ pub struct KnowledgeGraphSnapshot {
     /// Number of worker threads for parallel query execution
     pub num_workers: usize,
 
-    /// Names of derived relations that have valid materializations
-    ///
-    /// Rules for these relations are skipped during execution since
-    /// their data is already present in `input_tuples` as base facts.
-    pub materialized_relations: Arc<HashSet<String>>,
-
-    /// The non-materialized rules queries are evaluated with, and the plans
+    /// The persistent rules queries are evaluated with, and the plans
     /// compiled against them. Shared with the previous snapshot when equal.
     persistent: Arc<PersistentRules>,
 
@@ -106,7 +103,7 @@ pub struct KnowledgeGraphSnapshot {
 /// publishes a new value with no plans. Lookups are lock-free: the plan map is
 /// replaced, never modified, and a miss compiles outside any lock.
 pub struct PersistentRules {
-    /// Non-materialized rules formatted as text, one per line.
+    /// The persistent rules formatted as text, one per line.
     prefix: String,
     /// `prefix` parsed once, as every query would parse it.
     rules: Result<Vec<Rule>, String>,
@@ -201,29 +198,15 @@ impl KnowledgeGraphSnapshot {
         rules: Vec<Rule>,
         num_workers: usize,
     ) -> Self {
-        Self::new_with_materializations(input_tuples, rules, num_workers, HashSet::new())
+        Self::with_rules_after(input_tuples, rules, num_workers, None)
     }
 
-    /// Create a new snapshot with materialized relations
-    ///
-    /// Materialized tuples must already be merged into `input_tuples` by the
-    /// caller. `materialized_names` identifies them; their rules are skipped.
-    pub fn new_with_materializations<R: Into<Relation>>(
-        input_tuples: HashMap<String, R>,
-        rules: Vec<Rule>,
-        num_workers: usize,
-        materialized_names: HashSet<String>,
-    ) -> Self {
-        Self::with_rules_after(input_tuples, rules, num_workers, materialized_names, None)
-    }
-
-    /// [`Self::new_with_materializations`], sharing `previous`'s parsed rules
-    /// and compiled plans when its rules are the same.
+    /// [`Self::new_with_workers`], sharing `previous`'s parsed rules and
+    /// compiled plans when its rules are the same.
     pub fn with_rules_after<R: Into<Relation>>(
         input_tuples: HashMap<String, R>,
         rules: Vec<Rule>,
         num_workers: usize,
-        materialized_names: HashSet<String>,
         previous: Option<&Self>,
     ) -> Self {
         let revision = LAST_REVISION.fetch_add(1, Ordering::SeqCst) + 1;
@@ -231,7 +214,7 @@ impl KnowledgeGraphSnapshot {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_micros() as u64);
 
-        let prefix = Self::build_rule_prefix(&rules, &materialized_names);
+        let prefix = Self::build_rule_prefix(&rules);
         let persistent = match previous {
             Some(previous) if previous.persistent.prefix == prefix => {
                 Arc::clone(&previous.persistent)
@@ -249,7 +232,6 @@ impl KnowledgeGraphSnapshot {
             input_tuples: Arc::new(input_tuples),
             rules: Arc::new(rules),
             num_workers,
-            materialized_relations: Arc::new(materialized_names),
             persistent,
             max_result_rows: 0,
             max_query_cost: 0,
@@ -277,20 +259,17 @@ impl KnowledgeGraphSnapshot {
         Self::new(RelationMap::new(), Vec::new())
     }
 
-    /// Build the formatted rule prefix text from rules, excluding materialized ones.
-    fn build_rule_prefix(rules: &[Rule], materialized: &HashSet<String>) -> String {
+    /// Build the formatted rule prefix text from rules.
+    fn build_rule_prefix(rules: &[Rule]) -> String {
         let mut prefix = String::new();
         for rule in rules {
-            if materialized.contains(&rule.head.relation) {
-                continue;
-            }
             prefix.push_str(&super::format_rule(rule));
             prefix.push('\n');
         }
         prefix
     }
 
-    /// Get the cached rule prefix (all non-materialized rules as text).
+    /// Get the cached rule prefix (all persistent rules as text).
     pub fn rule_prefix(&self) -> &str {
         &self.persistent.prefix
     }
@@ -457,9 +436,6 @@ impl KnowledgeGraphSnapshot {
     }
 
     /// Execute a query with persistent rules, returning binary tuples
-    ///
-    /// Rules for materialized relations are skipped - their data is already
-    /// present in `input_tuples` as base facts (injected at snapshot creation).
     pub fn execute_with_rules(&self, program: &str) -> Result<Vec<(i32, i32)>, String> {
         Ok(Self::to_pairs(&self.execute_with_rules_tuples(program)?))
     }
@@ -494,8 +470,9 @@ impl KnowledgeGraphSnapshot {
 
     /// Execute a query with rules, returning tuples AND all derived relation data.
     ///
-    /// Used by the provenance system to pass materialized derived tuples
-    /// to the backward chainer, avoiding expensive re-derivation.
+    /// Used by the provenance system to pass the derived tuples this
+    /// evaluation computed to the backward chainer, avoiding a second
+    /// derivation.
     pub fn execute_with_rules_tuples_and_derived(
         &self,
         program: &str,
@@ -684,16 +661,6 @@ impl KnowledgeGraphSnapshot {
     pub fn is_empty(&self) -> bool {
         self.input_tuples.is_empty()
     }
-
-    /// Get the number of materialized relations in this snapshot
-    pub fn materialized_count(&self) -> usize {
-        self.materialized_relations.len()
-    }
-
-    /// Check if a relation is materialized in this snapshot
-    pub fn is_materialized(&self, relation: &str) -> bool {
-        self.materialized_relations.contains(relation)
-    }
 }
 
 impl std::fmt::Debug for KnowledgeGraphSnapshot {
@@ -704,7 +671,6 @@ impl std::fmt::Debug for KnowledgeGraphSnapshot {
             .field("relations", &self.relation_count())
             .field("tuples", &self.tuple_count())
             .field("rules", &self.rules.len())
-            .field("materialized", &self.materialized_count())
             .finish()
     }
 }
@@ -784,51 +750,10 @@ mod tests {
         assert_eq!(snapshot.tuple_count(), 0);
     }
 
-    // === Materialization Tests ===
-
     #[test]
-    fn test_snapshot_with_materializations() {
-        // Base relation
-        let mut input_tuples = HashMap::new();
-        input_tuples.insert(
-            "edge".to_string(),
-            vec![
-                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
-                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
-            ],
-        );
-
-        // Simulate materialized derived relation
-        let mut materialized_names = HashSet::new();
-        materialized_names.insert("path".to_string());
-
-        // Add "path" tuples as if they were materialized
-        input_tuples.insert(
-            "path".to_string(),
-            vec![
-                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
-                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
-                Tuple::new(vec![Value::Int32(1), Value::Int32(3)]), // transitive closure
-            ],
-        );
-
-        let snapshot = KnowledgeGraphSnapshot::new_with_materializations(
-            input_tuples,
-            Vec::new(), // No rules needed since path is materialized
-            1,
-            materialized_names,
-        );
-
-        assert_eq!(snapshot.materialized_count(), 1);
-        assert!(snapshot.is_materialized("path"));
-        assert!(!snapshot.is_materialized("edge"));
-    }
-
-    #[test]
-    fn test_snapshot_skips_materialized_rules() {
+    fn test_snapshot_evaluates_persistent_rules_on_read() {
         use crate::ast::{Atom, BodyPredicate, Rule, Term};
 
-        // Base relation
         let mut input_tuples = HashMap::new();
         input_tuples.insert(
             "edge".to_string(),
@@ -838,7 +763,7 @@ mod tests {
             ],
         );
 
-        // Create a rule: path(X, Y) <- edge(X, Y)
+        // path(X, Y) <- edge(X, Y)
         let rule = Rule {
             head: Atom {
                 relation: "path".to_string(),
@@ -856,134 +781,12 @@ mod tests {
             })],
         };
 
-        // Case 1: No materialization - rule is executed
-        let snapshot_no_mat = KnowledgeGraphSnapshot::new_with_materializations(
-            input_tuples.clone(),
-            vec![rule.clone()],
-            1,
-            HashSet::new(),
-        );
-
-        // Query for path - should use the rule
-        let results = snapshot_no_mat
+        let snapshot = KnowledgeGraphSnapshot::new(input_tuples, vec![rule]);
+        assert!(!snapshot.input_tuples.contains_key("path"));
+        let results = snapshot
             .execute_with_rules_tuples("result(X, Y) <- path(X, Y)")
             .unwrap();
-        assert_eq!(results.len(), 2); // edge has 2 tuples, so path has 2 tuples
-
-        // Case 2: With materialization - rule is skipped, uses pre-computed data
-        let mut mat_input_tuples = input_tuples.clone();
-        mat_input_tuples.insert(
-            "path".to_string(),
-            vec![
-                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
-                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
-                Tuple::new(vec![Value::Int32(99), Value::Int32(100)]), // Extra tuple from "materialization"
-            ],
-        );
-
-        let mut mat_names = HashSet::new();
-        mat_names.insert("path".to_string());
-
-        let snapshot_with_mat = KnowledgeGraphSnapshot::new_with_materializations(
-            mat_input_tuples,
-            vec![rule],
-            1,
-            mat_names,
-        );
-
-        // Query for path - should use materialized data (3 tuples, not 2)
-        let results = snapshot_with_mat
-            .execute_with_rules_tuples("result(X, Y) <- path(X, Y)")
-            .unwrap();
-        assert_eq!(results.len(), 3); // Uses materialized data, not rule
-    }
-
-    #[test]
-    fn test_snapshot_partial_materialization() {
-        use crate::ast::{Atom, BodyPredicate, Rule, Term};
-
-        // Base relation
-        let mut input_tuples = HashMap::new();
-        input_tuples.insert(
-            "base".to_string(),
-            vec![
-                Tuple::new(vec![Value::Int32(1)]),
-                Tuple::new(vec![Value::Int32(2)]),
-            ],
-        );
-
-        // Two rules: derived1 and derived2
-        let rule1 = Rule {
-            head: Atom {
-                relation: "derived1".to_string(),
-                args: vec![Term::Variable("X".to_string())],
-            },
-            body: vec![BodyPredicate::Positive(Atom {
-                relation: "base".to_string(),
-                args: vec![Term::Variable("X".to_string())],
-            })],
-        };
-
-        let rule2 = Rule {
-            head: Atom {
-                relation: "derived2".to_string(),
-                args: vec![Term::Variable("X".to_string())],
-            },
-            body: vec![BodyPredicate::Positive(Atom {
-                relation: "base".to_string(),
-                args: vec![Term::Variable("X".to_string())],
-            })],
-        };
-
-        // Only derived1 is materialized
-        let mut mat_input_tuples = input_tuples.clone();
-        mat_input_tuples.insert(
-            "derived1".to_string(),
-            vec![
-                Tuple::new(vec![Value::Int32(1)]),
-                Tuple::new(vec![Value::Int32(2)]),
-                Tuple::new(vec![Value::Int32(99)]), // Extra - proves we use materialized
-            ],
-        );
-
-        let mut mat_names = HashSet::new();
-        mat_names.insert("derived1".to_string());
-
-        let snapshot = KnowledgeGraphSnapshot::new_with_materializations(
-            mat_input_tuples,
-            vec![rule1, rule2],
-            1,
-            mat_names,
-        );
-
-        // derived1 uses materialized data (3 tuples)
-        let results1 = snapshot
-            .execute_with_rules_tuples("result(X) <- derived1(X)")
-            .unwrap();
-        assert_eq!(results1.len(), 3);
-
-        // derived2 uses rule (2 tuples)
-        let results2 = snapshot
-            .execute_with_rules_tuples("result(X) <- derived2(X)")
-            .unwrap();
-        assert_eq!(results2.len(), 2);
-    }
-
-    #[test]
-    fn test_materialized_relations_in_debug() {
-        let mut mat_names = HashSet::new();
-        mat_names.insert("path".to_string());
-        mat_names.insert("reachable".to_string());
-
-        let snapshot = KnowledgeGraphSnapshot::new_with_materializations(
-            RelationMap::new(),
-            Vec::new(),
-            1,
-            mat_names,
-        );
-
-        let debug_str = format!("{snapshot:?}");
-        assert!(debug_str.contains("materialized: 2"));
+        assert_eq!(results.len(), 2);
     }
 
     #[test]
@@ -1017,49 +820,6 @@ mod tests {
 
         // Calling again should return the same cached string
         assert_eq!(prefix, snapshot.rule_prefix());
-    }
-
-    #[test]
-    fn test_cached_rule_prefix_skips_materialized() {
-        use crate::ast::{Atom, BodyPredicate, Rule, Term};
-
-        let rule1 = Rule {
-            head: Atom {
-                relation: "derived1".to_string(),
-                args: vec![Term::Variable("X".to_string())],
-            },
-            body: vec![BodyPredicate::Positive(Atom {
-                relation: "base".to_string(),
-                args: vec![Term::Variable("X".to_string())],
-            })],
-        };
-
-        let rule2 = Rule {
-            head: Atom {
-                relation: "derived2".to_string(),
-                args: vec![Term::Variable("X".to_string())],
-            },
-            body: vec![BodyPredicate::Positive(Atom {
-                relation: "base".to_string(),
-                args: vec![Term::Variable("X".to_string())],
-            })],
-        };
-
-        let mut mat = HashSet::new();
-        mat.insert("derived1".to_string());
-
-        let snapshot = KnowledgeGraphSnapshot::new_with_materializations(
-            RelationMap::new(),
-            vec![rule1, rule2],
-            1,
-            mat,
-        );
-
-        let prefix = snapshot.rule_prefix();
-        // derived1 is materialized → excluded from prefix
-        assert!(!prefix.contains("derived1"));
-        // derived2 is NOT materialized → included in prefix
-        assert!(prefix.contains("derived2"));
     }
 
     // === Additional Coverage ===

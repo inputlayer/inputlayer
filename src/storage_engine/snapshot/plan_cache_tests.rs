@@ -25,13 +25,7 @@ fn snapshot_after(
     rule_text: &str,
     previous: Option<&KnowledgeGraphSnapshot>,
 ) -> KnowledgeGraphSnapshot {
-    KnowledgeGraphSnapshot::with_rules_after(
-        edges(data),
-        rules(rule_text),
-        1,
-        HashSet::new(),
-        previous,
-    )
+    KnowledgeGraphSnapshot::with_rules_after(edges(data), rules(rule_text), 1, previous)
 }
 
 const TWO_HOP: &str = "two_hop(X, Z) <- edge(X, Y), edge(Y, Z)";

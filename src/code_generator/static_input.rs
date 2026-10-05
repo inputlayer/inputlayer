@@ -107,7 +107,7 @@ impl CodeGenerator {
         }
     }
 
-    /// Stream already-materialized tuples as a collection.
+    /// Stream tuples already in memory as a collection.
     pub(super) fn collection_from_tuples<G, R: DiffType>(
         scope: &mut G,
         tuples: Vec<Tuple>,

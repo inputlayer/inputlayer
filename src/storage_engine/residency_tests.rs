@@ -265,9 +265,34 @@ fn a_knowledge_graph_with_state_only_in_memory_stays_loaded() {
     storage
         .register_or_update_session_schema_in("a", session)
         .unwrap();
+    let docs = RelationSchema::new("doc")
+        .with_column(ColumnSchema::new("id", SchemaType::Int))
+        .with_column(ColumnSchema::new(
+            "emb",
+            SchemaType::Vector { dim: Some(2) },
+        ));
+    storage.register_schema_in("b", docs).unwrap();
     storage
-        .with_kg_mut("b", |kg| kg.enable_incremental().map_err(|e| e.to_string()))
+        .insert_tuples_into(
+            "b",
+            "doc",
+            vec![Tuple::new(vec![
+                Value::Int64(1),
+                Value::vector(vec![0.0, 1.0]),
+            ])],
+        )
         .unwrap();
+    let index = crate::statement::IndexCreateOptions {
+        name: "doc_emb".into(),
+        relation: "doc".into(),
+        column: "emb".into(),
+        index_type: "hnsw".into(),
+        metric: Some("euclidean".into()),
+        m: None,
+        ef_construction: None,
+        ef_search: None,
+    };
+    storage.create_index_in("b", &index).unwrap();
     assert_eq!(storage.unload_idle_knowledge_graphs(Duration::ZERO), 0);
     assert!(loaded(&storage, "a") && loaded(&storage, "b"));
 }

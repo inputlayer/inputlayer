@@ -2023,9 +2023,9 @@ impl Handler {
             .commit_program(crate::auth::INTERNAL_KG, program, None)
             .map(drop)
             .map_err(|e| {
-                // Durable but possibly unapplied, or possibly recovered on
-                // restart: fail closed until restart settles it.
-                if matches!(e, CommitError::Unknown(_) | CommitError::OutcomeUnknown(_)) {
+                // Possibly recovered on restart: fail closed until restart
+                // settles it.
+                if matches!(e, CommitError::OutcomeUnknown(_)) {
                     self.credentials.remove_user(username);
                 }
                 ProgramError::from(e.into_storage_error())

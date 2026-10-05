@@ -392,13 +392,13 @@ pub enum IRNode {
 
     /// Fused Join+Map+Filter: performs join with inline projection and optional filter.
     ///
-    /// Uses DD's `join_core()` to avoid materializing the full join result,
+    /// Uses DD's `join_core()` to avoid building the full join result,
     /// instead projecting and filtering within the join operator itself.
     /// This is the most impactful memory optimization for join-heavy queries.
     ///
     /// ## Semantics
     /// Equivalent to `Filter(Map(Join(L, R, lk, rk), proj), pred)` but executed
-    /// as a single `join_core()` call that never materializes the intermediate result.
+    /// as a single `join_core()` call that never builds the intermediate result.
     JoinFlatMap {
         /// Left input relation
         left: Box<IRNode>,

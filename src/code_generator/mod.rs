@@ -1501,7 +1501,7 @@ impl CodeGenerator {
                 ..
             } => {
                 // Fused Join+Map+Filter using DD's join_map/join_core to avoid
-                // materializing an intermediate (key, (left, right)) collection.
+                // building an intermediate (key, (left, right)) collection.
                 let left_coll =
                     Self::generate_collection_tuples::<G, R>(scope, left, input_data, live);
                 let right_coll =
@@ -2064,7 +2064,7 @@ impl CodeGenerator {
                     if live_map.contains_key(relation) && !input_data.contains_key(relation) {
                         // The relation exists only as a live DD collection.
                         // For stratified negation, this should not happen (the right side
-                        // of negation must be in a lower stratum and already materialized).
+                        // of negation must be in a lower stratum and already computed).
                         // Log a debug warning if it does occur.
                         if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                             eprintln!(
@@ -2083,7 +2083,7 @@ impl CodeGenerator {
                     Self::collect_tuples_from_ir(input, input_data, live, key_indices, result);
                 }
             }
-            // For complex nodes like Join, execute a sub-dataflow to materialize tuples
+            // For complex nodes like Join, execute a sub-dataflow to collect tuples
             _ => {
                 let tuples = Self::execute_subquery_for_antijoin(node, input_data, live);
                 let mut pacer = Pacer::default();
@@ -2099,7 +2099,7 @@ impl CodeGenerator {
     /// Execute a subquery to collect tuples for antijoin.
     ///
     /// For complex right-side IR nodes (joins, aggregates), we execute the
-    /// sub-dataflow to materialize all tuples. The `live` parameter is passed
+    /// sub-dataflow to collect all tuples. The `live` parameter is passed
     /// through so that derived relations are available during execution.
     ///
     /// It runs while the enclosing dataflow is built, under the same request:
@@ -2117,7 +2117,7 @@ impl CodeGenerator {
         // Execute in a fresh timely context. Note: live collections from the
         // outer scope cannot cross into this new context, so we pass None.
         // For stratified negation, this is correct because the right side
-        // must already be fully materialized in input_data.
+        // must already be fully computed in input_data.
         let results = Arc::new(Mutex::new(Vec::new()));
         let results_clone = Arc::clone(&results);
         let node_clone = node.clone();
@@ -3420,14 +3420,14 @@ impl CodeGenerator {
     }
 
     // Recursive Query Execution
-    /// Execute transitive closure query using iterative materialization
+    /// Execute transitive closure query by iterating to a fixpoint
     ///
     /// This is a convenience method for the common pattern:
     /// tc(x, y) <- edge(x, y).
     /// tc(x, z) <- tc(x, y), edge(y, z).
     ///
     /// Takes edge relation name and computes transitive closure.
-    /// Uses iterative materialization for reliable fixpoint computation.
+    /// Extends the closure one hop per iteration until nothing new appears.
     pub fn execute_transitive_closure(&self, edge_relation: &str) -> Result<Vec<Tuple>, String> {
         use std::collections::{HashMap as StdHashMap, HashSet};
 

@@ -388,15 +388,6 @@ fn commit_failure(kg: &str, queued: &[Queued], error: CommitError) -> RunFailure
             code: super::supervise::stop_code(stop),
             message: stop.message().to_string(),
         },
-        CommitError::Unknown(error) => RunFailure {
-            index: last,
-            code: ErrorCode::OutcomeUnknown,
-            message: format!(
-                "The program's changes reached the write-ahead log but failed to apply \
-                 ({error}); they may or may not be visible until restart. Read the state \
-                 back before retrying."
-            ),
-        },
     }
 }
 
