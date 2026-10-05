@@ -186,8 +186,12 @@ pub fn prove_body(
                         }
                     }
 
-                    // Last resort: enumerate candidates
-                    if matches.is_empty() && ctx.is_derived(&atom.relation) {
+                    // Last resort: enumerate candidates of a relation whose
+                    // tuples the proof cannot look up
+                    if matches.is_empty()
+                        && ctx.is_derived(&atom.relation)
+                        && !ctx.is_complete(&atom.relation)
+                    {
                         matches = enumerate_derived_candidates(
                             &atom.relation,
                             &bound,
@@ -529,6 +533,67 @@ mod tests {
         let results = prove_body(&body, bindings, &ctx, &mut builder, &mut visited, 0)
             .expect("should match via derived_data");
         assert!(!results.is_empty());
+    }
+
+    /// A derived relation the evaluation computed holds all its tuples: a
+    /// subgoal with no match there fails instead of being re-derived from the
+    /// rules (which, for a recursive relation, re-derives its closure).
+    #[test]
+    fn test_computed_relation_is_not_re_derived() {
+        let rules = vec![crate::ast::Rule {
+            head: Atom {
+                relation: "path".into(),
+                args: vec![Term::Variable("X".into()), Term::Variable("Y".into())],
+            },
+            body: vec![pos("edge", vec!["X", "Y"])],
+        }];
+        let data = base_data(vec![("edge", vec![vec![int(1), int(2)]])]);
+        let body = vec![pos("path", vec!["X", "Y"])];
+        let bindings = || {
+            let mut bindings = Bindings::new();
+            bindings.insert("X".into(), int(1));
+            bindings
+        };
+
+        // Without derived data, `path(1, Y)` is enumerated from the rules.
+        let ctx = ProofContext::new(&rules, &data, ProofConfig::default());
+        let results = prove_body(
+            &body,
+            bindings(),
+            &ctx,
+            &mut ProofTreeBuilder::new(),
+            &mut HashSet::new(),
+            0,
+        )
+        .expect("enumerated from the rules");
+        assert_eq!(results[0].0.get("Y"), Some(&int(2)));
+
+        // The evaluation computed `path` and found no `path(1, _)`.
+        let derived: RelationMap = [("path".to_string(), Relation::new())].into();
+        let ctx =
+            ProofContext::new(&rules, &data, ProofConfig::default()).with_derived_data(&derived);
+        let result = prove_body(
+            &body,
+            bindings(),
+            &ctx,
+            &mut ProofTreeBuilder::new(),
+            &mut HashSet::new(),
+            0,
+        );
+        assert!(result.is_err(), "computed path has no path(1, _)");
+
+        // Likewise for a materialized relation, whose tuples are base data.
+        let ctx = ProofContext::new(&rules, &data, ProofConfig::default())
+            .with_materialized(["path".to_string()].into());
+        let result = prove_body(
+            &body,
+            bindings(),
+            &ctx,
+            &mut ProofTreeBuilder::new(),
+            &mut HashSet::new(),
+            0,
+        );
+        assert!(result.is_err(), "materialized path has no path(1, _)");
     }
 
     #[test]

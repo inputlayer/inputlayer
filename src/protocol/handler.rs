@@ -587,6 +587,9 @@ mod pinned_proof_tests;
 mod why_not_tests;
 
 #[cfg(test)]
+mod recursive_proof_tests;
+
+#[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod expect_revision_tests;
 
@@ -801,7 +804,8 @@ impl ProofSnapshot {
             config.clone(),
             index_info,
         )
-        .with_derived_data(&derived_data);
+        .with_derived_data(&derived_data)
+        .with_materialized(self.snapshot.materialized_relations.as_ref().clone());
 
         // Build wire rows and proof trees
         let schema = extract_query_schema(query, &result_tuples);

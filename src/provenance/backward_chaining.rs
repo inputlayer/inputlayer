@@ -43,6 +43,8 @@ pub struct ProofContext<'a> {
     pub config: ProofConfig,
     /// HNSW index metadata: index_name -> info
     pub index_info: HashMap<String, IndexProofInfo>,
+    /// Derived relations whose valid materializations `base_data` holds.
+    pub materialized: HashSet<String>,
 }
 
 impl<'a> ProofContext<'a> {
@@ -67,12 +69,20 @@ impl<'a> ProofContext<'a> {
             derived_relations,
             config,
             index_info,
+            materialized: HashSet::new(),
         }
     }
 
     /// Set derived/materialized relation data for candidate lookup.
     pub fn with_derived_data(mut self, derived_data: &'a RelationMap) -> Self {
         self.derived_data = Some(ProofRelations::new(derived_data));
+        self
+    }
+
+    /// Name the derived relations whose valid materializations `base_data`
+    /// holds.
+    pub fn with_materialized(mut self, materialized: HashSet<String>) -> Self {
+        self.materialized = materialized;
         self
     }
 
@@ -89,6 +99,18 @@ impl<'a> ProofContext<'a> {
     /// Check if a relation is derived (has rules) vs base (only facts).
     pub fn is_derived(&self, relation: &str) -> bool {
         self.derived_relations.contains(relation)
+    }
+
+    /// Whether lookups see every tuple of derived `relation`: the evaluation
+    /// behind the proof computed it, or it is materialized. A subgoal on such
+    /// a relation with no matching tuple has no derivation, so proof search
+    /// does not try to re-derive one from the rules.
+    pub fn is_complete(&self, relation: &str) -> bool {
+        self.materialized.contains(relation)
+            || self
+                .derived_data
+                .as_ref()
+                .is_some_and(|derived| derived.get(relation).is_some())
     }
 
     /// Get all rules whose head matches the given relation name.
