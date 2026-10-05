@@ -363,6 +363,29 @@ async fn a_restarted_follower_resumes_from_its_saved_position() {
     caught_up(&follower).await;
     assert_eq!(converge(&primary, &follower, "?edge(X, Y)").await.len(), 3);
     assert_eq!(status_of(&follower).await["follower"]["resyncs"], 0);
+
+    // Restarted against an idle primary, both sides report the saved
+    // position as caught up without waiting for another commit.
+    follower.stop().await.expect("kill follower");
+    follower.restart().await.expect("restart follower");
+    let head = status_of(&primary).await["primary"]["head_lsn"].clone();
+    let status = caught_up(&follower).await;
+    assert_eq!(status["follower"]["applied_lsn"], head, "{status}");
+    assert_eq!(status["follower"]["resyncs"], 0, "{status}");
+    let deadline = tokio::time::Instant::now() + CONVERGE;
+    loop {
+        let status = status_of(&primary).await;
+        let followers = status["primary"]["followers"].as_array().unwrap();
+        if followers.len() == 1 && followers[0]["lag_events"] == 0 {
+            assert_eq!(followers[0]["acked_lsn"], head, "{status}");
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the primary never saw the restarted follower caught up: {status}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

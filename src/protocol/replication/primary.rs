@@ -113,6 +113,10 @@ async fn serve(handler: Arc<Handler>, log: Arc<ReplicationLog>, socket: WebSocke
     let resync = !log.can_serve(stream_id, lsn);
     let status = handler.replication_status();
     let id = status.follower_connected(&name, &addr, resync);
+    if !resync {
+        // A tailing follower already holds everything up to its hello's LSN.
+        status.follower_acked(id, lsn);
+    }
     info!(follower = %name, %addr, stream_id, lsn, resync, "replication_follower_connected");
 
     // Acks arrive while events go out: read them on their own task.
