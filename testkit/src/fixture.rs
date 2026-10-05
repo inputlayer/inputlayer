@@ -61,7 +61,7 @@ impl Fixture {
     /// Create the knowledge graph on `engine` and run every statement.
     ///
     /// Consecutive statements commit together as one program of up to
-    /// [`PROGRAM_BYTES`]; a meta command (`.index create ...`) runs alone.
+    /// `PROGRAM_BYTES` (256 KiB); a meta command (`.index create ...`) runs alone.
     pub async fn install(&self, engine: &Engine) -> Checked<()> {
         let mut admin = WsClient::connect(engine, "default").await?;
         admin

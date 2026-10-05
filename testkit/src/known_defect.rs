@@ -9,8 +9,17 @@
 //! A [`Reproduction::Racy`] defect depends on thread timing: its probe retries
 //! within a bounded budget and a run that does not reproduce it passes with a
 //! `NOT REPRODUCED` note instead of XPASS, so the suite never flakes.
+//!
+//! When [`XFAIL_LOG_ENV`] names a file, every XFAIL and NOT REPRODUCED line
+//! is also appended to it, so a run can print the list of open expected
+//! failures at its end (`make unit-test`, `make e2e-reactive`).
+
+use std::io::Write;
 
 use crate::contract::{Checked, Violation};
+
+/// Environment variable naming the file expected-failure lines append to.
+pub const XFAIL_LOG_ENV: &str = "INPUTLAYER_XFAIL_LOG";
 
 /// Whether a defect shows on every run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,19 +53,61 @@ impl KnownDefect {
         } = self;
         match outcome {
             Err(violation) if (self.signature)(&violation) => {
-                println!("XFAIL [{plan_item}] {summary}: {violation}");
+                record(&format!("XFAIL [{plan_item}] {summary}: {violation}"));
             }
             Err(violation) => panic!(
                 "[{plan_item}] expected failure '{summary}' hit an unrelated violation: {violation}"
             ),
-            Ok(()) if self.reproduction == Reproduction::Racy => println!(
+            Ok(()) if self.reproduction == Reproduction::Racy => record(&format!(
                 "NOT REPRODUCED [{plan_item}] {summary}: racy defect not observed this run"
-            ),
+            )),
             Ok(()) => panic!(
                 "XPASS [{plan_item}] {summary}: the contract now holds. Remove this \
                  known-defect marker so the scenario becomes a required pass."
             ),
         }
+    }
+
+    /// Judge `outcome` against defects that stand in front of one another:
+    /// `defects[0]` is the first one the check runs into, and once it is
+    /// fixed the next one's violation shows. The first defect whose signature
+    /// matches is the expected failure; when the contract holds, the last
+    /// defect judges it (XPASS unless it is racy).
+    ///
+    /// # Panics
+    /// When `defects` is empty, on XPASS, or on a violation none of them
+    /// produces.
+    pub fn judge_first(defects: &[Self], outcome: Checked<()>) {
+        let last = defects.last().expect("at least one known defect");
+        let defect = match &outcome {
+            Err(violation) => defects
+                .iter()
+                .find(|defect| (defect.signature)(violation))
+                .unwrap_or(last),
+            Ok(()) => last,
+        };
+        defect.judge(outcome);
+    }
+}
+
+/// Print an expected-failure line and append it to the [`XFAIL_LOG_ENV`] file.
+/// This crate's own unit tests only print, so the list holds real XFAILs.
+fn record(line: &str) {
+    println!("{line}");
+    if cfg!(test) {
+        return;
+    }
+    let Some(path) = std::env::var_os(XFAIL_LOG_ENV) else {
+        return;
+    };
+    let appended = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut file| file.write_all(format!("{line}\n").as_bytes()));
+    if let Err(e) = appended {
+        let path = std::path::Path::new(&path).display();
+        eprintln!("cannot append to {XFAIL_LOG_ENV} file {path}: {e}");
     }
 }
 
@@ -95,5 +146,34 @@ mod tests {
     #[should_panic(expected = "unrelated violation")]
     fn test_other_violation_is_real_failure() {
         DEFECT.judge(Err(Violation::Transport("closed".into())));
+    }
+
+    const LATER: KnownDefect = KnownDefect {
+        plan_item: "X01",
+        summary: "the defect behind the first one",
+        signature: |v| matches!(v, Violation::UnexpectedWork(_)),
+        reproduction: Reproduction::Deterministic,
+    };
+
+    #[test]
+    fn test_first_defect_in_front_is_expected_failure() {
+        KnownDefect::judge_first(&[DEFECT, LATER], Err(Violation::Timeout("delta".into())));
+    }
+
+    #[test]
+    fn test_defect_behind_shows_once_the_first_is_fixed() {
+        KnownDefect::judge_first(&[DEFECT, LATER], Err(Violation::UnexpectedWork("x".into())));
+    }
+
+    #[test]
+    #[should_panic(expected = "XPASS [X01]")]
+    fn test_holding_contract_is_unexpected_pass_of_the_last_defect() {
+        KnownDefect::judge_first(&[DEFECT, LATER], Ok(()));
+    }
+
+    #[test]
+    #[should_panic(expected = "[X01] expected failure")]
+    fn test_violation_of_no_defect_is_real_failure() {
+        KnownDefect::judge_first(&[DEFECT, LATER], Err(Violation::Transport("closed".into())));
     }
 }

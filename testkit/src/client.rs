@@ -81,6 +81,10 @@ pub struct QueryResult {
     /// The reply's `revision`: for a write, the revision its changes are
     /// visible at. Queries carry none until V9 (#315).
     pub revision: Option<u64>,
+    /// The reply's `views_at`: for a write acknowledged before the deployed
+    /// views include it (a rule rebuild in progress), the revision they have
+    /// reached (V14 #320). `None` when the views include the write.
+    pub views_at: Option<u64>,
     /// Effective counts of the fact statements a write committed
     /// (`statements`), in program order.
     pub statements: Vec<Value>,
@@ -109,6 +113,7 @@ impl QueryResult {
             at,
             subscribed_revision: header["subscribed"]["revision"].as_u64(),
             revision: header["revision"].as_u64(),
+            views_at: header["views_at"].as_u64(),
             statements: header["statements"].as_array().cloned().unwrap_or_default(),
         }
     }
@@ -477,6 +482,19 @@ impl WsClient {
         self.send(json!({"type": "execute", "program": program, "at": revision}))
             .await?;
         self.result().await
+    }
+
+    /// [`Self::execute_at`] returning the engine's refusal with its code
+    /// (`revision_compacted` once V13 #316 retains a window) instead of a
+    /// violation.
+    pub async fn try_execute_at(
+        &mut self,
+        program: &str,
+        revision: u64,
+    ) -> Checked<Result<QueryResult, Refusal>> {
+        self.send(json!({"type": "execute", "program": program, "at": revision}))
+            .await?;
+        self.try_result().await
     }
 
     /// Send `program` without waiting; returns its request id (for

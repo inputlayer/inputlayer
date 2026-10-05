@@ -146,9 +146,11 @@ INPUTLAYER_SCENARIO_VIEWS=maintained cargo test --test scenarios  # refused unti
 
 Modules: `reactive`, `stream`, `delivery`, `saturation` and `wire` (the agent
 path below), `harness` (the testkit pieces scenarios build on, checked against
-a real engine), and the catalogue scenarios `lifecycle`, `claims`,
-`retraction`, `restart` and `tenancy` (below). The suite runs in about 25 s in
-debug on 4 cores. `make test-all` and `make ci-test-all` run it once, in
+a real engine), the catalogue scenarios `lifecycle`, `claims`, `retraction`,
+`restart` and `tenancy` (below), and the scenarios that hold the milestone 9
+contract as expected failures, `reads`, `consistency`, `fanout`,
+`subscribe_rules`, `generations` and `burst` (below). The suite runs in about
+25 s in debug on 4 cores. `make test-all` and `make ci-test-all` run it once, in
 release through `make e2e-reactive`: their debug unit stage runs every other
 workspace test without the scenarios binary.
 
@@ -178,6 +180,8 @@ workspace test without the scenarios binary.
   `Expect` that can also pin `expect_epoch`) return the engine's `Refusal`
   with its structured `code` instead of a violation, for scenarios that assert
   how a request is refused.
+  `try_execute_at` does the same for a read `at` a revision, and
+  `QueryResult::views_at` is a write acknowledgement's `views_at` (V14 #320).
 - `Fixture::shop_pack(Size)` installs one knowledge graph whose rules cover
   join, comparison, negation, recursion, negation over recursion and an
   aggregate (`Size::Vector` adds embeddings, the `emb_idx` HNSW index and the
@@ -230,6 +234,33 @@ its own graph (S15 refuses its access to the other graph instead). A
 permission refusal carries no structured `code` today; S15 asserts
 `access_denied` as an expected failure (`KnownDefect`, #364), so it fails
 loudly once the code is sent.
+
+### Expected-failure scenarios
+
+The scenarios whose contract is milestone 9's: each runs the part that holds
+today as a required pass and asserts the rest as an expected failure
+(`Reproduction::Deterministic`) naming the issue that makes it hold. When that
+issue lands the XFAIL turns into an XPASS, which fails the run until the
+marker is removed and the part becomes required.
+
+| Scenario | Test | Required today | Expected failure (issue) |
+|----------|------|----------------|--------------------------|
+| S2 one-row view read is a lookup | `reads::s2_one_row_view_read_is_a_lookup` | rows of 50 `eligible` reads and the recursive `related` | no rule evaluated, every read served from a view (V1 #308 counters, then V9 #315) |
+| S3 ad-hoc query joins facts and views | `reads::s3_ad_hoc_query_joins_facts_and_views` | rows equal the question asked of base relations; a session rule joins the `offer` view | only the query's own work (V1 #308, then V9 #315) |
+| S4 subscription and query agree at a revision | `consistency::s4_subscription_and_query_agree_at_a_revision` | exact deltas at each write's revision | query replies carry `revision` (V9 #315); `at: r` reads answer at r, `at: s` equals the snapshot, a compacted revision is refused `revision_compacted` (V13 #316) |
+| S5 many agents, each hears its key | `fanout::s5_many_agents_each_hear_only_their_key` | 200 keyed and 10 unkeyed agents: exactly the touched keys and the unkeyed agents hear a write, nobody hears a write that changes no row | one maintenance pass per commit, no rule evaluated by refreshes (V1 #308, then V10 #317) |
+| S6 subscribe only to a deployed rule | `subscribe_rules::s6_subscribe_to_a_query_is_refused` | the same bodies answer as queries; a rule subscription still works | `.subscribe` of a join or a filtered view refused `invalid_request`, `deploy a rule first` (V11 #318) |
+| S8 rule replaced while subscribed | `generations::s8_rule_replaced_while_subscribed` | one exact old-vs-new delta at the replacement's revision, concurrent reads see one generation, `.rule remove` is one exact delta | dropping `link` under `related` refused with `conflict` naming the dependents (V7 #314) |
+| S17 write burst, read-your-writes | `burst::s17_write_burst_reads_its_writes` | 4 writers x 100 writes, each read back on two connections; the agent hears every row once, through a rule rebuild | the rebuild's acknowledgement carries `views_at` (V14 #320) |
+
+A check that runs into two issues one after the other (the counters do not
+exist before V1, and once they do they show the work V9 or V10 removes) is
+judged with `KnownDefect::judge_first`, so each stage is an XFAIL of its own
+issue. The counter checks and S4's `revision` are asserted for the target
+contract, which the default `recompute` mode never reaches; until V20 removes
+it, a `recompute` run of the matrix keeps those markers when the `maintained`
+run flips. Latency halves (S2's p50 at lab size, S17's 1,000-write shape) are
+the perf tier's B1/B2 and B15 on the benchmark host.
 
 ### Reactive agent path
 
@@ -290,13 +321,17 @@ nightly workflow exists, `make e2e-reactive` stands in for it and passes
 quarantined for a rare engine hang in `.index create` (#377).
 
 Tracked defects run as **expected failures** through
-`inputlayer_testkit::KnownDefect`, naming the issue that fixes them (today:
+`inputlayer_testkit::KnownDefect`, naming the issue that fixes them (the
+milestone 9 ones are listed under Expected-failure scenarios;
 `harness::counters_scrape_the_running_engine`, #308;
 `tenancy::s15_tenants_and_scoped_keys_are_isolated`, #364;
 `restart::s12_restart_mid_scenario_preserves_revisions`, #380). Each asserts the
 correct contract; its own violation passes as `XFAIL`, any other violation
 fails, and a holding contract fails as `XPASS` so the marker is removed and
-the scenario becomes required when the issue lands.
+the scenario becomes required when the issue lands. `make unit-test`,
+`make ci-test-all` and `make e2e-reactive` print the open `XFAIL` list when
+the run ends (`make xfail-list` prints the last run's): `KnownDefect` appends
+each line to the file named by `INPUTLAYER_XFAIL_LOG`.
 
 Not yet covered by this pipeline (each is added when the work that enables it
 lands):
