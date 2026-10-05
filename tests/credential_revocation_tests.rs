@@ -568,14 +568,22 @@ async fn revocation_fences_a_subscription_held_at_the_result_cap() {
 }
 
 /// A completed `.why` proof must still pass the credential fence before output.
-/// Use the current-thread runtime so the thread-local trace subscriber also
-/// observes the server task, and revoke synchronously at its output boundary.
+/// Use the current-thread runtime so the server task runs on the test's thread,
+/// and revoke synchronously at its output boundary. The trace subscriber is
+/// global and acts only on that thread: a thread-local one is the only
+/// dispatcher, so another test's thread reaching an event first caches it as
+/// disabled everywhere, and the hook would never run.
 #[tokio::test]
 async fn revocation_during_a_proof_withholds_it() {
+    use std::sync::Mutex;
+    use std::thread::ThreadId;
     use tracing::field::{Field, Visit};
     use tracing_subscriber::prelude::*;
 
-    struct RevokeBeforeOutput(Arc<Handler>);
+    /// The thread whose next execution end revokes the handler's `bob-why`.
+    static ARMED: Mutex<Option<(ThreadId, Arc<Handler>)>> = Mutex::new(None);
+
+    struct RevokeBeforeOutput;
 
     #[derive(Default)]
     struct ExecutionEnd {
@@ -605,10 +613,17 @@ async fn revocation_during_a_proof_withholds_it() {
         ) {
             let mut end = ExecutionEnd::default();
             event.record(&mut end);
-            if end.matched {
-                assert!(end.succeeded, "proof evaluation failed before the fence");
-                self.0.handle_apikey_revoke("bob-why").unwrap();
+            if !end.matched {
+                return;
             }
+            let mut armed = ARMED.lock().unwrap();
+            if !matches!(&*armed, Some((thread, _)) if *thread == std::thread::current().id()) {
+                return;
+            }
+            let (_, handler) = armed.take().unwrap();
+            drop(armed);
+            assert!(end.succeeded, "proof evaluation failed before the fence");
+            handler.handle_apikey_revoke("bob-why").unwrap();
         }
     }
 
@@ -628,9 +643,16 @@ async fn revocation_during_a_proof_withholds_it() {
     // The event runs after evaluation but before any response frame is enqueued.
     // Blocking there until revocation completes removes assumptions about proof
     // duration, scheduling, and the time needed to persist the credential change.
-    let subscriber =
-        tracing_subscriber::registry().with(RevokeBeforeOutput(Arc::clone(&server.handler)));
-    let _guard = tracing::subscriber::set_default(subscriber);
+    // Enable only the execution's events, so other tests' code stays untraced.
+    let execution = tracing_subscriber::filter::Targets::new().with_target(
+        "inputlayer::protocol::rest::handlers::ws::execute",
+        tracing::Level::INFO,
+    );
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry().with(RevokeBeforeOutput.with_filter(execution)),
+    )
+    .expect("no other global subscriber");
+    *ARMED.lock().unwrap() = Some((std::thread::current().id(), Arc::clone(&server.handler)));
     client
         .send(json!({"type": "execute", "program": proof}))
         .await;

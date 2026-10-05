@@ -199,6 +199,8 @@ pub struct Handler {
     /// Permits of standing-query sharing probes, apart from the compute
     /// permits so that a probe never takes one a query waits for.
     probe_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Whether standing-query families share whatever their rounds cost.
+    share_regardless_of_cost: bool,
     /// Memory held by the computations of every request in flight.
     query_memory: Arc<QueryMemoryPool>,
     /// Accumulated timing histogram buckets for Prometheus export.
@@ -1002,6 +1004,7 @@ impl Handler {
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
+            share_regardless_of_cost: false,
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
@@ -1053,6 +1056,7 @@ impl Handler {
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
+            share_regardless_of_cost: false,
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
@@ -1136,6 +1140,21 @@ impl Handler {
         self.query_semaphore = Arc::new(tokio::sync::Semaphore::new(permits));
         self.compute_permits = permits;
         self
+    }
+
+    /// This handler's standing-query families sharing whenever their views
+    /// outnumber the compute permits, whatever their rounds cost: they still
+    /// probe, and still stop sharing on a failed round. For tests and
+    /// benchmarks that need sharing to happen whatever the host's timing.
+    #[cfg(feature = "test-support")]
+    pub fn with_sharing_regardless_of_cost(mut self) -> Self {
+        self.share_regardless_of_cost = true;
+        self
+    }
+
+    /// Whether standing-query families share whatever their rounds cost.
+    pub(crate) fn shares_regardless_of_cost(&self) -> bool {
+        self.share_regardless_of_cost
     }
 
     /// Standing-query counters.
