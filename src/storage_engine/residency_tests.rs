@@ -267,13 +267,19 @@ fn a_knowledge_graph_with_state_only_in_memory_stays_loaded() {
         .unwrap();
     let docs = RelationSchema::new("doc")
         .with_column(ColumnSchema::new("id", SchemaType::Int))
-        .with_column(ColumnSchema::new("emb", SchemaType::Vector { dim: Some(2) }));
+        .with_column(ColumnSchema::new(
+            "emb",
+            SchemaType::Vector { dim: Some(2) },
+        ));
     storage.register_schema_in("b", docs).unwrap();
     storage
         .insert_tuples_into(
             "b",
             "doc",
-            vec![Tuple::new(vec![Value::Int64(1), Value::vector(vec![0.0, 1.0])])],
+            vec![Tuple::new(vec![
+                Value::Int64(1),
+                Value::vector(vec![0.0, 1.0]),
+            ])],
         )
         .unwrap();
     let index = crate::statement::IndexCreateOptions {
