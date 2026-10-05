@@ -135,8 +135,9 @@ On a follower it reports:
 - `applied_lsn` and `primary_head_lsn`
 - `lag_events`
 - `last_contact_ms`: time since the primary was last heard
-- `resyncs` (begun), `resync_failures` (ended before streaming started)
-  and `reconnects`, counted since the follower started
+- `resyncs` (begun), `resync_failures` (ended before the follower caught
+  up with the primary's head) and `reconnects`, counted since the follower
+  started
 - `last_error`
 
 ```bash

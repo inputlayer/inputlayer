@@ -111,7 +111,7 @@ pub struct FollowerReport {
     pub last_contact_ms: Option<u64>,
     /// Resyncs begun.
     pub resyncs: u64,
-    /// Resyncs that ended before the checkpoint was applied.
+    /// Resyncs that ended before the follower caught up with the primary's head.
     pub resync_failures: u64,
     pub reconnects: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
