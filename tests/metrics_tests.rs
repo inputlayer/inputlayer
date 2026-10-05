@@ -153,16 +153,26 @@ async fn error_replies_and_rate_limits_are_counted() {
     let missing = json!({"type": "execute", "id": "q", "program": "?no_such_relation(X)"});
     ws.send(Message::Text(missing.to_string())).await.unwrap();
     let reply = recv(&mut ws, &["result", "error"]).await;
-    // Two more messages in the same second: the second is over the limit
-    for id in ["p1", "p2"] {
-        let ping = json!({"type": "ping", "id": id});
+    // The one-second window opens with the connection, and a slow login can
+    // close it before the pings arrive. Seven pings in a burst put more than
+    // three in one window wherever a window boundary falls.
+    const PINGS: usize = 7;
+    for i in 0..PINGS {
+        let ping = json!({"type": "ping", "id": format!("p{i}")});
         ws.send(Message::Text(ping.to_string())).await.unwrap();
     }
-    let limited = recv(&mut ws, &["error"]).await;
-    assert_eq!(limited["code"], "rate_limited", "{limited}");
+    let mut limited = 0;
+    for _ in 0..PINGS {
+        let reply = recv(&mut ws, &["pong", "error"]).await;
+        if reply["type"] == "error" {
+            assert_eq!(reply["code"], "rate_limited", "{reply}");
+            limited += 1;
+        }
+    }
+    assert!(limited > 0, "no ping was rate limited");
     eventually("rate limit counted", || {
-        metrics.rejections(Rejection::WsRateLimit) == 1
-            && metrics.ws_errors(Some(ErrorCode::RateLimited)) == 1
+        metrics.rejections(Rejection::WsRateLimit) == limited
+            && metrics.ws_errors(Some(ErrorCode::RateLimited)) == limited
     })
     .await;
     if reply["type"] == "error" {
