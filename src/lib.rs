@@ -308,6 +308,58 @@ pub type ExecutionOutput =
 /// Magic Sets seed facts, by relation.
 type MagicSeeds = Vec<(String, Vec<Tuple>)>;
 
+/// What the Magic Sets rewrite of a program added.
+#[derive(Clone, Default)]
+struct MagicRewrite {
+    /// Seed facts injected into the inputs.
+    seeds: MagicSeeds,
+    /// Adorned relations, each with the relation it restricts.
+    adorned: Vec<(String, String)>,
+}
+
+/// Make each adorned relation's tuples readable under the relation it
+/// restricts, unless the program also evaluated that relation unrestricted.
+///
+/// Callers of the derived relations look them up by the names in the
+/// original rules (proof search does), while a bound recursive query
+/// evaluates only the adorned copy. Every adorned tuple is a tuple of the
+/// original. A relation with one adornment shares its tuples; several are
+/// merged without duplicates.
+fn expose_adorned_relations(derived: &mut RelationMap, adorned: &[(String, String)]) {
+    let mut by_original: HashMap<&str, Vec<&Relation>> = HashMap::new();
+    for (adorned, original) in adorned {
+        if derived.contains_key(original) {
+            continue;
+        }
+        if let Some(tuples) = derived.get(adorned) {
+            by_original
+                .entry(original.as_str())
+                .or_default()
+                .push(tuples);
+        }
+    }
+    let exposed: Vec<(String, Relation)> = by_original
+        .into_iter()
+        .map(|(original, parts)| {
+            let relation = match parts.as_slice() {
+                [only] => (*only).clone(),
+                _ => {
+                    let mut seen = std::collections::HashSet::new();
+                    let mut merged = Relation::new();
+                    for tuple in parts.iter().flat_map(|part| part.iter()) {
+                        if seen.insert(tuple) {
+                            merged.push(tuple.clone());
+                        }
+                    }
+                    merged
+                }
+            };
+            (original.to_string(), relation)
+        })
+        .collect();
+    derived.extend(exposed);
+}
+
 fn inject_magic_seeds(inputs: &mut RelationMap, seeds: &MagicSeeds) {
     for (relation, tuples) in seeds {
         inputs
@@ -324,7 +376,7 @@ struct Staged {
     unoptimized_ir_nodes: Vec<IRNode>,
     /// Per IR node, the relation it recursively defines, if any.
     recursive_info: Vec<Option<String>>,
-    magic_seeds: MagicSeeds,
+    magic: MagicRewrite,
 }
 
 /// A program compiled by [`IQLEngine::compile_program`]: rewritten, lowered to
@@ -766,21 +818,21 @@ impl IQLEngine {
     /// Rewrites recursive rules so that the fixpoint computation is restricted to
     /// only the tuples demanded by the query's constant bindings. For example,
     /// `?reach(1, Y)` will only compute reachability from node 1.
-    /// Returns the seed facts it added to the inputs.
-    fn apply_magic_sets(&mut self) -> MagicSeeds {
+    /// Returns the seed facts it added to the inputs and the adorned relations.
+    fn apply_magic_sets(&mut self) -> MagicRewrite {
         if !self.optimization_config.enable_magic_sets {
-            return MagicSeeds::new();
+            return MagicRewrite::default();
         }
         if let Some(program) = &self.program {
             let recursive_rels = magic_sets::find_recursive_relations(program);
             if recursive_rels.is_empty() {
-                return MagicSeeds::new();
+                return MagicRewrite::default();
             }
 
             let bindings =
                 magic_sets::MagicSetRewriter::detect_query_bindings(program, &recursive_rels);
             if bindings.is_empty() {
-                return MagicSeeds::new();
+                return MagicRewrite::default();
             }
 
             let (rewritten, magic_seeds) =
@@ -825,9 +877,12 @@ impl IQLEngine {
             self.has_recursion = recursion::has_recursion(&rewritten);
             self.strata = recursion::stratify(&rewritten);
             self.program = Some(rewritten);
-            return magic_seeds;
+            return MagicRewrite {
+                seeds: magic_seeds,
+                adorned: magic_sets::MagicSetRewriter::adorned_relations(&bindings),
+            };
         }
-        MagicSeeds::new()
+        MagicRewrite::default()
     }
 
     /// Build IR from the parsed program
@@ -1599,7 +1654,7 @@ impl IQLEngine {
             .clone_from(&compiled.semiring_annotations);
         self.has_recursion = compiled.has_recursion;
         self.strata.clone_from(&compiled.strata);
-        inject_magic_seeds(&mut self.input_tuples, &compiled.staged.magic_seeds);
+        inject_magic_seeds(&mut self.input_tuples, &compiled.staged.magic.seeds);
         let collector = execution::TimingCollector::new(self.timing_mode);
         let source_len = compiled.program.rules.len();
         info!(rules = source_len, "engine_execute_compiled_start");
@@ -1638,7 +1693,7 @@ impl IQLEngine {
         info!(source_len, sip_ms, "engine_sip_complete");
         collector.breakdown.sip_us = sip_us;
 
-        let (magic_seeds, magic_us) = collector.time(|| self.apply_magic_sets());
+        let (magic, magic_us) = collector.time(|| self.apply_magic_sets());
         let magic_ms = magic_us / 1000;
         info!(source_len, magic_ms, "engine_magic_sets_complete");
         collector.breakdown.magic_sets_us = magic_us;
@@ -1676,7 +1731,7 @@ impl IQLEngine {
         Ok(Staged {
             unoptimized_ir_nodes,
             recursive_info,
-            magic_seeds,
+            magic,
         })
     }
 
@@ -1692,7 +1747,7 @@ impl IQLEngine {
         let Staged {
             mut unoptimized_ir_nodes,
             recursive_info,
-            ..
+            magic,
         } = staged;
         let rule_heads = self.get_rule_heads();
 
@@ -1894,6 +1949,7 @@ impl IQLEngine {
             total_ms = exec_start.elapsed().as_millis() as u64,
             "engine_execute_complete"
         );
+        expose_adorned_relations(&mut accumulated_results, &magic.adorned);
         let timing = collector.finish();
         Ok((last_result, accumulated_results, timing))
     }
@@ -3526,6 +3582,80 @@ mod tests {
             .unwrap();
         assert!(last_result_truncated());
         assert_eq!(derived["__query__"].to_vec(), rows);
+    }
+
+    /// An engine over the cyclic graph 1 -> 2 -> 3 -> 1, 3 -> 4, and 5 -> 1.
+    fn closure_engine() -> IQLEngine {
+        let mut engine = IQLEngine::new();
+        engine.add_tuples(
+            "edge",
+            [(1, 2), (2, 3), (3, 1), (3, 4), (5, 1)]
+                .into_iter()
+                .map(|(s, d)| Tuple::new(vec![Value::Int64(s), Value::Int64(d)]))
+                .collect(),
+        );
+        engine
+    }
+
+    fn sorted(relation: &Relation) -> Vec<Tuple> {
+        let mut tuples = relation.to_vec();
+        tuples.sort();
+        tuples
+    }
+
+    const CLOSURE: &str = "reach(X, Y) <- edge(X, Y)\n\
+                           reach(X, Z) <- reach(X, Y), edge(Y, Z)\n";
+
+    /// A bound recursive query evaluates only Magic Sets' adorned copy of
+    /// the relation; the derived relations name its tuples by the original
+    /// relation too, where proof search looks them up.
+    #[test]
+    fn test_derived_exposes_adorned_relation_under_original_name() {
+        let (rows, derived) = closure_engine()
+            .execute_tuples_with_derived(&format!(
+                "{CLOSURE}__query__(_c0, Y) <- reach(_c0, Y), _c0 = 1"
+            ))
+            .unwrap();
+        assert_eq!(rows.len(), 4);
+        assert_eq!(sorted(&derived["reach"]), sorted(&derived["reach_bf"]));
+        assert_eq!(sorted(&derived["reach"]), {
+            let mut rows = rows;
+            rows.sort();
+            rows
+        });
+    }
+
+    /// When the program also evaluates the relation unrestricted, the
+    /// derived relation is that full evaluation, not the adorned subset.
+    #[test]
+    fn test_derived_keeps_unrestricted_evaluation() {
+        let (_, derived) = closure_engine()
+            .execute_tuples_with_derived(&format!(
+                "{CLOSURE}__query__(_c0, Y, Z) <- reach(_c0, Y), reach(Y, Z), _c0 = 1"
+            ))
+            .unwrap();
+        assert_eq!(derived["reach_bf"].len(), 4);
+        // 1, 2, 3 and 5 reach {1, 2, 3, 4}.
+        assert_eq!(derived["reach"].len(), 16);
+    }
+
+    /// Several adornments of one relation are merged without duplicates.
+    #[test]
+    fn test_expose_adorned_relations_merges_adornments() {
+        let t = |a: i64, b: i64| Tuple::new(vec![Value::Int64(a), Value::Int64(b)]);
+        let mut derived = RelationMap::new();
+        derived.insert("r_bf".into(), Relation::from(vec![t(1, 2), t(1, 3)]));
+        derived.insert("r_fb".into(), Relation::from(vec![t(1, 3), t(4, 3)]));
+        derived.insert("s_bf".into(), Relation::from(vec![t(7, 8)]));
+        derived.insert("s".into(), Relation::from(vec![t(7, 8), t(8, 9)]));
+        let adorned = [
+            ("r_bf".to_string(), "r".to_string()),
+            ("r_fb".to_string(), "r".to_string()),
+            ("s_bf".to_string(), "s".to_string()),
+        ];
+        expose_adorned_relations(&mut derived, &adorned);
+        assert_eq!(sorted(&derived["r"]), vec![t(1, 2), t(1, 3), t(4, 3)]);
+        assert_eq!(sorted(&derived["s"]), vec![t(7, 8), t(8, 9)]);
     }
 
     /// `without_result_cap` returns every row, unflagged, and restores the cap.

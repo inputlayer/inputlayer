@@ -588,6 +588,9 @@ mod pinned_proof_tests;
 mod why_not_tests;
 
 #[cfg(test)]
+mod recursive_proof_tests;
+
+#[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod expect_revision_tests;
 

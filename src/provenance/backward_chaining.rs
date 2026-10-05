@@ -91,6 +91,16 @@ impl<'a> ProofContext<'a> {
         self.derived_relations.contains(relation)
     }
 
+    /// Whether lookups see every tuple of derived `relation`: the evaluation
+    /// behind the proof computed it. A subgoal on such a relation with no
+    /// matching tuple has no derivation, so proof search does not try to
+    /// re-derive one from the rules.
+    pub fn is_complete(&self, relation: &str) -> bool {
+        self.derived_data
+            .as_ref()
+            .is_some_and(|derived| derived.get(relation).is_some())
+    }
+
     /// Get all rules whose head matches the given relation name.
     pub fn rules_for(&self, relation: &str) -> Vec<&Rule> {
         self.rules
