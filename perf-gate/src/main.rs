@@ -5,7 +5,8 @@
 //! file under the policy and exits zero only on a pass; `genbi` benchmarks
 //! one server as the substrate for reactive agents on the genbi-trust suite;
 //! `sessions` measures standing-query cost as the sessions on one knowledge
-//! graph grow.
+//! graph grow; `views` measures what writes and reads cost against deployed
+//! rules as the graph, the rule catalog and the subscribers grow.
 //! See `perf-gate/README.md`.
 
 mod client;
@@ -23,6 +24,7 @@ mod server;
 mod sessions;
 mod stats;
 mod summary;
+mod views;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -56,6 +58,9 @@ enum Command {
     Genbi(genbi::GenbiArgs),
     /// Measure standing-query cost as sessions grow (voice-agent pack).
     Sessions(sessions::SessionsArgs),
+    /// Measure write and read cost against deployed rules by graph size,
+    /// rule count and subscriber count.
+    Views(views::ViewsArgs),
     /// Absolute numbers from a run file (a baseline table), not a verdict;
     /// exit 3 when a fixture run failed.
     Summary(SummaryArgs),
@@ -125,6 +130,7 @@ fn main() -> ExitCode {
         Command::Compare(args) => compare(&args),
         Command::Genbi(args) => genbi::run(&args),
         Command::Sessions(args) => sessions::run(&args),
+        Command::Views(args) => views::run(&args),
         Command::Summary(args) => summarize(&args),
     };
     result.unwrap_or_else(|e| {

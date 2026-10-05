@@ -35,12 +35,17 @@ pub enum Frame {
         truncated: bool,
         #[serde(default)]
         errors: Vec<Value>,
+        /// The revision a program's committed writes are visible at.
+        #[serde(default)]
+        revision: Option<u64>,
     },
     ResultStart {
         #[serde(default)]
         truncated: bool,
         #[serde(default)]
         errors: Vec<Value>,
+        #[serde(default)]
+        revision: Option<u64>,
     },
     ResultChunk {},
     ResultEnd {
@@ -51,11 +56,20 @@ pub enum Frame {
     },
     SubscriptionDelta {
         subscription: String,
+        /// The revision whose result this delta produces.
+        #[serde(default)]
+        revision: u64,
         #[serde(default)]
         inserted: Vec<Vec<Value>>,
         #[serde(default)]
         retracted: Vec<Vec<Value>>,
     },
+    /// Header of a delta streamed in chunks; it applies at the matching
+    /// [`Frame::SubscriptionDeltaEnd`].
+    SubscriptionDeltaStart {
+        revision: u64,
+    },
+    SubscriptionDeltaEnd {},
     SubscriptionError {
         subscription: String,
         message: String,
@@ -102,6 +116,9 @@ pub struct Reply {
     /// When the final frame of the reply arrived.
     pub at: Instant,
     pub row_count: usize,
+    /// The revision the program's committed writes are visible at, for a
+    /// program that wrote.
+    pub revision: Option<u64>,
 }
 
 pub struct Client {
@@ -243,7 +260,9 @@ impl Client {
                     answer.at = at;
                     return Ok((start, answer));
                 }
-                Frame::ResultStart { truncated, errors } => {
+                Frame::ResultStart {
+                    truncated, errors, ..
+                } => {
                     answer.columns = serde_json::from_str::<Payload>(&text)?.columns;
                     answer.errors = errors;
                     answer.truncated = truncated;
@@ -262,7 +281,10 @@ impl Client {
                     answer.at = at;
                     return Ok((start, answer));
                 }
-                frame @ (Frame::SubscriptionDelta { .. } | Frame::SubscriptionError { .. }) => {
+                frame @ (Frame::SubscriptionDelta { .. }
+                | Frame::SubscriptionDeltaStart { .. }
+                | Frame::SubscriptionDeltaEnd { .. }
+                | Frame::SubscriptionError { .. }) => {
                     self.deferred.push(Stamped { at, frame });
                 }
                 Frame::Other => {}
@@ -275,11 +297,8 @@ impl Client {
 
     /// Next subscription delta or error, including ones deferred by `reply`.
     pub async fn next_push(&mut self) -> Result<Stamped> {
-        if !self.deferred.is_empty() {
-            return Ok(self.deferred.remove(0));
-        }
         loop {
-            let stamped = self.next().await?;
+            let stamped = self.next_frame().await?;
             match stamped.frame {
                 Frame::SubscriptionDelta { .. } | Frame::SubscriptionError { .. } => {
                     return Ok(stamped)
@@ -288,6 +307,15 @@ impl Client {
                 _ => {}
             }
         }
+    }
+
+    /// Next frame of any kind (notifications included), starting with the
+    /// pushes deferred by `reply`; for a connection that sends nothing more.
+    pub async fn next_frame(&mut self) -> Result<Stamped> {
+        if !self.deferred.is_empty() {
+            return Ok(self.deferred.remove(0));
+        }
+        self.next().await
     }
 
     async fn send(&mut self, mut value: Value) -> Result<()> {
@@ -317,6 +345,7 @@ async fn read_reply<S>(ws: &mut S, deferred: &mut Vec<Stamped>) -> Result<Reply>
 where
     S: Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
 {
+    let mut revision = None;
     loop {
         let (at, text) = next_text(ws).await?;
         let frame = parse(&text)?;
@@ -325,14 +354,35 @@ where
                 row_count,
                 truncated,
                 errors,
+                revision,
             } => {
                 check_complete(truncated, &errors)?;
-                return Ok(Reply { at, row_count });
+                return Ok(Reply {
+                    at,
+                    row_count,
+                    revision,
+                });
             }
-            Frame::ResultStart { truncated, errors } => check_complete(truncated, &errors)?,
-            Frame::ResultEnd { row_count } => return Ok(Reply { at, row_count }),
+            Frame::ResultStart {
+                truncated,
+                errors,
+                revision: start_revision,
+            } => {
+                check_complete(truncated, &errors)?;
+                revision = start_revision;
+            }
+            Frame::ResultEnd { row_count } => {
+                return Ok(Reply {
+                    at,
+                    row_count,
+                    revision,
+                })
+            }
             Frame::Error { message } => bail!("server error: {message}"),
-            frame @ (Frame::SubscriptionDelta { .. } | Frame::SubscriptionError { .. }) => {
+            frame @ (Frame::SubscriptionDelta { .. }
+            | Frame::SubscriptionDeltaStart { .. }
+            | Frame::SubscriptionDeltaEnd { .. }
+            | Frame::SubscriptionError { .. }) => {
                 deferred.push(Stamped { at, frame });
             }
             Frame::ResultChunk {} | Frame::Other => {}

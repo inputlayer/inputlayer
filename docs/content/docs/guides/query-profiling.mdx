@@ -165,6 +165,16 @@ Timing histograms are exported at `/metrics/prometheus` in standard Prometheus t
 
 Bucket boundaries: 1ms, 5ms, 10ms, 50ms, 100ms, 500ms, 1s, 5s, +Inf. Each metric includes `_bucket`, `_sum`, and `_count` suffixes.
 
+Three counters tell how reads of persistent rules were answered:
+
+| Metric | Description |
+|--------|-------------|
+| `inputlayer_rule_evaluations_total` | Reads answered by evaluating persistent rules from the base facts |
+| `inputlayer_view_reads_total` | Reads answered from a view, without evaluating a rule |
+| `inputlayer_view_maintenance_us_total` | Microseconds spent keeping views current with commits |
+
+A read counts once, however many persistent rules its query depends on. Reads include queries, a subscription's initial result and each refresh, `.why` proofs, and conditional writes. A read that touches only base relations and session rules counts nothing. Today every read of a persistent rule evaluates it from the base facts, so `inputlayer_view_reads_total` and `inputlayer_view_maintenance_us_total` stay at 0.
+
 ## Performance Impact
 
 | Mode | Overhead | What you get |

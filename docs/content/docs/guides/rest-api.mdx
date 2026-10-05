@@ -171,7 +171,18 @@ inputlayer_ephemeral_facts 10
 # HELP inputlayer_ephemeral_rules Ephemeral rules across sessions.
 # TYPE inputlayer_ephemeral_rules gauge
 inputlayer_ephemeral_rules 2
+# HELP inputlayer_view_reads_total Reads of persistent rules answered from a view, without evaluating a rule.
+# TYPE inputlayer_view_reads_total counter
+inputlayer_view_reads_total 0
+# HELP inputlayer_rule_evaluations_total Reads of persistent rules answered by evaluating the rules from base facts.
+# TYPE inputlayer_rule_evaluations_total counter
+inputlayer_rule_evaluations_total 4200
+# HELP inputlayer_view_maintenance_us_total Microseconds spent keeping views current with commits.
+# TYPE inputlayer_view_maintenance_us_total counter
+inputlayer_view_maintenance_us_total 0
 ```
+
+The query timing histograms follow; see [Query Profiling](/docs/guides/query-profiling).
 
 ---
 

@@ -16,6 +16,7 @@ make perf-gate      # Performance gate: this tree vs the approved baseline (same
 make perf-gate-remote     # The same gate for HEAD on the benchmark host (heavy runs go there)
 make bench-engine-remote  # Engine suite on the benchmark host: absolute numbers, not judged
 make bench-sessions-remote  # Session-scale benchmark on the benchmark host
+make bench-views-remote     # Views benchmark (write and read cost vs graph, rules, subscribers) on the benchmark host
 make bench-genbi    # Reactive agent benchmark on genbi-trust (needs GENBI_TRUST_DIR)
 make oracle-test    # Differential correctness oracle only (~15s)
 ```
@@ -179,6 +180,12 @@ reaches exactly its session, once, within a bound of the write's
 acknowledgement, and no session gets a stray delta or a `subscription_error`
 (its module doc states the full contract).
 
+`tests/e2e_reactive/views.rs` requires the view work counters on
+`/metrics/prometheus` to tell how reads of deployed rules were answered:
+today each read of a deployed rule, subscribing to one and each refresh is
+exactly one rule evaluation, a read of base relations is none, and nothing is
+served from a view yet.
+
 Defects tracked by the reactive plan run as **expected failures** in a
 `tests/e2e_reactive/known_defects.rs` module (none is open today). Each
 asserts the correct contract; its own violation passes as `XFAIL`, any other
@@ -255,6 +262,7 @@ Source-to-category mapping:
 | `make perf-gate` | Paired latency/throughput gate over `/ws` vs the approved baseline | Every implementation PR (see `perf-gate/README.md`) |
 | `make perf-gate-remote` | The same gate for a commit on the benchmark host | Instead of `make perf-gate` on a shared development box |
 | `make bench-engine-remote` | Engine suite (rules, closure, deletes and updates, claims, `.why`, sessions, memory, recovery, WAL share) on the benchmark host | Release checkpoints and engine baselines |
+| `make bench-views-remote` | Write and read cost against deployed rules by graph size, rule count and subscribers, with rule-evaluation counts (`perf-gate views`) on the benchmark host | Changing evaluation, subscriptions or rule maintenance (the view work, #305) |
 | `make perf-gate-check` | Clippy + unit tests of the gate tool | After changing `perf-gate/` |
 | `make pre-pr-selftest` | Behavioural tests of `make pre-pr` routing (`scripts/test_pre_pr.py`) | After changing `Makefile` or `scripts/` |
 | `make e2e-reactive` | Reactive agent path against real engines, latency samples | Subscription or wire changes |

@@ -32,6 +32,7 @@ make perf-gate-remote REV=<commit> PERF_GATE_ARGS="--aa --rounds 20"
 make pre-pr PRE_PR_PERF=perf-gate-remote        # pre-pr with the gate measured there
 make bench-engine-remote REV=origin/main        # the engine suite (below), not judged
 make bench-sessions-remote REV=origin/main      # the session-scale benchmark (below)
+make bench-views-remote REV=origin/main         # the views benchmark (below)
 ```
 
 `scripts/perf-gate-remote.sh` fetches the commit into the host's clone
@@ -218,7 +219,8 @@ cancels out of the paired ratios. `scripts/perf-gate-ci.sh` drives it:
   and `verdict.json` for 30 days.
 
 To measure a branch before its checkpoint, dispatch the workflow with only
-the gate: `gh workflow run full-suite.yml --ref <branch> -f perf_gate_only=true`.
+the performance runs (the gate and the `Views benchmark` job):
+`gh workflow run full-suite.yml --ref <branch> -f perf_gate_only=true`.
 Add `-f perf_gate_aa=true` to measure the baseline against itself, which
 checks the runner's noise and records a calibration run for the baseline.
 
@@ -229,11 +231,12 @@ and the `delta_single` delta percentiles.
 
 ## Relationship to the Criterion benches
 
-The six Criterion harnesses under `benches/` are in-process diagnostic
+The Criterion harnesses under `benches/` are in-process diagnostic
 microbenchmarks and stay as they are. They report means, not request p99.
 Some of them disable persistence, or time a refresh without the insert that
 triggered it. Use them to investigate a regression the gate finds, not as
-the acceptance oracle.
+the acceptance oracle. `view_maintenance_benchmarks` is the headroom
+reference of the views benchmark (below).
 
 ## GenBI-trust reactive agent benchmark
 
@@ -382,6 +385,75 @@ has any late delta (a late delta is over any budget below the probe timeout).
 `target/bench-sessions/latest/` holds `result.json` (schema
 `inputlayer-perf-gate/sessions/v2`; v1 counted late deltas as missing and
 then stray) and `summary.md`.
+
+## Views benchmark
+
+`make bench-views` measures what writes and reads cost against deployed
+rules as the graph, the rule catalog and the subscribers grow (#308). It is
+the baseline of the work that turns persistent rules into maintained views
+(epic #305): the matrix of the incremental-views review (its report, Section
+4) as a perf-gate scenario, `perf-gate views`. Latency is reported, not
+judged. The acceptance bars of the view work are checked against these
+numbers.
+
+```bash
+make bench-views                                        # 10K, 100K, 1M edges
+make bench-views VIEWS_ARGS="--edges 10000,100000"      # smaller graphs
+make bench-views VIEWS_ARGS="--baseline-rev origin/main"   # before/after, same host
+make bench-views-remote REV=origin/main                 # on the benchmark host, under its lock
+scripts/bench-views.sh --help
+```
+
+Each graph size runs on a fresh server with the gate's configuration plus
+caps lifted for 1,000 subscriber connections from one address. Durability is
+the default (`immediate`: one fsync per commit).
+
+- **Graph.** Chains of four nodes (three edges each); every hundredth chain
+  head is labelled hot.
+- **Rules.** `r1(X,Y) <- edge(X,Y), label(X,"hot")` (non-recursive), `path`
+  (the right-recursive transitive closure, two rows per edge) and
+  `hot_reach(X,Y) <- label(X,"hot"), path(X,Y)` (a recursive dependency,
+  three rows per hot head).
+- **Idle reads.** A base point read `?edge(K,Y)`, `r1` unbound and bound,
+  `path` bound, `hot_reach` unbound and bound, 10 times each (`--reads`):
+  latency, rows and server CPU per read.
+- **Write phases.** Each write inserts an edge from a hot head to a fresh
+  node, which changes every view. The agent's ad-hoc bound read `?r1(K,Y)`
+  follows on the writing connection. A phase times the write's reply (ack),
+  the last delta it must cause (write->delta) and that read. It also records
+  server CPU per write (the read included), frames pushed to subscribers per
+  write and RSS. P0 has no subscribers; P1 one and P2 100 unbound subscribers
+  of `r1`; P3 one unbound subscriber of `hot_reach`. P4 has keyed subscribers
+  `?r1(K_i,Y)`, 1/10/100/1,000 (`--keyed`), and P5 keyed subscribers of the
+  recursive view (`--recursive-keyed`, 1/100, or 1/10 from 1M edges). Each
+  write changes one key, and only that key's subscriber waits for it. P6 is
+  one unbound `r1` subscriber after 50 and then 200 unrelated rules join the
+  catalog (`--filler-rules`), with the `r1` idle reads repeated. Phases run
+  30 writes each (`--writes`); at 1M edges or more, the subscriber phases run
+  20 (`--large-writes`).
+- **View work.** Every read and phase records the engine's view counters
+  from `/metrics/prometheus` per read or per write:
+  `inputlayer_rule_evaluations_total` (reads answered by evaluating deployed
+  rules), `inputlayer_view_reads_total` (reads served from a view) and
+  `inputlayer_view_maintenance_us_total`. Today every read of a deployed rule
+  is one rule evaluation. A standing query's refresh is one too, so P4 with
+  10 keyed subscribers shows 11 per write. The columns are empty for a server
+  that does not export the counters.
+
+A delta that does not arrive within 20 s of its write is **late**. A late
+delta, a failed subscription or a failed step fails the run (exit 1).
+`target/bench-views/latest/` holds `result.json` (schema
+`inputlayer-perf-gate/views/v1`) and `summary.md`, with tables in the review
+report's shape. Full-suite runs include it as the `Views benchmark` job,
+report-only, on the perf gate's 32-vCPU runner. Numbers comparable with the
+review come from the benchmark host.
+
+The headroom reference is `cargo bench --bench view_maintenance_benchmarks`.
+It is the review's differential-dataflow micro-benchmark: the same graph and
+rules kept as long-lived arrangements on one worker, with a single-edge
+insert, a retraction and a non-hot insert each propagated through every view,
+and a key lookup. It prints load time, RSS and rows per size
+(`VIEW_BENCH_EDGES=10000,100000` picks sizes).
 
 ## Extending
 
