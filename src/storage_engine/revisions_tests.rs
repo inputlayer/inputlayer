@@ -73,3 +73,36 @@ fn an_unreadable_bound_fails_the_open() {
     std::fs::write(dir.path().join(RESERVATION_FILE), "not json").unwrap();
     assert!(Counter::new().open(dir.path(), true).is_err());
 }
+
+#[test]
+fn a_bound_that_cannot_be_raised_refuses_writes_and_is_never_passed() {
+    let counter = Counter::new();
+    let dir = TempDir::new().unwrap();
+    let _reservation = counter.open(dir.path(), false).unwrap();
+    let bound = recorded(&dir);
+
+    // `metadata` is a file: the bound cannot be written.
+    let metadata = dir.path().join("metadata");
+    std::fs::remove_dir_all(&metadata).unwrap();
+    std::fs::write(&metadata, "").unwrap();
+
+    for _ in 0..bound - HEADROOM {
+        counter.next();
+    }
+    assert!(counter.reserve_ahead().is_ok());
+    counter.next();
+    assert!(counter.reserve_ahead().is_err());
+    for _ in 1..HEADROOM {
+        let revision = counter.next();
+        assert!(revision <= bound, "{revision} is above the bound on disk");
+    }
+    assert!(counter.reserve_ahead().is_err());
+    let past = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| counter.next()));
+    assert!(past.is_err(), "issued {past:?} above the bound on disk");
+
+    std::fs::remove_file(&metadata).unwrap();
+    counter.reserve_ahead().unwrap();
+    let revision = counter.next();
+    assert!(revision > bound);
+    assert!(revision <= recorded(&dir), "{revision} is not reserved");
+}

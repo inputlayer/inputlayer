@@ -3,7 +3,8 @@
 //! Revisions come from one counter shared by every knowledge graph. An engine
 //! keeps in its data directory a durable bound that no revision it has issued
 //! exceeds ([`RevisionReservation`]), raised a block at a time, and a starting
-//! engine continues above the bound its directory holds. A revision observed
+//! engine continues above the bound its directory holds. A write is refused
+//! when the bound it needs cannot be made durable. A revision observed
 //! in an earlier run is therefore lower than every revision of this one: it
 //! predates each knowledge graph's first snapshot here and fails an
 //! `expect_revision` precondition (see [`super::precondition`]), with or
@@ -23,6 +24,10 @@ const RESERVATION_FILE: &str = "metadata/revisions.json";
 
 /// Revisions reserved per durable write of the bound.
 const BLOCK: u64 = 1 << 20;
+
+/// How far below the bound writes start raising it, so that a bound that
+/// cannot be raised refuses them before the counter reaches it.
+const HEADROOM: u64 = BLOCK / 2;
 
 /// Where a data directory with state but no recorded bound continues: its
 /// earlier runs each counted from 1, far below this.
@@ -48,8 +53,21 @@ pub(super) fn last_revision() -> u64 {
 }
 
 /// The next revision, within every open engine's durable bound.
+///
+/// # Panics
+/// The bound has to be raised and cannot be written. Writes are refused long
+/// before that, by [`reserve_ahead`].
 pub(super) fn next_revision() -> u64 {
     REVISIONS.next()
+}
+
+/// Keep every open engine's durable bound [`HEADROOM`] above the counter, for
+/// the snapshots the caller goes on to build.
+///
+/// # Errors
+/// A bound could not be written: the caller must not change state.
+pub(super) fn reserve_ahead() -> StorageResult<()> {
+    REVISIONS.reserve_ahead()
 }
 
 impl Counter {
@@ -64,35 +82,46 @@ impl Counter {
     fn next(&self) -> u64 {
         let revision = self.last.fetch_add(1, Ordering::SeqCst) + 1;
         if revision > self.reserved.load(Ordering::SeqCst) {
-            self.reserve_through(revision);
+            if let Err(e) = self.reserve_through(revision) {
+                panic!("revision {revision} is above a bound that cannot be raised: {e}");
+            }
         }
         revision
     }
 
+    fn reserve_ahead(&self) -> StorageResult<()> {
+        let ahead = self.last.load(Ordering::SeqCst).saturating_add(HEADROOM);
+        if ahead <= self.reserved.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        self.reserve_through(ahead)
+    }
+
     /// Raise every open engine's bound below `revision` and drop closed
     /// engines.
-    fn reserve_through(&self, revision: u64) {
+    ///
+    /// # Errors
+    /// A bound could not be written: it stays where it was.
+    fn reserve_through(&self, revision: u64) -> StorageResult<()> {
         let mut reservations = self.reservations.lock();
         let mut lowest = u64::MAX;
+        let mut raised = Ok(());
         reservations.retain(|reservation| {
             let Some(reservation) = reservation.upgrade() else {
                 return false;
             };
-            // A removed data directory (a test's) has no history to bound.
-            if !reservation.path.parent().is_some_and(Path::exists) {
-                return false;
-            }
             if reservation.reserved.load(Ordering::SeqCst) < revision {
                 let last = self.last.load(Ordering::SeqCst);
-                // Left unraised, the next revision tries again.
                 if let Err(e) = reservation.reserve(last.max(revision) + BLOCK) {
                     error!(error = %e, revision, "revision_reservation_failed");
+                    raised = Err(e);
                 }
             }
             lowest = lowest.min(reservation.reserved.load(Ordering::SeqCst));
             true
         });
         self.reserved.store(lowest, Ordering::SeqCst);
+        raised
     }
 
     /// [`RevisionReservation::open`] on this counter.

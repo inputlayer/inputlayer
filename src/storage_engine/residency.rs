@@ -345,6 +345,7 @@ impl StorageEngine {
         &self,
         kg: &str,
     ) -> StorageResult<ArcRwLockWriteGuard<RawRwLock, KnowledgeGraph>> {
+        super::revisions::reserve_ahead()?;
         loop {
             let db = self.kg_handle(kg)?.write_arc();
             match db.retired {
@@ -417,6 +418,7 @@ impl StorageEngine {
                 "Knowledge graph '{kg}' is neither loaded nor on disk"
             )));
         };
+        super::revisions::reserve_ahead()?;
         let start = Instant::now();
         let created_at = slot.listing.lock().created_at.clone();
         let graph = self.load_graph(kg, dormant, created_at)?;

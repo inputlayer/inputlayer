@@ -411,6 +411,7 @@ impl StorageEngine {
     /// revision of its first snapshot.
     fn create_graph(&self, name: &str) -> StorageResult<u64> {
         self.persist.check_writable()?;
+        revisions::reserve_ahead()?;
         let start = Instant::now();
         naming::validate_kg_name(name).map_err(StorageError::InvalidName)?;
 
