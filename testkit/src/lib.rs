@@ -27,5 +27,5 @@ pub use contract::{Checked, Violation};
 pub use counters::Counters;
 pub use engine::{Engine, EngineBuilder, Mode, Replication};
 pub use fixture::{Fixture, Size};
-pub use known_defect::{KnownDefect, Reproduction};
+pub use known_defect::{KnownDefect, Reproduction, XFAIL_LOG_ENV};
 pub use metrics::SampleLog;

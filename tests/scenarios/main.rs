@@ -22,25 +22,35 @@
 //! scenarios on the shop pack, each naming its captain's table row and the
 //! milestone 9 issues it gates: `lifecycle` (S1), `claims` (S7),
 //! `retraction` (S9, also through the differential oracle via
-//! `oracle_check`), `restart` (S12) and `tenancy` (S15), sharing the
-//! assertions in `support`. Expected failures for tracked
-//! defects use `inputlayer_testkit::KnownDefect`; an XPASS fails the run.
+//! `oracle_check`), `restart` (S12) and `tenancy` (S15), and the ones that
+//! hold milestone 9's contract as expected failures: `reads` (S2, S3),
+//! `consistency` (S4), `fanout` (S5), `subscribe_rules` (S6),
+//! `generations` (S8) and `burst` (S17), sharing the assertions in
+//! `support`. Expected failures for tracked defects use
+//! `inputlayer_testkit::KnownDefect`, naming the issue that fixes them; an
+//! XPASS fails the run.
 //!
 //! Agents use the testkit's thin `/ws` client until an SDK subscribe API
 //! exists; switch them to the SDK then.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod burst;
 mod claims;
+mod consistency;
 mod delivery;
+mod fanout;
+mod generations;
 mod harness;
 mod lifecycle;
 mod oracle_check;
 mod reactive;
+mod reads;
 mod restart;
 mod retraction;
 mod saturation;
 mod stream;
+mod subscribe_rules;
 mod support;
 mod tenancy;
 mod wire;

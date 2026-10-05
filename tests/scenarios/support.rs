@@ -5,9 +5,13 @@
 //! `revision_increasing` are checked by `Agent` on every delta it applies;
 //! this module adds what the testkit does not have.
 
+use std::collections::BTreeSet;
 use std::time::Duration;
 
-use inputlayer_testkit::{Agent, Checked, Delta, QueryResult, Refusal, Violation, WsClient};
+use inputlayer_testkit::{
+    Agent, Checked, Counters, Delta, KnownDefect, QueryResult, Refusal, Reproduction, Violation,
+    WsClient,
+};
 use serde_json::Value;
 
 /// Longest a delta may take to reach an agent another connection's refusal
@@ -117,4 +121,65 @@ pub async fn others_unaffected(agents: &mut [(&mut Agent, &str)]) -> Checked<Vec
 /// Rows of a fresh query on another connection.
 pub async fn fresh(auditor: &mut WsClient, query: &str) -> Checked<Vec<Value>> {
     Ok(auditor.query(query).await?.rows)
+}
+
+/// The engine does not export the view counters yet (V1 #308).
+pub const NO_VIEW_COUNTERS: KnownDefect = KnownDefect {
+    plan_item: "#308",
+    summary: "rule_evaluations / view_reads / view_maintenance_us are not exported",
+    signature: |v| matches!(v, Violation::NotMeasurable(_)),
+    reproduction: Reproduction::Deterministic,
+};
+
+/// `no_rule_evaluations(counters.delta)`: across `delta` no deployed rule was
+/// evaluated and at least `view_reads` reads were served from views (pass 0
+/// for a step that only maintains views). [`Violation::NotMeasurable`] while
+/// the engine lacks a counter, [`Violation::UnexpectedWork`] when a rule ran.
+pub fn no_rule_evaluations(delta: &Counters, view_reads: u64) -> Checked<()> {
+    let evaluations = Counters::require("rule_evaluations", delta.rule_evaluations)?;
+    let served = Counters::require("view_reads", delta.view_reads)?;
+    if evaluations > 0 {
+        return Err(Violation::UnexpectedWork(format!(
+            "{evaluations} deployed rule evaluation(s) where views should have been read: \
+             {delta:?}"
+        )));
+    }
+    if served < view_reads {
+        return Err(Violation::UnexpectedWork(format!(
+            "{served} view read(s), expected at least {view_reads}: {delta:?}"
+        )));
+    }
+    Ok(())
+}
+
+/// Text of the violation a query reply without `revision` produces (V9 #315).
+pub const NO_QUERY_REVISION: &str = "query reply names no revision";
+
+/// `revision_aligned`: a read `at` `revision` answered at that revision with
+/// exactly `expected` rows (compared on the columns `project` keeps).
+pub fn revision_aligned(
+    read: &QueryResult,
+    revision: u64,
+    project: impl Fn(&Value) -> Value,
+    expected: &BTreeSet<String>,
+) -> Checked<()> {
+    let answered = read
+        .revision
+        .ok_or_else(|| Violation::Transport(format!("{NO_QUERY_REVISION} (read at {revision})")))?;
+    if answered != revision {
+        return Err(Violation::StaleRevision {
+            subscription: format!("read at {revision}"),
+            previous: revision,
+            got: answered,
+        });
+    }
+    let got: BTreeSet<String> = read.rows.iter().map(|r| project(r).to_string()).collect();
+    if &got == expected {
+        return Ok(());
+    }
+    Err(Violation::Diverged {
+        subscription: format!("read at {revision}"),
+        missing: expected.difference(&got).cloned().collect(),
+        unexpected: got.difference(expected).cloned().collect(),
+    })
 }

@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check perf-gate-remote bench-engine-remote bench-sessions-remote soak soak-remote secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check perf-gate-remote bench-engine-remote bench-sessions-remote soak soak-remote secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions test test-fast test-release unit-test xfail-list integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -212,7 +212,9 @@ ci-test-all:
 	echo ""; \
 	echo "=== Unit Tests ==="; \
 	UNIT_TMPFILE=$$(mktemp); \
+	mkdir -p $(dir $(XFAIL_LOG)) && : > $(XFAIL_LOG); \
 	set -o pipefail; \
+	export INPUTLAYER_XFAIL_LOG=$(abspath $(XFAIL_LOG)); \
 	$(call test_without_scenarios,$$CI_JOBS) \
 		2>&1 | tee "$$UNIT_TMPFILE"; \
 	UNIT_EXIT=$${PIPESTATUS[0]}; \
@@ -295,6 +297,8 @@ ci-test-all:
 	printf "  | %-14s | %-48s |\n" "Python Tests" "$${PY_PASSED:-0} passed, $${PY_FAILED:-0} failed"; \
 	printf "  | %-14s | %-48s |\n" "JS/TS Tests" "$${JS_PASSED:-0} passed, $${JS_FAILED:-0} failed"; \
 	echo ""; \
+	$(MAKE) --no-print-directory xfail-list; \
+	echo ""; \
 	echo "==========================================="; \
 	if [ $$FAILURES -ne 0 ]; then \
 		echo "SOME CHECKS FAILED ($$FAILURES)"; \
@@ -308,9 +312,27 @@ ci: check ci-test-all
 
 # Individual Test Tiers
 
+# Expected failures (inputlayer_testkit::KnownDefect) append their XFAIL line
+# to this file; the test targets print the list when the run ends, pass or fail.
+XFAIL_LOG ?= target/xfail.log
+define print_xfails
+	@if [ -s $(XFAIL_LOG) ]; then \
+		echo "Expected failures still open ($$(sort -u $(XFAIL_LOG) | wc -l)):"; \
+		sort -u $(XFAIL_LOG); \
+	else \
+		echo "Expected failures still open: none"; \
+	fi
+endef
+
 # Tier 1: Unit tests (cargo test - includes all #[test] functions)
 unit-test:
-	cargo test --workspace --all-features
+	@mkdir -p $(dir $(XFAIL_LOG)) && : > $(XFAIL_LOG)
+	INPUTLAYER_XFAIL_LOG=$(abspath $(XFAIL_LOG)) cargo test --workspace --all-features; \
+		status=$$?; $(MAKE) --no-print-directory xfail-list; exit $$status
+
+# The expected-failure list of the last test run.
+xfail-list:
+	$(print_xfails)
 
 # Tier 2: Integration tests only
 integration-test:
@@ -342,8 +364,11 @@ E2E_REACTIVE_SAMPLES ?= target/e2e-reactive
 e2e-reactive:
 	rm -rf $(E2E_REACTIVE_SAMPLES)
 	cargo test --release -p inputlayer-testkit
+	@mkdir -p $(dir $(XFAIL_LOG)) && : > $(XFAIL_LOG)
 	INPUTLAYER_REACTIVE_SAMPLES_DIR=$(abspath $(E2E_REACTIVE_SAMPLES)) \
-		cargo test --release --test scenarios -- --nocapture --include-ignored
+		INPUTLAYER_XFAIL_LOG=$(abspath $(XFAIL_LOG)) \
+		cargo test --release --test scenarios -- --nocapture --include-ignored; \
+		status=$$?; $(MAKE) --no-print-directory xfail-list; exit $$status
 	@ls $(E2E_REACTIVE_SAMPLES)/*.jsonl >/dev/null || { echo "ERROR: no latency samples written"; exit 1; }
 
 # Regenerate snapshot .iql.out files (sequential mode)

@@ -71,6 +71,9 @@ pub enum Violation {
     Transport(String),
     /// The engine does not export a counter the assertion needs.
     NotMeasurable(String),
+    /// The engine's counters show work the step must not cause, such as a
+    /// read of a deployed rule evaluating the rule instead of reading its view.
+    UnexpectedWork(String),
 }
 
 impl fmt::Display for Violation {
@@ -143,6 +146,7 @@ impl fmt::Display for Violation {
             }
             Self::Transport(detail) => write!(f, "transport: {detail}"),
             Self::NotMeasurable(counter) => write!(f, "counter {counter} is not exported"),
+            Self::UnexpectedWork(detail) => write!(f, "unexpected work: {detail}"),
         }
     }
 }
