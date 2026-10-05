@@ -27,6 +27,7 @@ pub mod csv;
 pub mod data_dir_lock;
 pub mod error;
 pub mod metadata;
+pub mod nested_json;
 pub mod parquet;
 pub mod persist;
 

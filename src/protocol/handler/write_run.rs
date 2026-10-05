@@ -15,8 +15,8 @@ use super::{storage_error_code, QueryJob};
 use crate::protocol::wire::{ErrorCode, StatementCounts};
 use crate::rule_catalog::RuleCatalog;
 use crate::storage_engine::{
-    CommitError, KnowledgeGraphSnapshot, ProgramCommit, StagedChanges, StatementEffect,
-    StorageEngine, WriteProgram,
+    CommitError, KnowledgeGraphSnapshot, PreconditionError, ProgramCommit, StagedChanges,
+    StatementEffect, StorageEngine, WriteProgram,
 };
 use rand::Rng;
 use std::sync::atomic::Ordering;
@@ -46,6 +46,12 @@ impl WriteStatement {
 
     fn changes_rules(&self) -> bool {
         matches!(self, Self::Catalog(statement) if statement.changes_rules())
+    }
+
+    /// Whether this statement writes persistent state rather than a session
+    /// schema.
+    fn is_durable(&self) -> bool {
+        !matches!(self, Self::Catalog(CatalogStatement::Schema(decl)) if !decl.persistent)
     }
 
     /// The code and message reporting that this statement failed with `error`.
@@ -119,8 +125,9 @@ impl WriteRun {
 impl QueryJob {
     /// Commit the statements queued in `run` to `kg` as one transaction and
     /// fill their message rows in `messages`. Returns the snapshot the
-    /// program committed against (see [`ProgramCommit::base`]) and the counts
-    /// of its fact statements.
+    /// program committed against (see [`ProgramCommit::base`]), the counts
+    /// of its fact statements, and the revision the program's effect is
+    /// visible at, or `None` when every queued statement is a session schema.
     ///
     /// A program whose staging read the KG is staged again, up to
     /// [`MAX_STAGE_ATTEMPTS`] times with a short random pause, if a concurrent
@@ -131,7 +138,14 @@ impl QueryJob {
         kg: &str,
         run: &mut WriteRun,
         messages: &mut [String],
-    ) -> Result<(Arc<KnowledgeGraphSnapshot>, Vec<StatementCounts>), RunFailure> {
+    ) -> Result<
+        (
+            Arc<KnowledgeGraphSnapshot>,
+            Vec<StatementCounts>,
+            Option<u64>,
+        ),
+        RunFailure,
+    > {
         let commit = match self.commit_queued(storage, kg, &run.queued) {
             Ok(commit) => commit,
             Err(mut failure) => {
@@ -146,6 +160,7 @@ impl QueryJob {
         };
 
         let queued = std::mem::take(&mut run.queued);
+        let durable = queued.iter().any(|q| q.statement.is_durable());
         let mut inserted_total = 0;
         let mut counts = Vec::new();
         for (queued, outcome) in queued.iter().zip(&commit.statements) {
@@ -188,7 +203,7 @@ impl QueryJob {
                 change.inserted + change.deleted,
             );
         }
-        Ok((commit.base, counts))
+        Ok((commit.base, counts, durable.then_some(commit.revision)))
     }
 
     /// Stage `queued` and commit it, re-staging while it goes stale.
@@ -360,6 +375,14 @@ fn commit_failure(kg: &str, queued: &[Queued], error: CommitError) -> RunFailure
                 ),
             }
         }
+        CommitError::Precondition(error) => RunFailure {
+            index: last,
+            code: match error {
+                PreconditionError::UnknownRelation(_) => ErrorCode::Validation,
+                _ => ErrorCode::PreconditionFailed,
+            },
+            message: error.to_string(),
+        },
         CommitError::Cancelled(stop) => RunFailure {
             index: last,
             code: super::supervise::stop_code(stop),

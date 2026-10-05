@@ -59,7 +59,7 @@ async fn start_server(configure: impl FnOnce(&mut Config)) -> Server {
     config.http.gui.enabled = false;
     configure(&mut config);
     let handler = Arc::new(Handler::from_config(config).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     for kg in [KG, OTHER_KG] {
         handler.get_storage().create_knowledge_graph(kg).unwrap();
     }

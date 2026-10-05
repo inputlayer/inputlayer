@@ -38,6 +38,7 @@ mod checkpoint;
 mod commit_tests;
 #[cfg(test)]
 mod materialize_tests;
+mod precondition;
 mod program_commit;
 #[cfg(test)]
 mod program_commit_tests;
@@ -47,6 +48,7 @@ mod vector_index;
 mod write_program;
 pub use catalog_change::{CatalogChange, CatalogOutcome};
 pub use checkpoint::{CheckpointExport, ExportStatus};
+pub use precondition::{ChangeLog, Precondition, PreconditionError};
 pub use relation_store::RelationStore;
 pub use snapshot::{CachedRun, KnowledgeGraphSnapshot, PersistentRules};
 pub use write_program::{
@@ -301,6 +303,12 @@ impl StorageEngine {
 
     /// Create a new knowledge graph
     pub fn create_knowledge_graph(&self, name: &str) -> StorageResult<()> {
+        self.create_knowledge_graph_at(name).map(drop)
+    }
+
+    /// Create a new knowledge graph; returns the revision of its first
+    /// snapshot.
+    pub fn create_knowledge_graph_at(&self, name: &str) -> StorageResult<u64> {
         self.persist.check_writable()?;
         let start = Instant::now();
         naming::validate_kg_name(name).map_err(StorageError::InvalidName)?;
@@ -326,7 +334,7 @@ impl StorageEngine {
         use dashmap::mapref::entry::Entry;
         let adding = self.kg_set.read();
         let entry = self.knowledge_graphs.entry(name.to_string());
-        match entry {
+        let revision = match entry {
             Entry::Occupied(_) => {
                 return Err(StorageError::KnowledgeGraphExists(name.to_string()));
             }
@@ -343,10 +351,12 @@ impl StorageEngine {
                 kg.max_result_rows = self.config.storage.performance.max_result_rows;
                 kg.max_query_cost = self.config.storage.performance.max_query_cost;
                 kg.set_optimization(self.config.optimization.clone());
+                let revision = kg.snapshot.load().revision;
 
                 vacant.insert(Arc::new(RwLock::new(kg)));
+                revision
             }
-        }
+        };
         drop(adding);
 
         if let Err(e) = self.save_knowledge_graphs_metadata() {
@@ -357,7 +367,7 @@ impl StorageEngine {
         let elapsed_ms = start.elapsed().as_millis() as u64;
         info!(kg = %name, elapsed_ms, "kg_create_complete");
 
-        Ok(())
+        Ok(revision)
     }
 
     /// Phase 1 of KG drop: Fast in-memory removal (~microseconds).
@@ -1055,7 +1065,9 @@ impl StorageEngine {
     /// KG write lock is held throughout, so neither a crash nor a concurrent
     /// write brings the relation back. If the shard cannot be deleted and
     /// nothing changed, returns the error and the relation stays.
-    pub fn drop_relation_in(&self, kg: &str, name: &str) -> StorageResult<()> {
+    ///
+    /// Returns the revision of the snapshot the drop published.
+    pub fn drop_relation_in(&self, kg: &str, name: &str) -> StorageResult<u64> {
         self.persist.check_writable()?;
         let db = self.kg_handle(kg)?;
         let mut db = Self::lock_live(&db, kg)?;
@@ -1118,7 +1130,7 @@ impl StorageEngine {
                 warn!(kg = %kg, relation = %name, error = %e, "relation_drop_tombstone_clear_failed");
             }
         }
-        Ok(())
+        Ok(db.snapshot.load().revision)
     }
 
     /// Drop all rules matching a prefix from a specific knowledge graph.
@@ -1132,18 +1144,20 @@ impl StorageEngine {
 
     /// Clear all facts from relations matching a prefix in a knowledge graph.
     ///
-    /// Returns list of (relation_name, count_deleted) for each affected relation.
+    /// Returns list of (relation_name, count_deleted) for each affected
+    /// relation, and the revision of the KG's snapshot after the clear.
     /// All of them are cleared, or on error none; see
     /// [`KnowledgeGraph::clear_relations_by_prefix`].
     pub fn clear_relations_by_prefix_in(
         &self,
         kg: &str,
         prefix: &str,
-    ) -> StorageResult<Vec<(String, usize)>> {
+    ) -> StorageResult<(Vec<(String, usize)>, u64)> {
         let db = self.kg_handle(kg)?;
         let mut db = Self::lock_live(&db, kg)?;
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
-        db.clear_relations_by_prefix(prefix, time, &self.persist, kg)
+        let cleared = db.clear_relations_by_prefix(prefix, time, &self.persist, kg)?;
+        Ok((cleared, db.snapshot.load().revision))
     }
 
     /// List all rules in the current knowledge graph
@@ -1964,6 +1978,8 @@ impl StorageEngine {
             num_workers,
         );
         initial.optimization = self.config.optimization.clone();
+        let changes = precondition::ChangeLog::first(&initial);
+        initial.set_changes(changes);
         let snapshot = ArcSwap::from_pointee(initial);
 
         let mut kg = KnowledgeGraph {
@@ -2399,6 +2415,7 @@ impl KnowledgeGraph {
             new_snapshot.max_query_cost = self.max_query_cost;
             new_snapshot.optimization = self.optimization.clone();
             new_snapshot.hnsw_search_fn = self.hnsw_search_fn();
+            self.stamp_changes(&mut new_snapshot);
             self.snapshot.store(Arc::new(new_snapshot));
 
             // Lock drops here AFTER publication - this is the fix for TOCTOU
@@ -2415,6 +2432,7 @@ impl KnowledgeGraph {
             new_snapshot.max_query_cost = self.max_query_cost;
             new_snapshot.optimization = self.optimization.clone();
             new_snapshot.hnsw_search_fn = self.hnsw_search_fn();
+            self.stamp_changes(&mut new_snapshot);
             self.snapshot.store(Arc::new(new_snapshot));
         }
 
@@ -2424,6 +2442,20 @@ impl KnowledgeGraph {
             snapshot_ms = snapshot_start.elapsed().as_millis() as u64,
             "snapshot_publish_complete"
         );
+    }
+
+    /// Give `snapshot`, about to replace the published one, the change log
+    /// that follows the published one's: what its base relations and rules
+    /// change, stamped with its revision.
+    fn stamp_changes(&self, snapshot: &mut KnowledgeGraphSnapshot) {
+        let previous = self.snapshot.load();
+        let changes = previous.changes().next(
+            &previous,
+            self.store.relations(),
+            &snapshot.rules,
+            snapshot.revision,
+        );
+        snapshot.set_changes(changes);
     }
 
     /// HNSW search over the indexes as of now (None without indexes).
@@ -5862,7 +5894,7 @@ mod tests {
             .insert_tuples_into("clear_pfx", "keep", vec![Tuple::new(vec![Value::Int32(3)])])
             .unwrap();
 
-        let results = storage
+        let (results, _) = storage
             .clear_relations_by_prefix_in("clear_pfx", "env_")
             .unwrap();
 
@@ -5899,7 +5931,7 @@ mod tests {
             )
             .unwrap();
 
-        let results = storage
+        let (results, _) = storage
             .clear_relations_by_prefix_in("clear_none", "zzz_")
             .unwrap();
 

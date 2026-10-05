@@ -8,8 +8,10 @@
 //!
 //! The OS releases the lock when the owning file handle closes, which
 //! includes the process exiting or crashing, so a leftover `LOCK` file never
-//! blocks a restart. The pid written into the file is diagnostic only; the
-//! OS lock is the sole authority.
+//! blocks a restart. Drop also unlocks explicitly: a child process spawned
+//! concurrently shares the open file until its `exec`, and closing our
+//! handle alone would leave the lock held for that window. The pid written
+//! into the file is diagnostic only; the OS lock is the sole authority.
 
 use super::{StorageError, StorageResult};
 use std::fs::{self, File, OpenOptions};
@@ -22,8 +24,8 @@ pub const LOCK_FILE_NAME: &str = "LOCK";
 /// Held exclusive lock on a data directory, released on drop.
 #[derive(Debug)]
 pub struct DataDirLock {
-    /// Open handle that owns the OS lock; closing it releases the lock.
-    _file: File,
+    /// Open handle that owns the OS lock; dropping the struct releases it.
+    file: File,
 }
 
 impl DataDirLock {
@@ -56,7 +58,14 @@ impl DataDirLock {
 
         file.set_len(0)?;
         writeln!(file, "{}", std::process::id())?;
-        Ok(Self { _file: file })
+        Ok(Self { file })
+    }
+}
+
+impl Drop for DataDirLock {
+    fn drop(&mut self) {
+        // Releases the lock on the shared open file, not just our handle.
+        let _ = fs4::FileExt::unlock(&self.file);
     }
 }
 
@@ -104,6 +113,30 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         drop(DataDirLock::acquire(tmp.path()).unwrap());
         DataDirLock::acquire(tmp.path()).unwrap();
+    }
+
+    /// Children spawned by other threads briefly share every open file.
+    #[test]
+    fn drop_releases_lock_while_processes_spawn() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let spawner = std::thread::spawn({
+            let stop = Arc::clone(&stop);
+            move || {
+                while !stop.load(Ordering::Relaxed) {
+                    let _ = std::process::Command::new("true").status();
+                }
+            }
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let refused = (0..2000)
+            .filter(|_| DataDirLock::acquire(tmp.path()).is_err())
+            .count();
+        stop.store(true, Ordering::Relaxed);
+        spawner.join().unwrap();
+        assert_eq!(refused, 0);
     }
 
     #[test]

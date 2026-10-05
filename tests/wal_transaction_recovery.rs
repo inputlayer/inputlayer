@@ -212,7 +212,7 @@ fn prefix_clear_is_one_transaction_across_relations() {
     // Reopening drains the WAL into batch files, so the clear is its only record.
     let storage = StorageEngine::new(engine_config(temp.path())).unwrap();
     assert_eq!(fs::metadata(&engine_wal).map_or(0, |m| m.len()), 0);
-    let cleared = storage
+    let (cleared, _) = storage
         .clear_relations_by_prefix_in("default", "p_")
         .unwrap();
     assert_eq!(cleared, [("p_a".into(), 3), ("p_b".into(), 4)]);

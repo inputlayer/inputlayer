@@ -107,11 +107,11 @@ List all users and their roles.
 
 ### `.user create <username> <password> <role>`
 
-Create a new user with the given password and role.
+Create a new user with the given password and role. Passwords need at least 12 characters.
 
 ```
-.user create alice s3cret viewer
-.user create bob hunter2 admin
+.user create alice alice-s3cret-pw viewer
+.user create bob hunter2-hunter2 admin
 ```
 
 **Roles:** `admin`, `editor`, `viewer`
@@ -126,10 +126,10 @@ Delete a user.
 
 ### `.user password <username> <new_password>`
 
-Change a user's password.
+Change a user's password. The new password needs at least 12 characters.
 
 ```
-.user password alice new-s3cret
+.user password alice new-s3cret-pw
 ```
 
 ### `.user role <username> <new_role>`

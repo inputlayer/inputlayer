@@ -789,5 +789,52 @@ mod tests {
                 let _ = parse_statement(&input);
             }
         }
+
+        /// One term `depth` levels deep (at least one), built by `kind`:
+        /// nested calls, nested groups, or a left-deep operator chain.
+        fn nested_term(kind: usize, depth: usize) -> String {
+            match kind {
+                0 => format!("{}Y{}", "abs(".repeat(depth), ")".repeat(depth)),
+                // The `+` is a level of its own
+                1 => {
+                    let groups = depth.saturating_sub(1);
+                    format!("{}Y+1{}", "(".repeat(groups), ")".repeat(groups))
+                }
+                2 => format!("Y{}", "+1".repeat(depth)),
+                _ => format!("Y{}", "%2".repeat(depth)),
+            }
+        }
+
+        // Deep nesting in every statement form is refused before it can
+        // overflow the stack (a 4,000-deep call once aborted the server).
+        proptest! {
+            #![proptest_config(ProptestConfig {
+                cases: 64,
+                failure_persistence: Some(Box::new(proptest::test_runner::FileFailurePersistence::SourceParallel("proptest-regressions"))),
+                .. ProptestConfig::default()
+            })]
+            #[test]
+            fn deep_nesting_is_refused_not_overflowed(
+                kind in 0usize..4,
+                depth in prop_oneof![
+                    120usize..140,
+                    Just(4_000usize),
+                    0usize..20_000,
+                ],
+                form in 0usize..5,
+            ) {
+                let term = nested_term(kind, depth);
+                let input = match form {
+                    0 => format!("+r({term})"),
+                    1 => format!("?r(Y), X = {term}"),
+                    2 => format!("+p(X) <- r(Y), X = {term}"),
+                    3 => format!("p(X) <- r(Y), {term} > X"),
+                    _ => format!("-r(Y) <- r(Y), Y = {term}"),
+                };
+                let too_deep = parse_statement(&input)
+                    .is_err_and(|e| e.contains("nesting exceeds the limit"));
+                prop_assert_eq!(too_deep, depth > crate::parser::max_nesting_depth());
+            }
+        }
     }
 }

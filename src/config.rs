@@ -240,6 +240,13 @@ pub struct PerformanceConfig {
     #[serde(default = "default_max_query_size_bytes")]
     pub max_query_size_bytes: usize,
 
+    /// Deepest nesting of a term or type expression: each function call,
+    /// arithmetic operator, parenthesized group, `list[...]` and record adds
+    /// a level. Deeper input is rejected as a validation error. Capped at
+    /// 1024; 0 is invalid and resets to 128. Process-wide.
+    #[serde(default = "default_max_nesting_depth")]
+    pub max_nesting_depth: usize,
+
     /// Maximum number of tuples in a single insert. 0 = no limit.
     #[serde(default = "default_max_insert_tuples")]
     pub max_insert_tuples: usize,
@@ -499,7 +506,11 @@ pub struct GuiConfig {
 #[serde(deny_unknown_fields)]
 pub struct AuthConfig {
     /// Initial admin password (set via INPUTLAYER_ADMIN_PASSWORD env var or config).
-    /// If unset on first boot, a random password is generated and printed to stderr.
+    /// If unset or blank on first boot, a random password is generated and
+    /// saved to the credentials file. A supplied one needs at least
+    /// [`crate::auth::MIN_PASSWORD_CHARS`] characters or the server refuses
+    /// to start on first boot; once the admin exists a short one is ignored
+    /// with a warning.
     #[serde(default)]
     pub bootstrap_admin_password: Option<String>,
 
@@ -655,6 +666,9 @@ fn default_query_timeout_ms() -> u64 {
 }
 fn default_max_query_size_bytes() -> usize {
     1_048_576 // 1 MB
+}
+fn default_max_nesting_depth() -> usize {
+    crate::parser::DEFAULT_MAX_NESTING_DEPTH
 }
 fn default_max_insert_tuples() -> usize {
     10_000
@@ -927,6 +941,24 @@ impl Config {
             self.storage.persist.buffer_size = 1000;
         }
 
+        // 0 would reject every term; past the ceiling deep input could
+        // overflow the stack again
+        let depth = self.storage.performance.max_nesting_depth;
+        if depth == 0 {
+            tracing::warn!(
+                "max_nesting_depth = 0 is invalid, auto-correcting to {}",
+                crate::parser::DEFAULT_MAX_NESTING_DEPTH
+            );
+            self.storage.performance.max_nesting_depth = default_max_nesting_depth();
+        } else if depth > crate::parser::MAX_NESTING_DEPTH_CEILING {
+            tracing::warn!(
+                value = depth,
+                "max_nesting_depth exceeds {}, capping",
+                crate::parser::MAX_NESTING_DEPTH_CEILING
+            );
+            self.storage.performance.max_nesting_depth = crate::parser::MAX_NESTING_DEPTH_CEILING;
+        }
+
         // Warn about very long query timeouts (> 10 minutes)
         if self.storage.performance.query_timeout_ms > 600_000 {
             tracing::warn!(
@@ -1013,6 +1045,7 @@ impl Config {
                     num_threads: 0,
                     query_timeout_ms: 30_000,
                     max_query_size_bytes: 1_048_576,
+                    max_nesting_depth: default_max_nesting_depth(),
                     max_insert_tuples: 10_000,
                     max_string_value_bytes: 65_536,
                     max_result_rows: default_max_result_rows(),
@@ -1067,6 +1100,7 @@ impl Default for PerformanceConfig {
             num_threads: 0, // 0 = use all available CPU cores
             query_timeout_ms: default_query_timeout_ms(),
             max_query_size_bytes: default_max_query_size_bytes(),
+            max_nesting_depth: default_max_nesting_depth(),
             max_insert_tuples: default_max_insert_tuples(),
             max_string_value_bytes: default_max_string_value_bytes(),
             max_result_rows: default_max_result_rows(),
@@ -1177,8 +1211,9 @@ mod tests {
         // config fields; they must not break config parsing.
         figment::Jail::expect_with(|jail| {
             jail.create_file("server.toml", "[storage]\ndata_dir = \"/tmp/x\"\n")?;
-            jail.set_env("INPUTLAYER_BOOTSTRAP_API_KEY", "secret");
-            jail.set_env("INPUTLAYER_ADMIN_PASSWORD", "secret");
+            // Blank, so tests bootstrapping meanwhile still generate theirs.
+            jail.set_env("INPUTLAYER_BOOTSTRAP_API_KEY", "");
+            jail.set_env("INPUTLAYER_ADMIN_PASSWORD", "");
             jail.set_env("INPUTLAYER_API_KEY", "client-key");
             let config = Config::from_file("server.toml").expect("parse must succeed");
             assert_eq!(config.storage.data_dir, PathBuf::from("/tmp/x"));
