@@ -54,7 +54,7 @@ make integration-test   # cargo test --all-features --test '*'
 | `subscription` | Standing queries assembled purely from pushed `inserted`/`retracted` deltas, through the real notification, dependency-filtering, coalescing and shared-view path a subscribed agent uses. Each query has two subscribers on one shared view, one taking every publication and one only the settled result; they must agree. |
 | `spec` | Results recorded in `.iql.out` transcripts (corpus cases only). |
 
-Histories come from hand-written scenarios (duplicate supports, recursive edge removal, negation, aggregates, rule replacement, restart), seeded random generation, and the `.iql.out` corpus of the derived-result categories. Results are compared as Z-sets, so a row reported twice or retracted without being present is a divergence of its own. A divergence is minimized (delta debugging) to a short reproducing script.
+Histories come from hand-written scenarios (duplicate supports, recursive edge removal, negation, aggregates, rule replacement, restart), seeded random generation, and the `.iql.out` corpus of the derived-result categories, and scenario histories of the [scenario suite](#catalogue-scenarios) (`oracle_check`). Results are compared as Z-sets, so a row reported twice or retracted without being present is a divergence of its own. A divergence is minimized (delta debugging) to a short reproducing script.
 
 Constructs the reference does not model (e.g. `avg`, `top_k`, arithmetic, floats, session state) are reported as explicit skips with a reason, never counted as agreement; the engine adapters are still compared with each other and the spec. A new evaluation strategy (such as persistent per-KG dataflows) joins by implementing the `Adapter` trait: `observe` takes the revision the result must reflect.
 
@@ -140,11 +140,12 @@ INPUTLAYER_SCENARIO_VIEWS=maintained cargo test --test scenarios  # refused unti
 ```
 
 Modules: `reactive`, `stream`, `delivery`, `saturation` and `wire` (the agent
-path below), and `harness` (the testkit pieces scenarios build on, checked
-against a real engine). The suite runs in about 25 s in debug on 4 cores.
-`make test-all` and `make ci-test-all` run it once, in release through
-`make e2e-reactive`: their debug unit stage runs every other workspace test
-without the scenarios binary.
+path below), `harness` (the testkit pieces scenarios build on, checked against
+a real engine), and the catalogue scenarios `lifecycle`, `claims`,
+`retraction`, `restart` and `tenancy` (below). The suite runs in about 25 s in
+debug on 4 cores. `make test-all` and `make ci-test-all` run it once, in
+release through `make e2e-reactive`: their debug unit stage runs every other
+workspace test without the scenarios binary.
 
 ### Harness
 
@@ -167,7 +168,11 @@ without the scenarios binary.
 - `WsClient::execute_expecting(program, revision, relations)` sends
   `expect_revision`; `execute_at(program, revision)` sends `at` (V13 #316).
   `QueryResult::revision` is the reply's revision: set for writes, `None` for
-  queries until V9 (#315).
+  queries until V9 (#315); `QueryResult::statements` holds a write's
+  per-statement counts. `try_execute` and `try_execute_expecting` (with an
+  `Expect` that can also pin `expect_epoch`) return the engine's `Refusal`
+  with its structured `code` instead of a violation, for scenarios that assert
+  how a request is refused.
 - `Fixture::shop_pack(Size)` installs one knowledge graph whose rules cover
   join, comparison, negation, recursion, negation over recursion and an
   aggregate (`Size::Vector` adds embeddings, the `emb_idx` HNSW index and the
@@ -178,6 +183,41 @@ without the scenarios binary.
   it; visible with `--nocapture`, as in `make e2e-reactive`). Nothing enforces
   the 200 ms budget yet: the perf-tier fixture tracked in #347 will, on the
   benchmark host. No PR or coverage run asserts on wall-clock time.
+
+### Catalogue scenarios
+
+The strategy's scenarios that hold on today's engine, each on the shop pack
+with agents, writers and auditors on their own keys. Each asserts rows, deltas
+and revisions, structured errors, and that other agents are unaffected, with
+one vocabulary (`tests/scenarios/support.rs`): `View::assert_matches` against
+a fresh query on another connection, `Delta::assert_rows`,
+`write_revision_matches_delta`, `refused(reply, code, message)` and
+`others_unaffected(agents)`; the testkit agent checks contiguous `seq` and
+increasing `revision` on every delta it applies. Together they take a few
+seconds of the suite.
+
+| Scenario | Test | Captain's table row | Gates (milestone 9) |
+|----------|------|---------------------|---------------------|
+| S1 agent lifecycle on a deployed rule | `lifecycle::s1_agent_lifecycle_on_a_deployed_rule` | 1, 3 | V10 #317, V11 #318, V14 #320 |
+| S7 concurrent claim refused with the reason | `claims::s7_concurrent_claim_is_refused_with_the_reason` | 1 (`expect_revision`, decider keys) | V14 #320 |
+| S9 retraction through recursion and negation | `retraction::s9_*` (live and through the oracle) | 1, 3 | V4 #311, V5 #312; V0 #307 keeps it green |
+| S12 restart mid-scenario | `restart::s12_restart_mid_scenario_preserves_revisions` | 3 | V18 #330 |
+| S15 multi-tenant isolation and scoped keys | `tenancy::s15_tenants_and_scoped_keys_are_isolated` | 1 (per tenant) | V10 #317 |
+
+Each scenario's doc comment states its steps, its row and its gates. S9's
+history also runs through the differential oracle (`oracle_check`, which
+includes the oracle's adapters by path): the reference, recompute,
+subscription and subscription-group adapters must agree at every checkpoint,
+and the reference must model the whole history.
+
+Where the strategy's table and the documented contract differ, a scenario
+asserts the contract and says so in its doc comment: revisions restart with
+the engine and are paired with the run's stream epoch (S12 asserts a new epoch
+and a refused pre-crash `expect_revision`), and a `writer` key may subscribe on
+its own graph (S15 refuses its access to the other graph instead). A
+permission refusal carries no structured `code` today; S15 asserts
+`access_denied` as an expected failure (`KnownDefect`, #364), so it fails
+loudly once the code is sent.
 
 ### Reactive agent path
 
@@ -239,7 +279,8 @@ quarantined for a rare engine hang in `.index create` (#377).
 
 Tracked defects run as **expected failures** through
 `inputlayer_testkit::KnownDefect`, naming the issue that fixes them (today:
-`harness::counters_scrape_the_running_engine`, #308). Each asserts the
+`harness::counters_scrape_the_running_engine`, #308;
+`tenancy::s15_tenants_and_scoped_keys_are_isolated`, #364). Each asserts the
 correct contract; its own violation passes as `XFAIL`, any other violation
 fails, and a holding contract fails as `XPASS` so the marker is removed and
 the scenario becomes required when the issue lands.

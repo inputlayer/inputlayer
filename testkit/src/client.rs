@@ -174,6 +174,61 @@ impl Pacing {
     };
 }
 
+/// The engine's `error` reply to a request: nothing it asked for was applied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    /// The structured `code` (`precondition_failed`, `validation`, ...);
+    /// `None` when the engine sent none.
+    pub code: Option<String>,
+    pub message: String,
+}
+
+impl Refusal {
+    fn from_frame(frame: &Frame) -> Self {
+        Self {
+            code: frame.value["code"].as_str().map(str::to_string),
+            message: frame.value["message"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        }
+    }
+}
+
+/// The `expect_revision` precondition of a write (see `ClientFrame::Execute`).
+#[derive(Debug, Clone, Default)]
+pub struct Expect {
+    pub revision: u64,
+    /// `expect_relations`; `None` scopes the whole knowledge graph.
+    pub relations: Option<Vec<String>>,
+    /// `expect_epoch`: the engine run `revision` belongs to.
+    pub epoch: Option<String>,
+}
+
+impl Expect {
+    /// Nothing in the knowledge graph changed after `revision`.
+    pub fn at(revision: u64) -> Self {
+        Self {
+            revision,
+            ..Self::default()
+        }
+    }
+
+    /// Narrow the scope to `relations` and what they are derived from.
+    #[must_use]
+    pub fn relations(mut self, relations: &[&str]) -> Self {
+        self.relations = Some(relations.iter().map(|r| (*r).to_string()).collect());
+        self
+    }
+
+    /// Pin `revision` to the engine run of `epoch`.
+    #[must_use]
+    pub fn epoch(mut self, epoch: &str) -> Self {
+        self.epoch = Some(epoch.to_string());
+        self
+    }
+}
+
 /// An authenticated `/ws` connection.
 ///
 /// Every request carries an id; a reply that does not echo it is a
@@ -384,6 +439,37 @@ impl WsClient {
         self.result().await
     }
 
+    /// Run `program`; returns its result, or the engine's refusal with its
+    /// structured code.
+    pub async fn try_execute(&mut self, program: &str) -> Checked<Result<QueryResult, Refusal>> {
+        self.send(json!({"type": "execute", "program": program}))
+            .await?;
+        self.try_result().await
+    }
+
+    /// [`Self::execute_expecting`] with the whole precondition, `expect_epoch`
+    /// included; returns the result, or the engine's refusal with its code
+    /// (`precondition_failed`).
+    pub async fn try_execute_expecting(
+        &mut self,
+        program: &str,
+        expect: &Expect,
+    ) -> Checked<Result<QueryResult, Refusal>> {
+        let mut request = json!({
+            "type": "execute",
+            "program": program,
+            "expect_revision": expect.revision,
+        });
+        if let Some(relations) = &expect.relations {
+            request["expect_relations"] = json!(relations);
+        }
+        if let Some(epoch) = &expect.epoch {
+            request["expect_epoch"] = json!(epoch);
+        }
+        self.send(request).await?;
+        self.try_result().await
+    }
+
     /// Run `program` reading the knowledge graph as of `revision` (`at`,
     /// V13 #316). Until the engine supports `at` it answers at its latest
     /// revision; compare [`QueryResult::revision`] with `revision`.
@@ -429,19 +515,27 @@ impl WsClient {
     /// The reply to the oldest request sent with [`Self::send_execute`]: its
     /// complete result or the engine's error.
     pub async fn result(&mut self) -> Checked<QueryResult> {
+        self.try_result()
+            .await?
+            .map_err(|refusal| Violation::Rejected(refusal.message))
+    }
+
+    /// The reply to the oldest outstanding request: its complete result or
+    /// the engine's refusal.
+    pub async fn try_result(&mut self) -> Checked<Result<QueryResult, Refusal>> {
         let result = self.read_result().await;
         self.outstanding.pop_front();
         result
     }
 
     /// Read the reply to the oldest outstanding request.
-    async fn read_result(&mut self) -> Checked<QueryResult> {
+    async fn read_result(&mut self) -> Checked<Result<QueryResult, Refusal>> {
         let header = self.next_reply().await?;
         match header.kind() {
             "result" => {
                 let mut result = QueryResult::from_header(&header);
                 result.extend_rows(&header);
-                Ok(result)
+                Ok(Ok(result))
             }
             // Complete only at a `result_end` its chunks add up to.
             "result_start" => {
@@ -469,7 +563,7 @@ impl WsClient {
                                 });
                             }
                             result.at = frame.at;
-                            return Ok(result);
+                            return Ok(Ok(result));
                         }
                         "error" => {
                             return Err(Violation::Rejected(format!(
@@ -486,12 +580,7 @@ impl WsClient {
                     }
                 }
             }
-            "error" => Err(Violation::Rejected(
-                header.value["message"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string(),
-            )),
+            "error" => Ok(Err(Refusal::from_frame(&header))),
             _ => Err(Violation::Transport(format!(
                 "unexpected reply: {}",
                 header.value

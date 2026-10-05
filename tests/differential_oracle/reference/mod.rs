@@ -60,6 +60,12 @@ impl ReferenceAdapter {
                 }
                 Ok(Outcome::Assumed)
             }
+            // Declares a base relation; the engine checks the types of its
+            // facts, which the reference assumes valid.
+            Statement::SchemaDecl(decl) if decl.persistent => {
+                self.ensure_base(&decl.name)?;
+                Ok(Outcome::Assumed)
+            }
             Statement::PersistentRule(rule) => self.add_clause(rule),
             Statement::Meta(MetaCommand::RuleDrop(name))
             | Statement::DeleteRelationOrRule(name) => Ok(match self.rules.remove(&name) {

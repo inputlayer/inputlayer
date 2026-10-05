@@ -22,7 +22,7 @@ pub mod metrics;
 pub mod streamed;
 
 pub use agent::{Agent, Delta, View};
-pub use client::{Commit, QueryResult, WsClient};
+pub use client::{Commit, Expect, QueryResult, Refusal, WsClient};
 pub use contract::{Checked, Violation};
 pub use counters::Counters;
 pub use engine::{Engine, EngineBuilder, Mode, Replication};

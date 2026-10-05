@@ -18,20 +18,57 @@
 //! notification stream and snapshot handoff), `delivery` (results and deltas
 //! too large for one frame), `saturation` (sessions' deltas while writers
 //! overload the engine), `wire` (request correlation) and `harness`
-//! (the testkit pieces the scenarios build on). Expected failures for tracked
+//! (the testkit pieces the scenarios build on). The strategy's catalogue
+//! scenarios on the shop pack, each naming its captain's table row and the
+//! milestone 9 issues it gates: `lifecycle` (S1), `claims` (S7),
+//! `retraction` (S9, also through the differential oracle via
+//! `oracle_check`), `restart` (S12) and `tenancy` (S15), sharing the
+//! assertions in `support`. Expected failures for tracked
 //! defects use `inputlayer_testkit::KnownDefect`; an XPASS fails the run.
 //!
 //! Agents use the testkit's thin `/ws` client until an SDK subscribe API
 //! exists; switch them to the SDK then.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod claims;
 mod delivery;
 mod harness;
+mod lifecycle;
+mod oracle_check;
 mod reactive;
+mod restart;
+mod retraction;
 mod saturation;
 mod stream;
+mod support;
+mod tenancy;
 mod wire;
+
+// The differential oracle's adapters, for `oracle_check`. They name each
+// other as `crate::...`, so they sit at the crate root as in their own binary.
+#[path = "../differential_oracle/adapter.rs"]
+mod adapter;
+#[path = "../differential_oracle/engine.rs"]
+#[allow(dead_code)]
+mod engine;
+#[path = "../differential_oracle/group.rs"]
+mod group;
+#[path = "../differential_oracle/minimize.rs"]
+mod minimize;
+#[path = "../differential_oracle/model.rs"]
+#[allow(dead_code)]
+mod model;
+#[path = "../differential_oracle/oracle.rs"]
+#[allow(dead_code)]
+mod oracle;
+#[path = "../differential_oracle/recompute.rs"]
+mod recompute;
+#[path = "../differential_oracle/reference/mod.rs"]
+mod reference;
+#[path = "../differential_oracle/subscription.rs"]
+#[allow(dead_code)]
+mod subscription;
 
 use inputlayer_testkit::{EngineBuilder, Mode};
 
