@@ -196,7 +196,7 @@ like the ontology seeds — prompt text can never write them), demonstrated exam
 become a third origin beside conversation and output, and eighteen new finding kinds
 cover phantom tools, schema drift, rule-violating examples, deleted mandatory rules,
 and guardrail weakening — each with verbatim spans and proof trees, engine-validated
-in `examples/iql/43_prompt_integrity/`. One ontology, layered: tool calling is new
+in `examples/iql/90_product_fixtures/43_prompt_integrity/`. One ontology, layered: tool calling is new
 fact relations in the same graph, not a second pack. Design and corpus mapping:
 `docs/prompt-integrity.md`.
 

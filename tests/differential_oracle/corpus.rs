@@ -33,7 +33,7 @@ const CATEGORIES: &[&str] = &[
     "18_advanced_patterns",
     "22_set_operations",
     "27_atomic_ops",
-    "42_consistency_pack",
+    "90_product_fixtures/42_consistency_pack",
 ];
 
 /// Cases whose engine evaluation alone takes tens of seconds in a debug

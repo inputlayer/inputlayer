@@ -1,6 +1,6 @@
 # Prompt integrity: checking a system prompt against the runtime it is bound to
 
-Status: rule pack engine-validated (snapshot test `examples/iql/43_prompt_integrity/`),
+Status: rule pack engine-validated (snapshot test `examples/iql/90_product_fixtures/43_prompt_integrity/`),
 extraction contract specified, gateway wiring pending. Companion to
 `rules/prompt-integrity.iql`; read the consistency-core docs first — this pack is an
 extension, not a sibling.

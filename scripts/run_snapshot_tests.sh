@@ -12,6 +12,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 EXAMPLES_DIR="$PROJECT_DIR/examples/iql"
+AFFECTED_MAP="$SCRIPT_DIR/affected-map.toml"
 SERVER_PORT="${INPUTLAYER_TEST_PORT:-8080}"
 SERVER_URL="http://127.0.0.1:${SERVER_PORT}"
 CLIENT_SERVER_URL="${SERVER_URL}"
@@ -433,28 +434,45 @@ changed_files() {
     git -C "$PROJECT_DIR" diff --name-only "$1" --
 }
 
+# Spec categories affected-map.toml lists for a changed file: the entry for
+# the file itself or for a directory above it. Prints nothing when the file
+# has no entry.
+mapped_categories() {
+    awk -v file="$1" '
+        /^"/ {
+            split($0, parts, "\"")
+            module = parts[2]
+            if (file == module || index(file, module "/") == 1) {
+                line = $0
+                sub(/^[^\[]*\[/, "", line)
+                gsub(/[\]",]/, " ", line)
+                print line
+            }
+        }
+    ' "$AFFECTED_MAP"
+}
+
 # Map changed files to the spec categories that exercise them. Sets
 # AFFECTED (space-separated categories) and AFFECTED_ALL=1 when a change can
-# reach every category. Only leaf modules have a narrow mapping; any other
-# change to the engine's sources or build runs the whole corpus, so a module
-# missing from this list costs time rather than coverage.
+# reach every category. Only the leaf modules in affected-map.toml (generated
+# by gen-affected-map.py from each category's statement types) have a narrow
+# mapping; any other change to the engine's sources or build runs the whole
+# corpus, so a module missing from the map costs time rather than coverage.
 affected_categories() {
     AFFECTED=""
     AFFECTED_ALL=0
     local file categories
     for file in "$@"; do
-        categories=""
-        case "$file" in
-            src/vector_ops.rs|src/hnsw_index.rs|src/hnsw_index_tests.rs)
-                categories="16_vectors 30_quantization 31_lsh" ;;
-            src/temporal_ops.rs)
-                categories="29_temporal" ;;
-            src/*.rs|src/*/*|Cargo.toml|Cargo.lock|config.toml|ws-protocol/*|ontology-client/*|scripts/run_snapshot_tests.sh)
-                AFFECTED_ALL=1 ;;
-            examples/iql/*/*)
-                # A spec changed: run its category
-                categories=$(echo "$file" | cut -d/ -f3) ;;
-        esac
+        categories=$(mapped_categories "$file")
+        if [[ -z "$categories" ]]; then
+            case "$file" in
+                src/*.rs|src/*/*|Cargo.toml|Cargo.lock|config.toml|ws-protocol/*|ontology-client/*|scripts/run_snapshot_tests.sh|scripts/affected-map.toml|scripts/gen-affected-map.py)
+                    AFFECTED_ALL=1 ;;
+                examples/iql/*/*)
+                    # A spec changed: run its category
+                    categories=$(echo "$file" | cut -d/ -f3) ;;
+            esac
+        fi
         AFFECTED="$AFFECTED $categories"
     done
     AFFECTED=$(echo "$AFFECTED" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//')
@@ -504,6 +522,10 @@ if [[ -n "$AFFECTED_REF" ]]; then
     fi
     if ! CHANGED=$(changed_files "$AFFECTED_REF"); then
         echo -e "${RED}Cannot diff against $AFFECTED_REF${NC}"
+        exit 1
+    fi
+    # A stale map would pick categories from specs that have since changed
+    if ! "$SCRIPT_DIR/gen-affected-map.py" --check; then
         exit 1
     fi
     affected_categories $CHANGED

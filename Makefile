@@ -641,7 +641,7 @@ lint:
 # make pre-pr PRE_PR_PERF=perf-gate-remote.
 PRE_PR_PERF ?= perf-gate
 PRE_PR_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null)
-PRE_PR_RUST_INPUTS := src tests benches examples gateway ontology-client testkit ws-protocol docs/spec Cargo.toml Cargo.lock config.toml clippy.toml Makefile scripts/test-affected.sh scripts/run_snapshot_tests.sh
+PRE_PR_RUST_INPUTS := src tests benches examples gateway ontology-client testkit ws-protocol docs/spec Cargo.toml Cargo.lock config.toml clippy.toml Makefile scripts/test-affected.sh scripts/run_snapshot_tests.sh scripts/affected-map.toml scripts/gen-affected-map.py
 pre-pr:
 	@set -e; \
 	targets="fmt-check"; \
