@@ -24,6 +24,7 @@ use tokio::time::Instant;
 use tracing::{debug, warn};
 
 use crate::protocol::handler::Notification;
+use crate::storage_engine::KnowledgeGraphSnapshot;
 
 use super::parameterized::{self, Families};
 use super::publication::{Doorbell, SubscriberId};
@@ -36,6 +37,7 @@ enum Command {
     Attach {
         key: ViewKey,
         doorbell: Arc<Doorbell>,
+        graph: Option<Arc<KnowledgeGraphSnapshot>>,
         query: Box<dyn StandingQuery>,
         reply: Reply,
     },
@@ -102,11 +104,13 @@ impl SubscriptionHub {
     }
 
     /// Attach a subscriber to the view of `key`; `query` evaluates it if the
-    /// view does not exist yet. Resolves to the subscriber's snapshot.
+    /// view does not exist yet. Resolves to the subscriber's snapshot, exact
+    /// at `graph`'s revision (the knowledge graph's when it subscribed) or later.
     pub async fn attach(
         &self,
         key: ViewKey,
         doorbell: Arc<Doorbell>,
+        graph: Option<Arc<KnowledgeGraphSnapshot>>,
         query: Box<dyn StandingQuery>,
     ) -> Result<Attachment, String> {
         let (reply, answer) = oneshot::channel();
@@ -114,6 +118,7 @@ impl SubscriptionHub {
             .send(Command::Attach {
                 key,
                 doorbell,
+                graph,
                 query,
                 reply,
             })
@@ -177,12 +182,16 @@ impl Worker {
             Command::Attach {
                 key,
                 doorbell,
+                graph,
                 query,
                 reply,
             } => {
                 self.drain_notifications();
                 let subscriber = doorbell.id();
-                match self.registry.attach(key, doorbell, || query) {
+                match self
+                    .registry
+                    .attach(key, doorbell, graph.as_deref(), || query)
+                {
                     Attach::Attached(attachment) => self.answer(subscriber, reply, Ok(attachment)),
                     Attach::Waiting(dispatch) => {
                         self.replies.insert(subscriber, reply);
@@ -314,14 +323,14 @@ mod tests {
         let (first, _m1) = doorbell(hub.next_subscriber_id());
         let steps = vec![Ok((vec![1], "a")), Ok((vec![1], "a"))];
         let old = hub
-            .attach(key(), first, Scripted::boxed(steps))
+            .attach(key(), first, None, Scripted::boxed(steps))
             .await
             .unwrap();
 
         announce.send(rule_change()).unwrap();
         let (second, _m2) = doorbell(hub.next_subscriber_id());
         let new = hub
-            .attach(key(), second, Scripted::boxed([Ok((vec![2], "a"))]))
+            .attach(key(), second, None, Scripted::boxed([Ok((vec![2], "a"))]))
             .await
             .unwrap();
         assert!(!Arc::ptr_eq(&new.cell, &old.cell));

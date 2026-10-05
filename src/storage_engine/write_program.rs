@@ -360,6 +360,9 @@ pub enum CommitError {
     /// The KG published a new snapshot after the program read it. Stage the
     /// program again against the current snapshot.
     Stale,
+    /// The request's [`Precondition`](super::Precondition) does not hold on
+    /// the KG's current state. Staging again cannot change that.
+    Precondition(super::PreconditionError),
     /// The request was stopped (deadline or cancel) before the commit began.
     Cancelled(Stop),
     /// Statement `statement` cannot apply to the KG's current state.
@@ -407,6 +410,7 @@ impl CommitError {
                     .to_string(),
             ),
             Self::Cancelled(stop) => StorageError::Other(stop.message().to_string()),
+            Self::Precondition(error) => StorageError::Other(error.to_string()),
         }
     }
 }
