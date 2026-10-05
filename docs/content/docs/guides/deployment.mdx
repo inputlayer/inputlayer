@@ -559,7 +559,7 @@ creating `inputlayer-data` from the snapshot (`spec.dataSource`).
 
 ### Memory
 
-InputLayer holds the active working set in memory via Differential Dataflow. Memory usage is proportional to the number of facts, rules, and active computations.
+InputLayer holds the facts of loaded knowledge graphs in memory, in its relation store. Derived data is not kept: each query builds a Differential Dataflow computation over a snapshot of the facts and drops it when it finishes. Memory usage is proportional to the number of facts plus the working memory of the queries and standing queries running at the time.
 
 | Workload | Facts | Rules | Recommended Memory |
 |---|---|---|---|
@@ -632,7 +632,7 @@ four graphs at their full budget (4 × 0.5 + 3 + 0.5 = 5.5 GiB, inside
 
 ### CPU
 
-Differential Dataflow benefits from multiple cores for parallel dataflow computation. The `num_threads` setting (default: `0`, meaning all available cores) controls worker parallelism.
+Each query runs its own Differential Dataflow computation, and concurrent queries and standing-query re-evaluations run on separate workers, so more cores serve more of them at once. The `num_threads` setting (default: `0`, meaning all available cores) controls worker parallelism.
 
 | Workload | Recommended CPU |
 |---|---|
@@ -697,7 +697,7 @@ WARNING: Durability mode is Batched (not Immediate).
 Recent writes may be lost on crash.
 ```
 
-Also ensure `storage.persist.enabled = true`. Without it, all data is lost on restart:
+Also ensure `storage.persist.enabled = true` (the "DD-native persist layer" is the WAL + Parquet storage layer). Without it, all data is lost on restart:
 
 ```
 WARNING: DD-native persist layer is DISABLED.

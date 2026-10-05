@@ -4,12 +4,12 @@ A unified syntax for InputLayer, designed for intuitive data manipulation and qu
 
 ## Quick Reference
 
-| Operator | Meaning | Persisted | DD Semantics |
-|----------|---------|-----------|--------------|
-| `+` | Insert fact or persistent rule | Yes | diff = +1 |
-| `-` | Delete fact or drop rule | Yes | diff = -1 |
-| `<-` (no `+`) | Session rule (transient) | No | Ad-hoc computation |
-| `?` | Query | No | Ad-hoc query |
+| Operator | Meaning | Persisted | Stored as |
+|----------|---------|-----------|-----------|
+| `+` | Insert fact or persistent rule | Yes | Fact: WAL record with diff +1, applied to the relation store. Rule: catalog entry |
+| `-` | Delete fact or drop rule | Yes | Fact: WAL record with diff -1, removed from the relation store. Rule: catalog entry removed |
+| `<-` (no `+`) | Session rule (transient) | No | Nothing; compiled into each query of the session |
+| `?` | Query | No | Nothing; evaluated against the current facts |
 
 ## Key Terminology
 
@@ -133,7 +133,7 @@ To update data, delete the old value then insert the new:
 
 ## Persistent Rules (`+head <- body`)
 
-Persistent rules are saved to disk and incrementally maintained by Differential Dataflow.
+Persistent rules are saved to the knowledge graph's rule catalog (`rules/catalog.json`) and evaluated from the base facts on every query that reads them. No rule results are stored between queries. Planned: deployed rules become incrementally maintained views ([#305](https://github.com/inputlayer/inputlayer/issues/305), not yet shipped).
 
 Simple rule:
 ```iql
@@ -359,18 +359,20 @@ See [functions](functions) for the complete reference (55 functions).
    Sim = cosine(V, [0.9, 0.1]), Sim > 0.5
 ```
 
-## Differential Dataflow Semantics
+## Differential Dataflow as the Execution Engine
 
-InputLayer is built on Differential Dataflow (DD), which uses a diff-based model:
+InputLayer executes each query as a Differential Dataflow (DD) dataflow that is built for that query and torn down when it finishes:
 
-- `+fact` sends `(fact, time, +1)` to DD
-- `-fact` sends `(fact, time, -1)` to DD
-- Rules are incrementally maintained using DD's `iterate()` operator
-- Queries are executed using DD's dataflow operators
+- `+fact` is recorded as a `(fact, time, +1)` triple in the WAL and applied to the relation store
+- `-fact` is recorded as a `(fact, time, -1)` triple and removed from the relation store
+- A query reads the current facts, evaluates the persistent and session rules it depends on (recursion uses DD's `iterate()`), and returns the result
+- No dataflow or rule result survives between queries; the next query evaluates again from the facts
 
-The persistence layer stores `(data, time, diff)` triples, enabling:
-- Efficient incremental updates
-- Crash recovery with WAL (Write-Ahead Log)
+The `(data, time, diff)` triple is the persist format of the WAL and Parquet batches, used for:
+- Crash recovery with the WAL (Write-Ahead Log)
+- Compaction of the stored facts
+
+Planned: the live-views milestone ([#305](https://github.com/inputlayer/inputlayer/issues/305), not yet shipped) keeps one long-lived dataflow per knowledge graph that maintains every persistent rule as it changes; queries will then read those views instead of re-deriving them.
 
 ## Architecture
 

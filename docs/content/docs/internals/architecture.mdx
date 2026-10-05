@@ -1,22 +1,18 @@
 # InputLayer Architecture
 
-**Version**: 3.0 (Production-Ready)
-**Date**: 2026-02-05
-**Status**: All architectural issues resolved, ready for HNSW indexing
+**Status**: Describes the engine as it runs today. Persistent rules are evaluated on every read; they are not materialized or incrementally maintained. Section 16 describes the planned live-views design ([#305](https://github.com/inputlayer/inputlayer/issues/305)), which is not yet shipped.
 
 ---
 
 ## Overview
 
-InputLayer is an incremental database engine built on Differential Dataflow (DD). The architecture supports:
+InputLayer is a Datalog engine that executes each query as a Differential Dataflow (DD) dataflow over a snapshot of the knowledge graph's facts. The architecture provides:
 
-- **Persistent incremental computation** via DDComputation with shared arrangements
-- **Lock-free concurrent reads** via ArcSwap snapshot system
-- **Rule materialization** with automatic cascade invalidation
+- **Recompute on read**: every query evaluates the persistent rules it depends on from the base facts, in a dataflow built for that query and torn down afterwards
+- **Lock-free concurrent reads** via an ArcSwap snapshot system
+- **Standing queries (subscriptions)** that re-evaluate their query after each relevant commit and send the diff against the previous result
 - **Session isolation** for ephemeral facts and rules
-- **Multi-worker parallel execution** for batch queries
-
-**Test Coverage**: ~3107 unit tests + ~1121 snapshot tests = ~4228 total, all passing.
+- **Durability** through a WAL and Parquet batch files
 
 ---
 
@@ -31,22 +27,17 @@ InputLayer is an incremental database engine built on Differential Dataflow (DD)
 |  |                        KnowledgeGraph                                    | |
 |  |                                                                          | |
 |  |  +--------------------+  +--------------------+  +-------------------+  | |
-|  |  |   IQLEngine    |  |    RuleCatalog     |  |  DDComputation    |  | |
-|  |  |                    |  |                    |  |   (Optional)      |  | |
-|  |  | input_tuples:      |  | rules: HashMap     |  |                   |  | |
-|  |  |   HashMap<String,  |  | catalog.json       |  | InputSessions     |  | |
-|  |  |   Vec<Tuple>>      |  |                    |  | TraceAgents       |  | |
-|  |  |                    |  | Stratification     |  | Arrangements      |  | |
-|  |  | num_workers: usize |  | Validation         |  | ProbeHandle<u64>  |  | |
-|  |  +--------------------+  +--------------------+  |                   |  | |
-|  |                                                   | DerivedRelations |  | |
-|  |  +--------------------------------------------+  |   Manager        |  | |
-|  |  |        ArcSwap<KnowledgeGraphSnapshot>      |  +-------------------+  | |
-|  |  |                                             |                          | |
-|  |  |  input_tuples: Arc<HashMap>                |                          | |
-|  |  |  rules: Arc<Vec<Rule>>                     |                          | |
-|  |  |  materialized_relations: Arc<HashSet>      |                          | |
-|  |  |  num_workers: usize                        |                          | |
+|  |  |   RelationStore    |  |    RuleCatalog     |  |   IndexManager    |  | |
+|  |  |  base facts with   |  |  rules/catalog.json|  |  HNSW indexes on  |  | |
+|  |  |  dedup indexes     |  |  stratification    |  |  base relations   |  | |
+|  |  +--------------------+  +--------------------+  +-------------------+  | |
+|  |                                                                          | |
+|  |  +--------------------------------------------+                          | |
+|  |  |        ArcSwap<KnowledgeGraphSnapshot>      |                          | |
+|  |  |  revision                                   |                          | |
+|  |  |  input_tuples: Arc<RelationMap> (base only) |                          | |
+|  |  |  rules: Arc<Vec<Rule>>                      |                          | |
+|  |  |  persistent: rule prefix + plan cache       |                          | |
 |  |  +--------------------------------------------+                          | |
 |  +-------------------------------------------------------------------------+ |
 |                                                                               |
@@ -55,7 +46,11 @@ InputLayer is an incremental database engine built on Differential Dataflow (DD)
 |  |              WAL (Write-Ahead Log) + Parquet Batch Files                | |
 |  +-------------------------------------------------------------------------+ |
 +-----------------------------------------------------------------------------+
+
+ Each query: snapshot -> fresh IQLEngine -> one DD dataflow per rule -> rows -> dataflow dropped
 ```
+
+No component keeps rule results between queries. Derived relations exist only inside the evaluation of the query that reads them.
 
 ---
 
@@ -65,132 +60,50 @@ InputLayer is an incremental database engine built on Differential Dataflow (DD)
 
 **Purpose**: Multi-knowledge-graph storage with concurrent access.
 
-```rust
-pub struct StorageEngine {
-    knowledge_graphs: DashMap<String, Arc<RwLock<KnowledgeGraph>>>,
-    logical_time: AtomicU64,
-    persist: Arc<FilePersist>,
-    config: StorageConfig,
-}
-```
-
 **Key Features**:
 - **DashMap** enables concurrent access to different KGs without global locking
-- **Logical timestamps** provide monotonically increasing write ordering
+- **Revisions** from one counter shared by every knowledge graph of the engine run; each published snapshot gets the next one
 - **Per-KG locking** allows parallel queries to different knowledge graphs
 
 ### 2.2 KnowledgeGraph
 
-**Purpose**: Single knowledge graph with data, rules, and optional incremental computation.
+**Purpose**: Single knowledge graph: base facts, rules, schemas, vector indexes and the current snapshot (`src/storage_engine/mod.rs`).
 
 ```rust
 pub struct KnowledgeGraph {
     name: String,
-    engine: IQLEngine,
-    rule_catalog: RuleCatalog,
-    schema_catalog: SchemaCatalog,  // Per-KG schema isolation
+    store: RelationStore,              // base relations with dedup indexes
+    rule_catalog: RuleCatalog,         // persistent rules (rules/catalog.json)
+    schema_catalog: SchemaCatalog,     // per-KG schema isolation
     snapshot: ArcSwap<KnowledgeGraphSnapshot>,
-    dd_computation: Option<DDComputation>,
+    incremental: Option<IncrementalEngine>, // None in production, see 2.4
+    auto_materialize: bool,                 // false in production, see 2.4
+    indexes: IndexManager,             // vector indexes on base relations
     num_workers: usize,
+    // query limits: max_result_rows, max_query_cost, max_recursion_iterations, ...
 }
 ```
-
-**Key Features**:
-- **IQLEngine**: Holds base relation data (`input_tuples`, private with accessors)
-- **RuleCatalog**: Persistent rule storage with stratification validation
-- **SchemaCatalog**: Per-KG schema validation (isolated from other KGs)
-- **Snapshot**: Lock-free point-in-time consistent views via ArcSwap
-- **DDComputation**: Optional persistent incremental computation (returns `Result`)
 
 ### 2.3 KnowledgeGraphSnapshot
 
-**Purpose**: Immutable point-in-time view for lock-free reads.
-
-```rust
-pub struct KnowledgeGraphSnapshot {
-    version: u64,
-    timestamp: u64,
-    input_tuples: Arc<HashMap<String, Vec<Tuple>>>,
-    rules: Arc<Vec<Rule>>,
-    materialized_relations: Arc<HashSet<String>>,
-    num_workers: usize,
-}
-```
+**Purpose**: Immutable point-in-time view for lock-free reads (`src/storage_engine/snapshot.rs`).
 
 **Key Features**:
-- **Arc-wrapped data** enables O(1) clone operations
-- **ArcSwap** provides atomic snapshot publication
-- **Materialization awareness** skips rules for already-materialized relations
-- **Session isolation** via `execute_with_session_facts()` method
+- **revision** names the state a query read and is returned to clients
+- **input_tuples** holds the base relations (Arc-shared with the store, O(1) clone per relation)
+- **rules** holds the persistent rules; **persistent** holds their formatted program prefix and a plan cache, shared with the previous snapshot while the rules are unchanged
+- **materialized_relations** is always empty on the server path (it is filled only when the test-only auto-materialization of 2.4 is on)
 
-### 2.4 DDComputation
+### 2.4 IncrementalEngine and DerivedRelationsManager (test-only)
 
-**Purpose**: Persistent incremental computation with shared arrangements.
+`src/incremental.rs` and `src/derived_relations.rs` contain an `IncrementalEngine` (a long-lived timely worker with one DD `InputSession` and arrangement per **base** relation) and a `DerivedRelationsManager` (rule bookkeeping whose compiled rule clauses are always empty). Neither is used by the server:
 
-```rust
-pub struct DDComputation {
-    command_tx: Sender<DDCommand>,
-    current_time: Arc<AtomicU64>,
-    max_write_time: Arc<AtomicU64>,
-    derived_relations: Arc<Mutex<DerivedRelationsManager>>,
-    known_relations: Mutex<HashSet<String>>,
-    worker_handle: Option<JoinHandle<()>>,
-}
-```
+- `KnowledgeGraph.incremental` is `None` in both production constructors; `enable_incremental()` and `set_auto_materialize()` are called only from tests.
+- There is no configuration key that turns either on.
+- When a test enables auto-materialization, each publish recomputes every rule from the base facts in a temporary engine and copies the results in; nothing is maintained incrementally.
+- No rule is compiled into a DD dataflow that outlives a query.
 
-**Architecture**:
-```
-Main Thread --command_tx--> DD Worker Thread
-                            +- Owns timely Worker<u64>
-                            +- Owns InputSessions per relation
-                            +- Owns TraceAgents (arrangements)
-                            +- Steps worker in event loop
-                            +- Processes commands between steps
-```
-
-**Command Protocol**:
-```rust
-enum DDCommand {
-    InsertDelta { relation, updates: Vec<(Tuple, u64, isize)> },
-    AdvanceTime(u64),
-    WaitUntilCaughtUp(u64, oneshot::Sender<()>),
-    AddRelation(String),
-    RegisterRule { name, dependencies },
-    RemoveRule(String),
-    SetMaterialized { relation, tuples },
-    NotifyBaseUpdate(String),
-    ReadRelation(String, oneshot::Sender<Vec<Tuple>>),
-    Shutdown,
-}
-```
-
-### 2.5 DerivedRelationsManager
-
-**Purpose**: Manage materialized derived relations with validity tracking.
-
-```rust
-pub struct DerivedRelationsManager {
-    compiled_rules: HashMap<String, CompiledRule>,
-    materialized: HashMap<String, MaterializedRelation>,
-    base_to_derived: HashMap<String, HashSet<String>>,
-    derived_to_derived: HashMap<String, HashSet<String>>,
-    base_versions: HashMap<String, u64>,
-}
-
-pub struct MaterializedRelation {
-    tuples: Vec<Tuple>,
-    version: u64,
-    base_versions: HashMap<String, u64>,
-    valid: bool,
-    materialized_at: u64,
-}
-```
-
-**Key Features**:
-- **Dependency tracking** maps base relations to derived relations
-- **Cascade invalidation** automatically invalidates dependent materializations
-- **Validity tracking** ensures queries see consistent data
-- **Version management** for optimistic concurrency
+The live-views milestone replaces this code (Section 16).
 
 ---
 
@@ -199,100 +112,71 @@ pub struct MaterializedRelation {
 ### 3.1 Write Path
 
 ```
-Insert Request
+WS/REST write program (+fact, -fact, +rule, ...)
     |
     v
-FilePersist.append() --------------------------> Durability (WAL)
+commit_program (KG write lock)                     src/storage_engine/program_commit.rs
+    |
+    +-> expect_revision precondition check
+    +-> resolve and validate facts (schema, refuse writes into rule heads)
+    +-> FilePersist: WAL append + fsync ----------> Durability
+    +-> apply_delta:
+    |     store insert/delete
+    |     vector index upsert/delete
+    |     shadow_write -> returns at once (incremental is None)
+    v
+publish_snapshot() -------------------------------> new revision, ArcSwap.store(new_snapshot)
     |
     v
-KnowledgeGraph.insert_in_memory()
-    |
-    +-> engine.input_tuples.insert() -----------> In-memory state
-    |
-    +-> DDComputation.insert() (if enabled)
-        |
-        +-> InputSession.update(tuple, time, +1)
-        |
-        +-> notify_base_update() ---------------> Cascade invalidation
-            |
-            +-> Invalidate dependent materializations
-    |
-    v
-auto_rematerialize_invalid_rules() -------------> Recompute materializations
-    |
-    v
-publish_snapshot() -----------------------------> Atomic snapshot publication
-    |
-    +-> Merge valid materializations into input_tuples
-    |
-    +-> ArcSwap.store(new_snapshot)
+notifications: one PersistentUpdate per changed relation
+    -> subscription hub re-evaluates affected standing queries (3.3)
 ```
+
+A fact commit does nothing to persistent rules: no rule result exists to update. Rule definitions are written to the catalog (`rules/catalog.json`) and logged in the WAL.
 
 ### 3.2 Read Path (Query)
 
 ```
-Query Request
+?path(X, Y)
     |
+    +-> query shorthand: __query__(X, Y) <- path(X, Y)
+    +-> parse session facts and session rules
     v
-Handler.query_program()
+KnowledgeGraphSnapshot (pinned at the current revision)
     |
-    +-> Validate session rules -----------------> validate_rule()
-    |
-    +-> Parse statements
-    |
-    +-> Collect session facts and rules
-    |
+    +-> combine: dependency closure of the query over the persistent rules;
+    |            keep only those rules and only the relations they read
+    +-> add session facts (isolated copy of the touched relations) and session rules
+    +-> new_engine(): a fresh IQLEngine for this query
     v
-StorageEngine.execute_query_with_session_facts_on()
-    |
+IQLEngine
+    +-> load: safety, stratification
+    +-> compile: constant specialization, SIP, Magic Sets, IR, optimizer
+    |     (standing queries reuse a cached plan while the rules are unchanged;
+    |      ad-hoc queries compile every time)
+    +-> execute: per rule, a fresh CodeGenerator and timely worker; inputs streamed in,
+    |            results collected, dataflow torn down
     v
-KnowledgeGraphSnapshot.execute_with_session_facts()
-    |
-    +-> Clone input_tuples (isolated copy)
-    |
-    +-> Add session facts to clone
-    |
-    +-> Build combined program:
-    |   +-> Persistent rules (skip if materialized)
-    |   +-> Session rules
-    |   +-> Query
-    |
-    +-> IQLEngine.execute_tuples()
-        |
-        +-> CodeGenerator with num_workers config
-    |
-    v
-Results (concurrent queries unaffected)
+Rows (sorted, paginated, capped by the handler), tagged with the snapshot revision
 ```
 
-### 3.3 Materialization Flow
+Every read of a persistent rule re-derives it from the base facts. Magic Sets restrict the work when the query binds a constant in a position the rule's recursion can use; otherwise the whole derived relation is computed.
+
+### 3.3 Subscriptions (Standing Queries)
 
 ```
-Rule Registration
-    |
-    v
-RuleCatalog.register_rule()
-    |
-    +-> Stratification validation
-    |
-    +-> DDComputation.register_rule()
-        |
-        +-> DerivedRelationsManager.register_rule()
-    |
-    v
-auto_materialize_rule()
-    |
-    +-> Execute rule against current data
-    |
-    +-> DDComputation.set_materialized()
-    |
-    v
-publish_snapshot()
-    |
-    +-> Merge materialized tuples into snapshot
-    |
-    +-> Record materialized_relations set
+commit on KG -> PersistentUpdate{relation} -> hub
+  for each view of the KG whose dependency closure contains the relation:
+     re-evaluate the query on the KG's current snapshot (same path as 3.2, cached plan)
+     diff the new full result against the previous one
+     publish the delta to every subscriber of the view
 ```
+
+- Code: `src/protocol/subscription/` (`hub.rs`, `views.rs`, `reevaluate.rs`, `result_set.rs`).
+- Subscribers of the same query share one view and one evaluation per change. Changes that arrive while an evaluation runs are merged into one pending change, so a view has at most one evaluation running and one pending.
+- **Parameterized families** (`parameterized.rs`): views that differ only in bound constants lift the constants to parameters and may share one evaluation per revision, partitioning its rows by binding. Whether a family shares is decided by measuring shared cost against each member's own cost (config `subscriptions.share_parameterized`, on by default). Shared evaluations run one at a time, with at most one more pending.
+- A view that reads a vector index re-evaluates on every commit of its graph.
+- The delta is computed by re-evaluation and diff; no support counts or derived state are kept between evaluations.
 
 ---
 
@@ -304,51 +188,25 @@ publish_snapshot()
 
 - Readers get consistent snapshots without holding locks
 - Snapshot cloning is O(1) due to Arc sharing
-- Session facts isolation via cloned HashMap
-- No TOCTOU vulnerabilities (lock held through publication)
+- Each query evaluates everything it reads (base facts and rules) against one snapshot revision
 
 ### 4.2 Write Consistency
 
 **Guarantee**: All writes are durable before acknowledgment.
 
-- WAL append before in-memory update
-- DD shadow writes propagate with proper timestamps
-- Cascade invalidation is atomic (compute-then-apply pattern)
+- WAL append and fsync before the in-memory update
+- The new snapshot is published under the KG write lock, so revisions of one KG increase with every commit
+- `expect_revision` preconditions are checked against the snapshot the commit applies to
 
 ### 4.3 Read-After-Write Consistency
 
-**Guarantee**: Via `read_relation_consistent()` in DDComputation.
+A write is acknowledged with the revision it committed at. A query on the same knowledge graph issued after the acknowledgement reads that revision or a later one, and recomputes every rule it reads from those facts.
 
-```rust
-pub fn read_relation_consistent(&self, relation: &str) -> Result<Vec<Tuple>> {
-    // 1. Advance time to max_write_time + 1
-    // 2. Wait for DD frontier to pass
-    // 3. Read from arrangement cursor
-}
-```
+A subscription's delta for a commit comes from a re-evaluation on the KG's current snapshot when the evaluation starts, which may already include later commits.
 
 ### 4.4 Session Isolation
 
-**Guarantee**: Session facts and rules don't affect concurrent queries.
-
-```rust
-pub fn execute_with_session_facts(
-    &self,
-    program: &str,
-    session_facts: Vec<(String, Tuple)>,
-) -> Result<Vec<Tuple>> {
-    // Clone input_tuples (isolated copy)
-    let mut isolated = (*self.input_tuples).clone();
-
-    // Add session facts to the clone
-    for (relation, tuple) in session_facts {
-        isolated.entry(relation).or_default().push(tuple);
-    }
-
-    // Execute against isolated state
-    // ...
-}
-```
+**Guarantee**: Session facts and rules don't affect concurrent queries. Session facts are added to an isolated copy of the relations the query touches; session rules are compiled into that query's program only.
 
 ---
 
@@ -362,10 +220,9 @@ pub fn execute_with_session_facts(
 ```
 
 **Characteristics**:
-- Stored in RuleCatalog (JSON persistence)
-- Registered with DDComputation for dependency tracking
-- Auto-materialized on registration and base data changes
-- Cascade invalidation when dependencies change
+- Stored in the RuleCatalog (`rules/catalog.json`), validated at registration (safety, stratification, arity, aggregates)
+- Evaluated from the base facts on every query that reads them; no results are stored
+- A rule change invalidates the KG's cached plans and the affected subscription views
 
 ### 5.2 Session Rules (no prefix)
 
@@ -375,10 +232,10 @@ reachable_from(Y) <- path(1, Y)
 ```
 
 **Characteristics**:
-- Ephemeral (per-request lifecycle)
+- Ephemeral (per-session lifecycle), compiled into each query of the session
 - Validated for stratification before execution
-- Can reference materialized persistent rules
-- Computed fresh each time (not cached)
+- Can reference persistent rules, which are evaluated in the same query
+- Computed fresh each time (not cached), like persistent rules
 
 ### 5.3 Rule Validation
 
@@ -479,23 +336,9 @@ pub struct ExecutionConfig {
 - Join queries use single-worker DD for correctness
 - Configurable via `num_workers`
 
-### 7.2 Incremental Execution (DDComputation)
+### 7.2 No Incremental Execution Path
 
-```rust
-impl DDComputation {
-    // Returns Result - no more panicking on initialization errors
-    pub fn new(relations: Vec<String>) -> Result<Self, String>;
-
-    pub fn insert(&self, relation: &str, tuples: Vec<Tuple>, time: u64) -> Result<()>;
-    pub fn delete(&self, relation: &str, tuples: Vec<Tuple>, time: u64) -> Result<()>;
-    pub fn read_relation_consistent(&self, relation: &str) -> Result<Vec<Tuple>>;
-}
-```
-
-**Features**:
-- **Fire-and-forget inserts**: Shadow writes don't block query execution
-- **Lazy time advancement**: Writes buffer, time only advances on consistent reads
-- **Dynamic relations**: InputSessions created at runtime
+Every query, ad-hoc or standing, runs through the batch path of 7.1. There is no long-lived dataflow on the server path; see 2.4 for the test-only `IncrementalEngine`.
 
 ---
 
@@ -540,13 +383,14 @@ pub struct ShardMeta {
 ### 8.3 Recovery Sequence
 
 ```
-1. Load shard metadata from disk
-2. Create DDComputation for each KG
-3. Replay batch files through InputSessions
-4. Replay WAL transactions since last batch
-5. Step workers until frontier advances past WAL upper
-6. DDComputation is live and ready
+1. Load shard metadata, rule catalog, schemas and index definitions
+2. Load batch files into the relation store
+3. Replay WAL transactions since the last batch
+4. Rebuild vector indexes from the facts
+5. Publish the first snapshot; rules are evaluated on the first query that reads them
 ```
+
+Nothing derived is persisted or recovered: after a restart every rule is recomputed on every read, as before the restart.
 
 ---
 
@@ -586,42 +430,9 @@ pub enum Statement {
 
 ---
 
-## 10. HNSW Indexing Readiness
+## 10. HNSW Indexing
 
-### 10.1 Prerequisites (All Complete)
-
-| Prerequisite | Status | Description |
-|-------------|--------|-------------|
-| Abomonation fix | Done | Proper exhume() for multi-worker DD |
-| Generic timestamps | Done | CodeGenerator uses `G::Timestamp: Lattice + Ord + Default` |
-| DDComputation | Done | Persistent incremental computation |
-| Insert path wiring | Done | Shadow writes to DDComputation |
-| Consistent reads | Done | Lazy time advancement + frontier tracking |
-| Rule materialization | Done | DerivedRelationsManager with validity tracking |
-| Auto-materialization | Done | Persistent rules auto-materialize |
-| Session isolation | Done | Cloned snapshots for session facts |
-
-### 10.2 HNSW Integration Points
-
-```
-Insert -> Persist WAL -> In-Memory State -> DDComputation
-                                              |
-                                              v
-                                        Arrangement
-                                              |
-                                              v
-                                    [HNSW INDEX SINK]
-                                              |
-                                    On insert: hnsw.insert(embedding, id)
-                                    On delete: tombstone.add(id)
-```
-
-### 10.3 Required Extensions for HNSW
-
-1. **IndexManager** in KnowledgeGraph
-2. **IRNode::IndexScan** in IR
-3. **`.index create/drop/rebuild`** commands
-4. **Query planning** for distance predicates
+Vector indexes are maintained on **base** relations by the commit path (`apply_delta`), synchronously under the KG write lock. Queries resolve `hnsw_nearest` right before the rule that uses it runs. An index on a rule's head relation is not maintained today (it is built from stored facts only, and a rule's rows are never stored); the live-views milestone covers vectors inside maintained rules (Section 16).
 
 ---
 
@@ -668,7 +479,7 @@ InputLayer includes query optimization infrastructure for improving join perform
 | **Statistics** | `src/statistics.rs` | Cardinality and selectivity estimation |
 | **Join Planning** | `src/join_planning/mod.rs` | Join ordering via MST algorithm |
 | **SIP Rewriting** | `src/sip_rewriting/mod.rs` | Sideways Information Passing |
-| **Subplan Sharing** | `src/subplan_sharing/mod.rs` | Common subexpression elimination |
+| **Subplan Sharing** | `src/subplan_sharing/mod.rs` | Common subexpression elimination within one evaluation |
 
 ### 12.2 Bloom Filter
 
@@ -764,12 +575,13 @@ This node filters `input` to keep only tuples whose key columns exist in `filter
 | `src/value/mod.rs` | Value, Tuple, Abomonation |
 | `src/storage_engine/mod.rs` | StorageEngine, KnowledgeGraph |
 | `src/storage_engine/snapshot.rs` | KnowledgeGraphSnapshot |
-| `src/incremental.rs` | IncrementalEngine |
-| `src/derived_relations.rs` | DerivedRelationsManager |
+| `src/incremental.rs` | IncrementalEngine (base-relation mirror, test-only) |
+| `src/derived_relations.rs` | DerivedRelationsManager (rule bookkeeping, test-only) |
 | `src/rule_catalog.rs` | RuleCatalog, validation |
 | `src/schema/catalog.rs` | SchemaCatalog (per-KG) |
 | `src/code_generator/mod.rs` | CodeGenerator, execution |
 | `src/protocol/handler.rs` | Request handling |
+| `src/protocol/subscription/` | Subscription hub, views, re-evaluation, parameterized families |
 | `src/storage/persist/mod.rs` | FilePersist, WAL, batches |
 | `src/bloom_filter.rs` | Bloom filter implementation |
 | `src/hash_index.rs` | Hash index with Bloom acceleration |
@@ -785,11 +597,10 @@ This node filters `input` to keep only tuples whose key columns exist in `filter
 
 ### 14.1 Arc-Wrapped Data for Sharing
 
-All persistent data wrapped in Arc for O(1) cloning:
+Base relations and rules in a snapshot are Arc-wrapped for O(1) cloning:
 ```rust
-input_tuples: Arc<HashMap<String, Vec<Tuple>>>
+input_tuples: Arc<RelationMap>
 rules: Arc<Vec<Rule>>
-materialized_relations: Arc<HashSet<String>>
 ```
 
 ### 14.2 ArcSwap for Atomic Publishing
@@ -798,61 +609,50 @@ materialized_relations: Arc<HashSet<String>>
 self.snapshot.store(Arc::new(new_snapshot));  // O(1) atomic swap
 ```
 
-### 14.3 Fire-and-Forget Shadow Writes
+### 14.3 Recompute on Read
 
 ```rust
-dd.insert(relation, tuples, time)?;  // Returns immediately
-// DD processes asynchronously
+let snapshot = kg.snapshot();          // pinned revision
+let engine = snapshot.new_engine();    // fresh IQLEngine per query
+// combine persistent-rule closure + session rules + query, compile, execute, drop
 ```
 
-### 14.4 Lazy Time Advancement
+### 14.4 Session Isolation via Copy-on-Touch
 
 ```rust
-max_write_time.store(time, Ordering::Relaxed);  // Track writes
-// Only advance on read: max_write_time + 1
-```
-
-### 14.5 Atomic Cascade Invalidation
-
-```rust
-// Compute invalidation set (read-only)
-let to_invalidate = self.compute_invalidation_set(base_relation);
-
-// Bump version
-*version += 1;
-
-// Apply all invalidations atomically
-for rel in &to_invalidate {
-    mat.invalidate();
-}
-```
-
-### 14.6 Session Isolation via Cloning
-
-```rust
-let mut isolated = (*snapshot.input_tuples).clone();
-isolated.insert(session_fact);
-// Execute against isolated copy
+// Only the relations that receive session facts are copied
+isolated.entry(relation).or_default().push(session_fact);
+// Execute against the isolated copy
 ```
 
 ---
 
 ## 15. Summary
 
-InputLayer's architecture provides:
-
-| Capability | Implementation |
+| Capability | Implementation today |
 |-----------|----------------|
-| **Incremental computation** | DDComputation with persistent arrangements |
+| **Rule evaluation** | Recomputed from base facts on every query, one DD dataflow per rule per query |
+| **Subscriptions** | Re-evaluate after each relevant commit, diff with the previous result |
 | **Lock-free reads** | ArcSwap snapshot system |
 | **Concurrent writes** | DashMap + per-KG locking |
-| **Rule materialization** | DerivedRelationsManager with auto-rematerialization |
 | **Schema isolation** | Per-KG SchemaCatalog |
-| **Session isolation** | Cloned snapshots for ephemeral data |
-| **Parallel execution** | Rayon-based multi-worker batch queries |
-| **Durability** | WAL + Parquet batch files |
-| **Consistency** | Frontier tracking, atomic cascade invalidation |
+| **Session isolation** | Isolated copies for ephemeral data |
+| **Durability** | WAL + Parquet batch files; only base facts and definitions are stored |
+| **Consistency** | One snapshot revision per query; revision returned on writes and reads |
 
-**Test Coverage**: ~3107 unit tests + ~1121 snapshot tests = ~4228 total, all passing.
+---
 
-**HNSW Readiness**: All prerequisites complete. Indexes can attach as arrangement sinks.
+## 16. Planned: Live Views (Milestone 9, #305)
+
+> Status: planned, not yet shipped. Tracked in [#305](https://github.com/inputlayer/inputlayer/issues/305). Nothing in this section describes today's behaviour.
+
+The live-views milestone makes every deployed (persistent) rule an incrementally maintained view; everything else is a query.
+
+- **One view maintainer per knowledge graph**: a long-lived Differential Dataflow worker fed from the commit path (the `shadow_write` hook) at each commit's revision. It replaces `IncrementalEngine` and `DerivedRelationsManager`.
+- **Persistent rules as arrangements**: each rule compiles into the maintainer's dataflow (joins, recursion with `iterate`, negation with `antijoin`, aggregates with `reduce`); its rows live only in its arrangements.
+- **Queries never re-derive deployed rules**: ad-hoc queries, session rules and proofs import the view arrangements at a stated revision and run only their own operators.
+- **Writes confirmed once views include them**: a write is acknowledged after the maintainer has applied it, so the acknowledged revision is the revision views and queries show.
+- **Subscriptions only on deployed rules**: a subscription is a keyed diff of a view between two revisions, read from the view's update history. Subscribing to a body that is not a deployed rule is refused with a request to deploy it first.
+- **Query batching kept, simplified**: many subscribers that bind different constants become subscribers of one view with different keys; the cost probe that decides whether to share goes away.
+- **Non-maintainable constructs refused in deployed rules**: constructs that cannot be maintained (for example time-dependent or non-deterministic functions) are rejected at registration and stay available in queries and session rules.
+- **Vectors inside live rules**: vector predicates and indexes over rule outputs are maintained with the views.

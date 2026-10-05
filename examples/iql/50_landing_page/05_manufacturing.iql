@@ -1,6 +1,6 @@
 // Use case: Manufacturing Operations
 // Multi-hop dependency chain: line -> operator -> certification -> training
-// When training expires, the entire chain retracts incrementally.
+// When training expires, the next query no longer derives the chain.
 
 .kg create landing_manufacturing
 .kg use landing_manufacturing

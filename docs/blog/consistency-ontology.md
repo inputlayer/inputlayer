@@ -165,8 +165,9 @@ nobody deploys.
 The fix lives in the translation step. When a sentence carries an explicit
 revision marker - actually, correction, I misspoke, make that - the old
 fact is retracted and the new one takes its place. The conflict that
-briefly existed vanishes with the retracted fact, because the engine
-handles retraction natively; nothing needs to be recomputed from scratch.
+briefly existed vanishes with the retracted fact: the next evaluation
+recomputes the conclusions from the remaining facts, and the conflict is
+simply absent.
 
 The same sentence without a marker stays a contradiction. "We leave on the
 12th" followed later by a flat "we leave on the 14th" keeps both
@@ -190,8 +191,8 @@ keynote precedes itself, which no schedule survives.
 
 Walking chains is called transitive closure, and it is the native gait of
 a logic engine. It follows every ordering as far as it goes, at any depth,
-across any number of turns, in milliseconds, incrementally as each new
-fact arrives. This is the aha moment of the journey: for pairwise clashes
+across any number of turns, in milliseconds, each time the rules are
+evaluated. This is the aha moment of the journey: for pairwise clashes
 the engine is merely more reliable than the model, but for chained clashes
 it is doing something the model, reviewing sentence pairs, structurally
 misses.

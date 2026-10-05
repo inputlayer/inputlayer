@@ -1,5 +1,5 @@
 // Test: Schema with Derived Views
-// Description: Tests schemas combined with materialized views
+// Description: Tests schemas combined with persistent rules (views)
 
 .kg create test_schema_views_n24t03
 .kg use test_schema_views_n24t03
@@ -14,7 +14,7 @@
 // Insert customers
 +customers[(100, "Acme Corp"), (200, "Widgets Inc")]
 
-// Materialized view: customer order totals
+// Persistent rule: customer order totals
 +customer_total(CustId, sum<Amount>) <-
     orders(_, CustId, Amount)
 

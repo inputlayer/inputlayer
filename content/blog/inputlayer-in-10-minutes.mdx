@@ -9,7 +9,7 @@ excerpt: "A hands-on tutorial to get InputLayer running and build your first kno
 
 Someone changes a role in your org chart. Now you need to figure out which permissions changed, which documents need re-filtering, and which downstream reports are stale. In custom-built permission systems, that's a ticket, a script, and a prayer that you caught everything.
 
-In 10 minutes, you'll build a knowledge graph that derives conclusions automatically, updates them the moment facts change, and explains every result with a full reasoning chain. Not a toy demo. These are the same mechanics that handle access control hierarchies, compliance chains, and recommendation graphs in production. Let's build it.
+In 10 minutes, you'll build a knowledge graph that derives conclusions automatically, reflects every fact change in the next query, and explains every result with a full reasoning chain. Not a toy demo. These are the same mechanics that handle access control hierarchies, compliance chains, and recommendation graphs in production. Let's build it.
 
 ## Step 1: Start InputLayer
 
@@ -89,7 +89,7 @@ Now query: *"Who does Alice have authority over?"*
 
 The answer: **Bob, Charlie, and Diana.**
 
-Alice doesn't manage Charlie or Diana directly. But the engine followed the chain and derived it automatically. SQL can compute this too, but InputLayer maintains the result as the facts change. When facts change, conclusions update in milliseconds without re-running the query.
+Alice doesn't manage Charlie or Diana directly. But the engine followed the chain and derived it automatically. SQL can compute this too. The difference is that the chain lives in one rule you wrote once, every query derives it from the current facts, and a bound question like this one only explores Alice's part of the graph.
 
 ## Step 6: Add vector search
 
@@ -107,7 +107,7 @@ Rank by similarity :: Most relevant first [success]
 
 Reasoning and retrieval, combined in one pass. No separate authorization service, no glue code.
 
-## Step 7: See incremental updates
+## Step 7: See new facts reflected
 
 Add a new fact: Diana now manages a new employee, Frank.
 
@@ -121,7 +121,7 @@ Alice [primary]
 
 Query authority again. Frank shows up in Alice's results immediately, even though you never told the system about Alice's relationship to Frank. The engine derived it: Alice has authority over Diana, Diana manages Frank, therefore Alice has authority over Frank.
 
-The important part: InputLayer didn't recompute everything from scratch. It identified that the new fact only affects a small part of the graph and updated just that. On a 2,000-node graph, this is over **1,600x faster** than recomputing everything.
+The important part: nothing had to be refreshed. The query re-derived the answer from the current facts, and because it asked about Alice, Magic Sets kept the recursion to Alice's part of the graph. On a 2,000-node graph, that bound query is over **1,600x faster** than computing every authority chain. If you subscribe to the rule instead of querying it, the engine re-runs the query after each relevant commit and pushes you the rows that changed.
 
 ## Step 8: See correct retraction
 
@@ -135,7 +135,7 @@ Alice [primary]
 
 Query authority again. Diana and Frank are gone from Alice's results. But Bob still has authority over Charlie. That relationship doesn't depend on Diana at all.
 
-Here's the subtle part: what if Diana had reported to Alice through *two* paths? Say both Bob and Eve managed Diana. Removing Bob's management of Diana shouldn't remove Alice's authority over Diana if the Eve path still exists. InputLayer tracks this automatically. A conclusion only disappears when *all* paths supporting it are gone.
+Here's the subtle part: what if Diana had reported to Alice through *two* paths? Say both Bob and Eve managed Diana. Removing Bob's management of Diana shouldn't remove Alice's authority over Diana if the Eve path still exists. InputLayer gets this right because the next query recomputes from the remaining facts. A conclusion only disappears when *all* paths supporting it are gone.
 
 ## What you just built
 
@@ -146,7 +146,7 @@ In about 10 minutes, you've used:
 | Knowledge graph | Stored facts about people and relationships |
 | Recursive reasoning | A rule derived authority chains automatically |
 | Vector search | Combined similarity with logical reasoning |
-| Incremental updates | New facts spread in milliseconds |
+| Fresh answers | New facts show up in the next query |
 | Correct retraction | Removed facts cleaned up precisely |
 
 These capabilities often live in separate systems: graph traversal in one, vector search in another, business rules in application code. InputLayer handles them in one place.

@@ -1,6 +1,8 @@
 //! # `InputLayer` IQL Engine
 //!
-//! IQL engine built on Differential Dataflow.
+//! IQL engine built on Differential Dataflow: each query (and each persistent
+//! rule it reads) is compiled and executed as a fresh dataflow over a
+//! snapshot of the base facts.
 //!
 //! ## Pipeline Architecture
 //!

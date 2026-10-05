@@ -10,9 +10,10 @@ using rules instead of glue code.
    API, inventory filter, re-ranking)
 2. **Vector search + rules in one query** - similarity ranking combined with
    compatibility logic
-3. **Live retraction** - when stock runs out, recommendations update instantly
-4. **Incremental derivation** - when the shopper buys a new printer, compatible
-   products appear automatically
+3. **Live retraction** - when stock runs out, the next query (or standing-query
+   refresh) no longer returns the recommendation
+4. **Derivation on read** - when the shopper buys a new printer, compatible
+   products appear in the next query, computed from the current facts
 
 ## Running it
 

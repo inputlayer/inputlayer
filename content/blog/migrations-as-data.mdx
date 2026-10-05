@@ -27,7 +27,7 @@ Created migration: migrations/0002_auto.json
   - Replace rule gold_customer
 ```
 
-The autodetector diffs your model classes against the last migration's state. Change a `Derived` rule's `where()` clause and the diff is a `ReplaceRule` operation that stores both the old and the new clauses - which is what makes rollback meaningful: reverting restores the exact previous logic, and the engine's incremental evaluation retracts every conclusion the new rule had derived. Rollback is not just "the table is back"; it is "the reasoning is back."
+The autodetector diffs your model classes against the last migration's state. Change a `Derived` rule's `where()` clause and the diff is a `ReplaceRule` operation that stores both the old and the new clauses - which is what makes rollback meaningful: reverting restores the exact previous logic, and because every query evaluates the current rules, no conclusion the new rule had derived appears after the rollback. Rollback is not just "the table is back"; it is "the reasoning is back."
 
 ## 2. The ledger lives in the knowledge graph
 

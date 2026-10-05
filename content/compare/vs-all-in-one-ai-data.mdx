@@ -6,7 +6,7 @@ competitors:
 
 # InputLayer + All-in-One AI Data Platforms
 
-All-in-one AI data platforms find data that matches your criteria. InputLayer derives new conclusions from connected facts. They solve different problems, and many teams use both. InputLayer is the live rules engine for AI agents: it keeps those derived conclusions current as facts change and tells the agent what changed.
+All-in-one AI data platforms find data that matches your criteria. InputLayer derives new conclusions from connected facts. They solve different problems, and many teams use both. InputLayer is the live rules engine for AI agents: it derives those conclusions from the current facts on every query, and re-evaluates an agent's subscription after each relevant commit to tell it what changed.
 
 Here's the distinction. An AI data platform answers: "Find the 50 most similar documents matching these filters." InputLayer answers: "Given these facts and these business rules, which enterprise customers are at churn risk - and here's the derivation proof for each one."
 
@@ -19,8 +19,8 @@ Here's the distinction. An AI data platform answers: "Find the 50 most similar d
 | Analytics (aggregation, grouping) | Growing | Via aggregation rules |
 | Derive conclusions from rules | Outside scope | Native |
 | Recursive queries | Outside scope | Native |
-| Update conclusions when facts change | Re-index | Incremental (milliseconds) |
-| Retract stale conclusions automatically | Outside scope | Native |
+| Conclusions reflect changed facts | Re-index | Native: derived from current facts on every query |
+| Drop conclusions whose facts were deleted | Outside scope | Native: absent from the next evaluation |
 | Trace relationships across data sources | Limited | Native |
 | Knowledge graph storage | Some platforms | Native |
 
@@ -50,12 +50,12 @@ AI data platforms handle updates by re-indexing vectors and metadata. That works
 But when you have derived conclusions, updates get more interesting.
 
 ```steps
-Customer usage drops below threshold :: InputLayer updates the churn risk assessment immediately [success]
-A fact is retracted :: Everything derived from it disappears automatically [success]
-A rule changes :: All affected conclusions recompute - nothing else does [success]
+Customer usage drops below threshold :: The next query derives the churn risk from the new usage [success]
+A fact is retracted :: Everything derived only from it is absent from the next evaluation [success]
+A rule changes :: The next query uses the new rule - nothing to rebuild [success]
 ```
 
-InputLayer's incremental computation means updates propagate through the rules, recomputing only what's affected. A single fact change in a 2,000-node graph takes 6.83ms. Retractions are correct - derived conclusions only disappear when all supporting derivation paths are removed.
+InputLayer stores no derived results: every query evaluates the rules against the current facts, and a bound recursive question computes only the slice it needs (6.83ms on a 2,000-node graph with 400,000 derived relationships). Retractions are correct - derived conclusions only disappear when all supporting derivation paths are removed, because the next evaluation recomputes from the remaining facts.
 
 ## How teams use them together
 

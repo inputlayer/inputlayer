@@ -130,7 +130,8 @@ existing app, nothing breaks, findings appear.
 ### 5. M2: incremental sessions and streaming  (#85, needs 4)
 
 Chained hash over messages, prefix match to reuse the session KG, extract
-only the new suffix. Edited history retracts facts from the changed index
+only the new suffix. (Session resolution is incremental; the engine still
+re-evaluates the rules over the session's facts on each request.) Edited history retracts facts from the changed index
 onward; findings that depended on removed turns disappear, the rest
 survive. Session pinning header, TTL + LRU eviction, SSE streaming with
 findings in one final chunk, and an `il verify` CLI for CI use.

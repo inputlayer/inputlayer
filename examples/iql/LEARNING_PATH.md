@@ -91,7 +91,7 @@ Or use the snapshot test runner:
 
 **Key Concepts**:
 - `+derived(X, Y) :- source(X, Y).` - Persistent rule
-- Rules automatically update when facts change
+- Rules are evaluated against the current facts on every query
 
 ### 2.3 Rule Management
 

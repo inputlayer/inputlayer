@@ -6,7 +6,7 @@ competitors:
 
 # InputLayer + Graph Databases
 
-Graph databases traverse relationships that already exist in your data. InputLayer derives new relationships through rules - and keeps them current as facts change.
+Graph databases traverse relationships that already exist in your data. InputLayer derives new relationships through rules, from the current facts, every time you ask.
 
 That's the core difference. A graph database answers "what's connected to what?" InputLayer answers "what can we conclude from these facts and rules?" As the live rules engine for AI agents, it also tells your agent when one of those conclusions changes, instead of leaving it to re-run the traversal.
 
@@ -14,7 +14,7 @@ That's the core difference. A graph database answers "what's connected to what?"
 
 Graph databases are built for exploring and traversing stored relationships. They have mature tooling - visual explorers, admin interfaces, clustering. When you need to see the path between two entities or explore a neighborhood of a graph, they're the right tool.
 
-InputLayer evaluates logical rules over facts, computes recursive conclusions, and maintains those conclusions incrementally. When a fact changes, only the affected conclusions update. When a fact is deleted, everything derived from it disappears - but only if no alternative path still supports it.
+InputLayer evaluates logical rules over facts and computes recursive conclusions on every query, from the facts as they are at that moment. When a fact changes, the next query reflects it, and a subscription is re-evaluated after the commit and pushes the rows that changed. When a fact is deleted, everything derived from it disappears from the next evaluation - but only if no alternative path still supports it.
 
 | Capability | Graph Databases | InputLayer |
 |---|---|---|
@@ -22,8 +22,8 @@ InputLayer evaluates logical rules over facts, computes recursive conclusions, a
 | Pattern matching on graphs | Native | Native |
 | Derive new relationships from rules | Via procedures | Native |
 | Recursive traversal | Native | Native |
-| Update conclusions when facts change | Recompute per query | Automatic, incremental |
-| Retract derived state when facts are deleted | Recompute per query | Automatic (weight-based) |
+| Conclusions reflect changed facts | Re-run your traversal | Rules re-evaluated per query; subscriptions pushed the changed rows |
+| Derived conclusions after facts are deleted | Re-run your traversal | Absent from the next evaluation, unless another path supports them |
 | Vector similarity search | Plugin | Native |
 | Visual exploration tools | Mature | Via API |
 | Clustering | Native | Single-node |
@@ -42,14 +42,14 @@ Authority from two sources [primary]
     Therefore Alice has authority over everyone in Engineering
 ```
 
-In InputLayer, you define both sources of authority as rules. The engine derives the combined result. In a graph query language, you can combine patterns in a single query, but without automatic incremental maintenance when the underlying data changes.
+In InputLayer, you define both sources of authority as rules. The engine derives the combined result. In a graph query language, you can combine patterns in a single query, but the combined concept lives in each query you write rather than in one named rule every query and subscription reuses.
 
-**Keeping derived state consistent.** When someone leaves the company, a graph database still has all the edges you stored. You decide what to invalidate and rebuild. InputLayer tracks which conclusions depend on which facts. Remove "Alice manages Bob" and every conclusion that was derived through that relationship retracts automatically - but conclusions supported by alternative paths survive.
+**Keeping derived state consistent.** When someone leaves the company, a graph database still has all the edges you stored. You decide what to invalidate and rebuild. InputLayer stores no derived state to invalidate. Remove "Alice manages Bob" and every conclusion that was derived through that relationship is gone from the next evaluation - but conclusions supported by alternative paths survive, because the evaluation recomputes from the remaining facts.
 
 ```steps
 A relationship changes in a graph database :: You decide what to rebuild and invalidate [highlight]
-A fact changes in InputLayer :: Only affected conclusions recompute automatically [success]
-A fact is deleted in InputLayer :: Derived conclusions retract, but only if no alternative path exists [success]
+A fact changes in InputLayer :: The next query derives from the current facts [success]
+A fact is deleted in InputLayer :: Derived conclusions are gone, but only if no alternative path exists [success]
 ```
 
 ## How teams use them together
@@ -58,7 +58,7 @@ The most natural pattern: your graph database handles interactive exploration an
 
 Your graph database answers: "Show me the path between these two entities." "What does this part of the graph look like?" These are the queries where visual tools and interactive exploration add real value.
 
-InputLayer answers: "Given these rules, who does Alice have authority over?" "If I change this supplier's status, which orders are affected?" These are the queries that need recursive rule evaluation, incremental updates, and correct retraction.
+InputLayer answers: "Given these rules, who does Alice have authority over?" "If I change this supplier's status, which orders are affected?" These are the queries that need recursive rule evaluation, answers that reflect the current facts, and correct retraction.
 
 Some teams compute derived relationships in InputLayer and sync the results back to their graph database for visualization. Reasoning power on one side, exploration tools on the other.
 

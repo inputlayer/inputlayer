@@ -87,9 +87,9 @@ async def generate_spec(state: dict[str, Any]) -> dict[str, Any]:
     kg = state["kg"]
 
     # Clear previous endpoints and name checks from KG (delete all facts,
-    # keep the schema). InputLayer's incremental maintenance automatically
-    # retracts derived missing_auth/bad_naming facts when the supporting
-    # base facts are deleted.
+    # keep the schema). Derived missing_auth/bad_naming rows are computed
+    # from the current facts on every query, so they disappear once the
+    # supporting base facts are deleted.
     if iteration > 0:
         await kg.execute(
             "-api_endpoint(Name, Method, Path, Auth) <- api_endpoint(Name, Method, Path, Auth)"

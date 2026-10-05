@@ -71,7 +71,7 @@ auto_save_interval = 0
 enable_wal = true
 
 # -----------------------------------------------------------------------------
-# DD-Native Persist Layer (Recommended)
+# DD-Native Persist Layer (Recommended): the WAL + Parquet storage layer
 # -----------------------------------------------------------------------------
 [storage.persist]
 # Enable the DD-native persistence layer
@@ -451,7 +451,7 @@ buffer_size = 1000
 
 A knowledge graph stays in memory while anything uses it: a running request, a
 query still reading its snapshot, or a standing subscription. One holding state
-that is not on disk (session schemas, the incremental engine, vector indexes)
+that is not on disk (session schemas, vector indexes, or the base-relation mirror only tests enable)
 also stays. Unloading is otherwise invisible: the next use loads the same
 state under the same revision, at the cost of reading it from disk.
 

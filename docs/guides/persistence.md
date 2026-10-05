@@ -416,7 +416,7 @@ version that wrote it once, so it drains the WAL into batch files, then upgrade.
 
 ## Differential Updates
 
-InputLayer uses differential dataflow semantics internally:
+The WAL and Parquet batch files store facts as differential `(data, time, diff)` triples:
 
 ```rust
 Update {
@@ -439,7 +439,8 @@ Multiple updates to the same tuple are consolidated:
 This enables:
 - Efficient delta storage
 - Time-travel queries (if history preserved)
-- Incremental computation
+
+Only base facts are stored this way. Rule results are not persisted and there is no long-lived dataflow: each query evaluates the rules it reads from the current facts in a fresh dataflow.
 
 ---
 

@@ -249,9 +249,9 @@ sentences wrong, only the chain) detectable at all:
 +areach(A, X, Y) <- aedge(A, X, Y)  +areach(A, X, Z) <- areach(A, X, Y), aedge(A, Y, Z)
 ```
 
-Evaluation is incremental (differential dataflow): each new fact
-re-derives only what it touches, so always-on checking stays at
-millisecond cost per turn regardless of conversation length.
+Each request re-evaluates the rules over the conversation's facts
+(a fresh differential dataflow per evaluation); on conversation-sized
+graphs that full re-evaluation stays at millisecond cost per turn.
 
 ## 7. The deontic layer: instruction consistency
 

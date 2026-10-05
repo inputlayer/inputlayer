@@ -83,7 +83,7 @@ This is the multiple paths problem, and it's what makes correct retraction genui
 
 ## The three common approaches
 
-**Append-only.** You mark a source fact as deleted, but leave derived facts in whatever cache, index, or materialized view they were written to. Fast, but you get phantom permissions and ghost recommendations. Stale conclusions that you can't clean up because you don't know where they all spread to.
+**Append-only.** You mark a source fact as deleted, but leave derived facts in whatever cache, index, or precomputed table they were written to. Fast, but you get phantom permissions and ghost recommendations. Stale conclusions that you can't clean up because you don't know where they all spread to.
 
 **Full recomputation.** You throw away all derived data and re-derive from scratch. Correct, but expensive. Seconds to minutes on large knowledge graphs. Between batch runs, your data is potentially inconsistent.
 
@@ -102,25 +102,27 @@ Approaches [primary]
     Retraction: Yes [success]
     Diamond: No [highlight]
     Speed: Fast but wrong [highlight]
-  Support counting (InputLayer)
+  Recompute on read (InputLayer)
     Retraction: Yes [success]
     Diamond: Yes [success]
-    Speed: Fast and correct [success]
+    Speed: Cost of the query asked [success]
 ```
 
-## How InputLayer solves it: counting support
+## How InputLayer solves it: recompute, with counted support
 
-InputLayer is built on Differential Dataflow, which tracks a support count for every conclusion the system reaches. That count reflects the number of independent paths that lead to the conclusion.
+InputLayer stores no derived data. Every query evaluates the rules against the facts as they are now, so a retracted fact simply isn't there for the next evaluation, and only conclusions that some remaining path supports come back. Nothing has to be found and deleted.
+
+Inside each evaluation, InputLayer runs on Differential Dataflow, which tracks a support count for every conclusion. That count reflects the number of independent paths that lead to the conclusion.
 
 Here's the diamond example, step by step:
 
 ```steps
 Initial: count = 2 (via Bob + Diana) :: authority(Alice, Charlie)
 Remove Bob path: count = 1 :: survives [success]
-Remove Diana path: count = 0 :: retracted [highlight]
+Remove Diana path: count = 0 :: gone [highlight]
 ```
 
-The engine doesn't need to search for alternative paths or do any special-case reasoning. The counting handles it automatically. And this works through any number of recursive levels. If your reasoning chain is 10 hops deep with branching paths at every level, the counts still track correctly.
+The engine doesn't need to search for alternative paths or do any special-case reasoning. Recomputing from the remaining facts handles it automatically. And this works through any number of recursive levels. If your reasoning chain is 10 hops deep with branching paths at every level, the counts still track correctly.
 
 ## Retraction through recursive chains
 
@@ -132,11 +134,11 @@ Consider a deeper hierarchy:
 Alice --manages-> Bob --manages-> Charlie --manages-> Diana --manages-> Eve [primary]
 ```
 
-The conclusion `authority(Alice, Eve)` goes through 4 hops. If you remove "Charlie manages Diana," the engine needs to retract not just `authority(Charlie, Diana)` but also `authority(Alice, Diana)`, `authority(Bob, Diana)`, `authority(Alice, Eve)`, `authority(Bob, Eve)`, and `authority(Charlie, Eve)`. Every derived authority that passed through the Charlie-Diana link.
+The conclusion `authority(Alice, Eve)` goes through 4 hops. If you remove "Charlie manages Diana," the answer must lose not just `authority(Charlie, Diana)` but also `authority(Alice, Diana)`, `authority(Bob, Diana)`, `authority(Alice, Eve)`, `authority(Bob, Eve)`, and `authority(Charlie, Eve)`. Every derived authority that passed through the Charlie-Diana link.
 
 But if Diana also reports to someone else (say, Frank, who reports to Alice through a different branch), some of those authority relationships might survive through the alternative path.
 
-The engine tracks all of this through its counting mechanism. Each removal ripples through the reasoning chain as a -1 adjustment. At each step, the adjustment combines with the existing count. Conclusions retract when and only when their count reaches zero. No manual reasoning about paths needed.
+The next evaluation gets all of this right because it derives the chain again from the remaining facts: a conclusion is present when and only when some remaining path supports it. No manual reasoning about paths needed. A subscription to the rule re-runs the query after the commit and reports the rows that disappeared.
 
 ## Why this matters: three real scenarios
 
@@ -148,15 +150,15 @@ The engine tracks all of this through its counting mechanism. Each removal rippl
 
 ## Performance
 
-Correct retraction is only useful if it's fast enough to happen in real time. If propagating a retraction takes seconds, you're back to batch processing.
+Correct retraction is only useful if the answer comes back fast enough to use. Because InputLayer recomputes on read, the cost of seeing a retraction is the cost of the query you ask after it.
 
-| Operation | Time (2,000-node graph) |
+| Re-query after deleting edges (500 nodes, 1,000 edges, full closure) | Time |
 |---|---|
-| Retract 1 edge, propagate all downstream changes | <10ms |
-| Retract 10 edges, propagate all downstream changes | ~100ms |
-| Retract 100 edges, propagate all downstream changes | ~1 second |
+| -10 edges | ~600ms |
+| -50 edges | ~715ms |
+| -100 edges | ~1.1 seconds |
 
-These numbers come from our benchmark graph with ~400,000 derived relationships. The incremental approach means each retraction only touches the affected portion of the reasoning chain. The total graph size barely matters. What matters is the size of the ripple effect from the specific retraction.
+These numbers re-query the whole transitive closure. A bound question ("who does Alice have authority over now?") explores only the part of the graph reachable from its seed, so it typically costs milliseconds rather than seconds. Applying a retraction once to a maintained view instead of re-deriving it on every read is planned work ([milestone 9](https://github.com/inputlayer/inputlayer/issues/305)).
 
 ## Getting started
 

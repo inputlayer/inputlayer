@@ -8,8 +8,8 @@ This page names the four pieces it replaces, shows the replacement running on to
 
 | What you run today | What replaces it | Available |
 |---|---|---|
-| **The trigger service** that decides which agent to wake, and **the crons that re-check data for changes** (a check that waits on time keeps a one-line clock writer) | A [standing query](/docs/guides/websocket-api#standing-queries) on a rule-derived view. The engine pushes the exact change when the answer changes and nothing when it does not. | Today over the WebSocket API. `kg.subscribe()` in the upcoming SDK release. |
-| **The precomputed eligibility flags** you cache, and the handlers that invalidate them | A rule. "Late", "eligible" and "allowed" become views the engine keeps current. A conclusion is retracted when its facts stop supporting it. | Today |
+| **The trigger service** that decides which agent to wake, and **the crons that re-check data for changes** (a check that waits on time keeps a one-line clock writer) | A [standing query](/docs/guides/websocket-api#standing-queries) on a rule-derived view. The engine re-runs the query after each commit that touches its relations, diffs the result and pushes the exact change when the answer changes and nothing when it does not. | Today over the WebSocket API. `kg.subscribe()` in the upcoming SDK release. |
+| **The precomputed eligibility flags** you cache, and the handlers that invalidate them | A rule. "Late", "eligible" and "allowed" become views the engine recomputes from the current facts on every read. A conclusion is gone from the next read once its facts stop supporting it. | Today |
 | **The business rules in system prompts and tool handlers**, and the eligibility logic that ended up in OPA policies | Policy as facts and rules, enforced where the agent's action is recorded: the action is recorded only while the rules allow it at commit. A refusal comes back with the condition that failed. | Today as a guarded write in IQL. `kg.claim()` in the upcoming SDK release. |
 | **The "already handled" rows and `claimed_by` columns** that keep two agents from doing the same work | A claim: a guarded insert that one agent wins. The others see that they lost. | Today as a guarded write in IQL. `kg.claim()` in the upcoming SDK release. Locks with a timeout need leases, planned for a later SDK release. |
 
@@ -76,7 +76,7 @@ Where it stops:
 
 ### 2. Precomputed flags and their invalidation
 
-`check_needed` is the flag, and the engine maintains it. When an operator flips the kill switch:
+`check_needed` is the flag, and the engine derives it on demand from the current facts; nothing is stored to invalidate. When an operator flips the kill switch:
 
 ```iql
 +kill_switch("carrier_check")
@@ -89,7 +89,7 @@ the subscriber receives the retraction in the same way:
  "columns": ["Order", "Shipment"], "inserted": [], "retracted": [["ORD-4821", "SHP-77"]], "...": "..."}
 ```
 
-Nobody wrote an invalidation handler for the kill switch, and nobody has to find the keys it affects two joins away. A derived row is retracted only when every derivation that supported it is gone. Removing the switch (`-kill_switch("carrier_check")`) brings the row back with another delta. Redis can keep caching raw rows if you want it to; what goes is the derived flag and its invalidation code.
+Nobody wrote an invalidation handler for the kill switch, and nobody has to find the keys it affects two joins away. Because the standing query is re-evaluated from the remaining facts, a derived row leaves the result only when every derivation that supported it is gone; there is no stored view and no support counting to keep in sync. Removing the switch (`-kill_switch("carrier_check")`) brings the row back with another delta. Redis can keep caching raw rows if you want it to; what goes is the derived flag and its invalidation code.
 
 ### 3. Business rules in prompts and tool handlers
 
@@ -127,7 +127,7 @@ Before an agent calls the carrier, it claims the check. The claim is a guarded w
   !attempt(Order, "carrier_check", _)
 ```
 
-The first agent gets `Update: 0 deleted, 1 inserted.` and calls the carrier. A second agent sending the same claim with its own attempt id gets `Update: 0 deleted, 0 inserted.` and does nothing. The guard is checked at commit against the live view, so a claim sent after the kill switch was flipped inserts nothing either. In a test, twenty connections racing one claim produced one winner, nineteen no-ops and no errors.
+The first agent gets `Update: 0 deleted, 1 inserted.` and calls the carrier. A second agent sending the same claim with its own attempt id gets `Update: 0 deleted, 0 inserted.` and does nothing. The guard is evaluated at commit against the current facts, so a claim sent after the kill switch was flipped inserts nothing either. In a test, twenty connections racing one claim produced one winner, nineteen no-ops and no errors.
 
 The leading `-attempt("", "", "")` deletes a row that never exists. It is there because a statement with a single `+` head and a body registers a persistent rule; the delete head makes the statement a one-time [conditional update](/docs/guides/core-concepts#pattern-3-atomic-update) instead.
 
@@ -143,7 +143,7 @@ Where it stops:
 These are available but are not why you would adopt InputLayer:
 
 - **LangGraph checkpoints and memory.** `InputLayerCheckpointer` is a one-line swap from `PostgresSaver`. See the [LangGraph Integration](/docs/guides/langgraph).
-- **Agent coordination state.** Which agent owns a session or a task is a set of rows, and a view joined on it empties as soon as ownership changes.
+- **Agent coordination state.** Which agent owns a session or a task is a set of rows, and a view joined on it is empty in the next evaluation after ownership changes.
 - **"Why did it do that?"** A proof over facts and rules for the row the agent acted on, next to your traces.
 
 ## What you add

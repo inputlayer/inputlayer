@@ -49,7 +49,7 @@ Main client class with namespaced API methods:
 - `client.databases` - Database management
 - `client.query` - Query execution
 - `client.relations` - Relation data access
-- `client.views` - View management
+- `client.views` - View management (persistent rules, evaluated on each query)
 - `client.rules` - Rule management
 - `client.admin` - Server health and stats
 

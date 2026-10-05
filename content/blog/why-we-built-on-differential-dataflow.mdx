@@ -2,18 +2,18 @@
 title: "Why We Built InputLayer on Differential Dataflow"
 date: "2026-01-30"
 category: "Engineering"
-excerpt: "One fact changes. Two million derived conclusions exist. How many need to update? Usually a few hundred. Differential Dataflow finds exactly those, in milliseconds."
+excerpt: "Deleting one fact from a recursive chain of reasoning must retract exactly the conclusions that lost all support. Differential Dataflow's weighted model gets that right by construction. Here is why we built on it, and what it does and does not do for us today."
 ---
 
 # Why We Built InputLayer on Differential Dataflow
 
-We needed an engine where deleting one fact from a graph with two million derived conclusions would correctly retract exactly the right subset in milliseconds, not minutes. Getting this wrong means phantom permissions that should have been revoked, stale compliance flags that miss a sanctions hit, or recommendations pointing to discontinued products. These aren't edge cases. They're the normal state of any system where facts change and derived conclusions don't keep up.
+We needed an engine where deleting one fact from a graph with two million derived conclusions would correctly drop exactly the right subset from the answer, every time. Getting this wrong means phantom permissions that should have been revoked, stale compliance flags that miss a sanctions hit, or recommendations pointing to discontinued products. These aren't edge cases. They're the normal state of any system where facts change and derived conclusions are stored somewhere that nobody refreshes.
 
 The choice of computation engine determines whether these bugs are even possible. We chose Differential Dataflow because it makes an entire category of consistency failures structurally impossible. Not caught by tests, not handled by cleanup jobs, but eliminated at the engine level. Here's the story behind that choice.
 
 ## The problem that started everything
 
-We wanted to build a knowledge graph engine that could do something deceptively simple: keep derived conclusions up to date when facts change.
+We wanted to build a knowledge graph engine that could do something deceptively simple: give answers that are correct for the facts as they are right now, including after facts are removed.
 
 That sounds straightforward until you think about scale. Imagine a knowledge graph with 100,000 facts and 50 rules that derive new conclusions from those facts. Some of those rules are recursive, meaning their output feeds back into their input. The initial computation produces millions of derived facts. Fine, that's a one-time cost.
 
@@ -23,29 +23,33 @@ But then a single fact changes. One employee transfers departments. One entity g
 100K facts + 50 rules -> 2M derived facts [primary] -> 1 fact changes -> ~100 affected [highlight]
 ```
 
-With a naive approach, you throw away all 2 million derived facts and recompute them from scratch. For small graphs, that's fast enough. For production workloads, it doesn't work. At 11 seconds per recomputation on a 2,000-node graph, you're locked into batch processing. Real-time permission checks, live compliance screening, instant recommendation updates. None of that is practical.
+There are two ways to get this wrong. Store the 2 million derived facts and forget to retract the ones that lost support, and you serve phantom conclusions. Recompute the whole closure for every question, and at 11 seconds per recomputation on a 2,000-node graph you're locked into batch processing.
 
-We needed an engine that could update just the affected derivations, correctly, in milliseconds.
+We needed an engine whose derivations are correct under deletion by construction, and a way to compute only the part of the graph a question actually needs.
 
 ## Finding Differential Dataflow
 
 We found it in Frank McSherry's work on [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow), built on top of [Timely Dataflow](https://github.com/TimelyDataflow/timely-dataflow). Both are Rust libraries. The performance was a bonus. The computational model was the real discovery.
 
-The core idea is simple enough to explain in a paragraph: instead of storing derived data as static results, the engine tracks *changes*. Adding a fact is a +1. Removing a fact is a -1. Every computation in the system takes changes in and produces changes out. This means every operation is naturally incremental. It never looks at the whole dataset, only at what changed.
+The core idea is simple enough to explain in a paragraph: data is a collection of weighted records. Adding a fact is a +1. Removing a fact is a -1. Every operator, including recursive iteration, takes weighted records in and produces weighted records out, so a derived record exists exactly as long as its weight is positive. The same model is what lets a long-lived dataflow apply a change without recomputing everything.
+
+How InputLayer uses it today: every query compiles its rules into a fresh Differential Dataflow dataflow, streams the current facts in, collects the result and tears the dataflow down. Nothing derived is stored between queries. A subscription re-runs its query after each relevant commit and pushes the difference from the previous result.
 
 ```flow
-Full recompute: Changed fact -> Recompute ALL [highlight] -> Rebuilt results
+Today: Query -> Fresh dataflow over current facts [primary] -> Answer
 ```
 
 ```flow
-Differential: Changed fact -> Compute diff only [success] -> Updated derivations
+Planned: Changed fact -> Long-lived dataflow applies the diff [success] -> Maintained view
 ```
+
+The second line is planned work: keeping every persistent rule as a long-lived, incrementally maintained view is [milestone 9](https://github.com/inputlayer/inputlayer/issues/305).
 
 ## How it handles the hard part: recursive retraction
 
-The real test of an incremental system isn't additions. It's deletions. And specifically, deletions through recursive chains of reasoning.
+The real test of a reasoning engine isn't additions. It's deletions. And specifically, deletions through recursive chains of reasoning.
 
-Here's the scenario that breaks naive incremental systems. Alice has authority over Charlie through two independent paths:
+Here's the scenario that breaks naive systems that store and patch derived results. Alice has authority over Charlie through two independent paths:
 
 ```graph
 Alice --manages-> Bob --manages-> Charlie [primary]
@@ -54,7 +58,7 @@ Alice --manages-> Diana --manages-> Charlie [primary]
 
 Remove Bob's management of Charlie. Does Alice lose authority over Charlie? *No*, the path through Diana still supports it. Now remove Diana's management of Charlie too. Does Alice lose authority over Charlie? *Yes*, there are no remaining paths.
 
-Differential Dataflow handles this through its weight-based model. Each derived fact carries a weight representing the number of independent reasoning paths that support it. Removing a path decreases the weight. The fact only retracts when the weight hits zero.
+Differential Dataflow's weight-based model makes this precise. Within an evaluation, each derived fact carries a weight representing the support it has. Removing a path decreases the weight, and the fact only disappears when the weight hits zero. In InputLayer today, the deletion takes effect on the next evaluation: the query is recomputed from the remaining facts, and Alice keeps or loses Charlie exactly as the remaining paths dictate.
 
 ```steps
 Both paths: weight = 2 :: via Bob + Diana
@@ -62,23 +66,25 @@ Remove Bob path: weight = 1 :: survives [success]
 Remove Diana path: weight = 0 :: retracted [highlight]
 ```
 
-This sounds simple in theory. In practice, getting it right through multiple levels of recursive reasoning, where intermediate conclusions can also have multiple support paths, is extraordinarily difficult. Differential Dataflow solves it at the engine level, which means we didn't have to.
+This sounds simple in theory. In practice, getting it right through multiple levels of recursive reasoning, where intermediate conclusions can also have multiple support paths, is extraordinarily difficult. Differential Dataflow solves it at the engine level, which means we didn't have to, and it is the same machinery the planned maintained views will use to apply deletions without a full re-evaluation.
 
 ## What this gives you
 
 Building on Differential Dataflow gave us three properties that show up directly in what you can build with InputLayer.
 
-**Incremental maintenance:** When a fact changes, only the affected derivations recompute. On a 2,000-node graph with 400,000 derived relationships, updating a single edge takes 6.83ms instead of 11.3 seconds. That's a 1,652x speedup that turns batch-only workloads into real-time operations.
+**Answers that match the current facts:** Every query is evaluated against the facts as they are when it runs, so there is no stored derived state to drift out of date. Subscriptions get the same guarantee by re-evaluating after each relevant commit.
 
 **Correct retraction:** Delete a fact, and everything derived through it disappears, but only if there's no alternative reasoning path. Phantom permissions, stale recommendations, lingering compliance flags. These bugs simply don't exist when the engine handles retraction correctly.
 
-**On-demand computation:** We combined Differential Dataflow with an optimization called Magic Sets, which rewrites recursive rules so the engine only computes what's needed for a specific query. Ask "who does Alice have authority over?" and the engine starts from Alice and follows only her paths. It doesn't compute authority for the entire organization. Query time is proportional to the relevant portion of the graph.
+**On-demand computation:** We combined Differential Dataflow with an optimization called Magic Sets, which rewrites recursive rules so the engine only computes what's needed for a specific query. Ask "who does Alice have authority over?" and the engine starts from Alice and follows only her paths. It doesn't compute authority for the entire organization. On a 2,000-node graph with 400,000 derived relationships, the bound query `?reach(1, Y)` takes 6.83ms against 11.3 seconds for computing the full closure, a 1,652x difference. That is a demand-driven query computing only the slice it needs, not incremental maintenance.
 
 ## The tradeoffs
 
 No engineering decision is free. Here's what we trade.
 
-**Memory:** Differential Dataflow keeps its working memory in RAM. For very large datasets, memory usage grows with the size of the maintained results. We handle this with persistent storage (Parquet files plus a write-ahead log) that lets us recover state without keeping everything in memory indefinitely. But it's a real consideration for very large knowledge graphs.
+**Recomputation on read:** Because nothing derived is stored, every read re-derives its answer. Bound recursive queries stay cheap through Magic Sets, but unbound reads of large recursive rules, and subscriptions that re-run them after every commit, pay the full cost each time. That is the gap milestone 9 closes by maintaining persistent rules as views.
+
+**Memory:** Facts live in memory, backed by persistent storage (Parquet files plus a write-ahead log) for recovery. Each query's dataflow holds its working set in RAM while it runs, which is a real consideration for very large knowledge graphs.
 
 **Complexity floor:** The Timely/Differential Dataflow programming model is powerful but has a steep learning curve. We invested significant engineering time building the abstraction layer that compiles high-level rules into efficient computation pipelines. You never touch the dataflow layer directly, but we do, and it required deep expertise to get right.
 
@@ -88,6 +94,6 @@ No engineering decision is free. Here's what we trade.
 
 The Differential Dataflow foundation matters most for use cases where data changes frequently and derived conclusions need to stay current. Access control hierarchies where people change roles regularly. Supply chain graphs where supplier status changes daily. Compliance systems where entity relationships and sanctions lists are updated constantly. Agent memory systems where new observations arrive continuously.
 
-For batch-once-query-many workloads with no updates, a simpler engine would be fine. But the moment your facts change and you need derived conclusions to stay correct, the incremental approach pays for itself immediately.
+For batch-once-query-many workloads with no updates, a simpler engine would be fine. But the moment your facts change and you need derived conclusions to stay correct, including under deletion, the weighted model pays for itself immediately.
 
 Our [benchmarks post](/blog/benchmarks-1587x-faster-recursive-queries/) has the specific numbers. And the [quickstart guide](/docs/guides/quickstart/) gets you running in about 5 minutes so you can see it in action.

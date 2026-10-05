@@ -1,4 +1,5 @@
 // The derived answer the demo's agent watches: enterprise customers with an
 // unresolved failed payment. `customer` comes from Postgres CDC, `payment_issue`
-// from billing webhooks; the engine keeps the join current as either changes.
+// from billing webhooks; the join is re-evaluated on each query and after each
+// relevant commit for the standing query, so it reflects either change.
 +needs_attention(Id, Name, Invoice) <- customer(Id, Name, "enterprise"), payment_issue(Invoice, Id, _)

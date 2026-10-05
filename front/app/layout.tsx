@@ -9,7 +9,7 @@ const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono"
 
 const siteTitle = "InputLayer - The live rules engine for AI agents"
 const siteDescription =
-  "Take the rules out of your prompts. Your agents act on what's true now: InputLayer keeps every conclusion current as facts change, tells your agents what changed, and records an agent's action only while the rules allow it."
+  "Take the rules out of your prompts. Your agents act on what's true now: InputLayer derives every conclusion from the current facts when it is read, tells your agents what changed, and records an agent's action only while the rules allow it."
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://inputlayer.ai"),

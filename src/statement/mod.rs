@@ -39,7 +39,7 @@ pub enum Statement {
     Update(UpdateOp),
     /// Type declaration: type Name: `TypeExpr`.
     TypeDecl(TypeDecl),
-    /// Session rule: head <- body. (query-only, not materialized)
+    /// Session rule: head <- body. (query-only, not stored in the catalog)
     SessionRule(Rule),
     /// Fact: relation(args). (base data)
     Fact(Rule),
@@ -47,7 +47,7 @@ pub enum Statement {
     Query(QueryGoal),
     /// Schema declaration via typed arguments: +name(col: type, ...). or name(col: type, ...).
     SchemaDecl(SchemaDecl),
-    /// Persistent rule: +name(...) <- body. (DD materialized view)
+    /// Persistent rule: +name(...) <- body. (stored in the catalog, evaluated on every query that reads it)
     PersistentRule(Rule),
     /// Delete relation or rule: -name.
     DeleteRelationOrRule(String),
@@ -135,7 +135,7 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
         return Ok(Statement::Query(query));
     }
 
-    // Session rule: head <- body (query-only, not materialized)
+    // Session rule: head <- body (query-only, not stored in the catalog)
     if contains_outside_strings(input, "<-") {
         return parse_transient_rule(input).map(Statement::SessionRule);
     }

@@ -114,7 +114,7 @@ Output:
 
 ## 7. Watch the Conclusion Change
 
-`senior` is not a stored list: it is derived from `person` and stays current as the facts change. Bob turns 30, and Charlie leaves:
+`senior` is not a stored list: it is computed from `person` on each query, so it reflects the facts as they are when you ask. Bob turns 30, and Charlie leaves:
 
 ```iql
 -person("bob", 25)
@@ -142,7 +142,7 @@ Output:
 
 *2 rows*
 
-Bob is now derived as a senior and Charlie's conclusion is retracted, with no rule re-run by hand. An agent does not even poll for this: a [standing query](websocket-api) pushes each change as it happens.
+Bob is now derived as a senior and Charlie no longer is, with no rule re-run by hand: the query evaluated the rule against the current facts. An agent does not even poll for this: a [standing query](websocket-api) is re-run after each commit that touches `person` and pushes the rows that changed.
 
 ## 8. Use Aggregation
 

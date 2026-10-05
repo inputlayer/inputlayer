@@ -8,9 +8,9 @@ InputLayer is the live rules engine for AI agents. These docs use a few words wi
 
 - **Fact**: a row in a relation, written by your adapters, operators or agents (`+eta("SHP-77", 20261009)`).
 - **Rule**: a declaration of what follows from facts, evaluated by the engine (`+late(Order) <- ...`).
-- **View**: a rule-derived relation the engine keeps current. When a fact changes, rows that stop holding are retracted and new ones are added.
+- **View**: a rule-derived relation, computed from the facts whenever it is read. Nothing derived is stored: after a fact changes, the next read no longer contains rows that stopped holding and contains the new ones.
 - **Knowledge graph**: the facts and rule-derived conclusions of one domain. It is what the engine holds; one server holds many knowledge graphs.
-- **Standing query**: a query whose result the engine keeps current and whose exact changes it pushes to the subscriber (see [Standing Queries](/docs/guides/websocket-api#standing-queries)).
+- **Standing query**: a query whose exact changes the engine pushes to the subscriber, by re-evaluating the query after each commit that touches its relations and diffing the result against the previous one (see [Standing Queries](/docs/guides/websocket-api#standing-queries)).
 - **Claim**: a guarded write an agent sends before it acts. It is recorded only while the rules allow it at commit, and only one claimant wins (see [What InputLayer Replaces](/docs/guides/what-it-replaces#4-already-handled-rows-and-claimedby-columns)).
 - **Proof**: the derivation of a row from facts and rules, returned by `.why`; `.why_not` names the condition that blocks a missing row (see [Explainability](/docs/guides/explainability)).
 
@@ -294,18 +294,20 @@ views/
   reporting.iql
 ```
 
-### 4. Use Persistent Rules for Automatic Materialization
+### 4. Use Persistent Rules for Definitions You Reuse
 
-Persistent rules are automatically materialized and updated when base data changes:
+Persistent rules are stored in the knowledge graph's rule catalog and survive restarts. Their results are not stored: every query that reads a persistent rule evaluates it from the base facts, exactly like a session rule.
 
 ```iql
-// Session rules compute fresh each query:
+// Session rules: exist for this connection, evaluated on each query:
 reachable(X, Y) <- edge(X, Y)
 reachable(X, Y) <- reachable(X, Z), edge(Z, Y)
 
-// Persistent rules materialize and cache results:
+// Persistent rules: stored in the catalog, also evaluated on each query:
 +reachable(X, Y) <- edge(X, Y)
 +reachable(X, Y) <- reachable(X, Z), edge(Z, Y)
 ```
 
-Both session and persistent rules support full recursion with fixed-point iteration.
+Both session and persistent rules support full recursion with fixed-point iteration. A bound query such as `?reachable(1, Y)` computes only the slice it asks for when Magic Sets applies to the rule's recursion form.
+
+Planned, not shipped: milestone 9 ([#305](https://github.com/inputlayer/inputlayer/issues/305)) turns every persistent rule into an incrementally maintained view. Queries will read a deployed rule's rows without re-deriving them, and a subscription will be a keyed diff of a view between two revisions instead of a re-run of the query.

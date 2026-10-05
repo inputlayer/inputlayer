@@ -231,9 +231,11 @@ pub struct KnowledgeGraph {
     schema_catalog: SchemaCatalog,
     /// Current snapshot for lock-free reads (updated atomically on writes)
     snapshot: ArcSwap<KnowledgeGraphSnapshot>,
-    /// Persistent DD computation for incremental updates (shadow writes)
+    /// Optional base-relation mirror fed by shadow writes; `None` in both
+    /// production constructors (enabled only by tests)
     incremental: Option<IncrementalEngine>,
-    /// Recompute every rule into the incremental engine on each publish (off by default)
+    /// Recompute every rule from base into the incremental engine on each
+    /// publish; test-only, no config key
     auto_materialize: bool,
     /// Vector indexes, kept in sync with base relations on every write
     indexes: IndexManager,
@@ -2305,7 +2307,8 @@ impl KnowledgeGraph {
         self.optimization = config;
     }
 
-    /// Enable the IncrementalEngine for incremental updates.
+    /// Enable the IncrementalEngine (a base-relation mirror; test-only, no
+    /// production caller).
     ///
     /// Creates a persistent DD computation worker thread for this knowledge graph.
     /// Once enabled, all inserts and deletes are shadow-written to DD.

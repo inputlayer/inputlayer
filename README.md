@@ -5,9 +5,9 @@
 
 # Take the rules out of your prompts.
 
-**Your agents act on what's true now.** Declare your facts and rules once. InputLayer keeps every conclusion current as facts change, tells your agents what changed, and records an agent's action only while the rules allow it, so the tool runs only then.
+**Your agents act on what's true now.** Declare your facts and rules once. InputLayer derives every conclusion from the current facts when it is read, tells your agents what changed, and records an agent's action only while the rules allow it, so the tool runs only then.
 
-A rules engine, made live: a conclusion is retracted when its facts stop supporting it, the exact change is pushed to every subscribed agent, and any row can be explained with a proof, on request. The model proposes; the rules decide.
+A rules engine, made live: a conclusion disappears from the next evaluation once its facts stop supporting it, the exact change is pushed to every subscribed agent, and any row can be explained with a proof, on request. The model proposes; the rules decide.
 
 **Replaces:** the trigger service and the crons that re-check data for changes (a check that waits on time keeps a one-line clock writer); the precomputed eligibility flags you cache and invalidate; the business rules you wrote into system prompts and tool handlers (and the eligibility logic that ended up in OPA policies); the "already handled" rows and `claimed_by` columns that keep two agents from doing the same work (TTL locks too, once `WorkQueue` leases ship in phase 3).<br>
 **Keeps:** your models and gateway, LangGraph, MCP tool servers, Zep, pgvector, Redis for plain lookups, your systems of record, Debezium/Kafka and webhooks (they feed InputLayer), OPA for who may call, NeMo for content safety, Temporal for durable effects (its workflow id becomes the claim key), LangSmith/OTel.
@@ -136,7 +136,7 @@ And `.why` returns the proof for the row the agent acted on (the engine's proof 
 
 ## What it does
 
-1. **Told what changed, including what stopped being true.** When a fact changes, the conclusions that stop holding are retracted and the new ones pushed to every subscribed agent as exact deltas, with a proof on request. This replaces the trigger service, the re-check crons and the flags you invalidate by hand.
+1. **Told what changed, including what stopped being true.** When a fact changes, the engine re-evaluates each affected standing query, diffs the result against the previous one, and pushes the rows that left and entered to every subscribed agent as exact deltas, with a proof on request. This replaces the trigger service, the re-check crons and the flags you invalidate by hand.
 2. **No duplicate starts, no action the rules do not support when it commits.** One agent's claim per need, checked at commit against the live policy view; twenty connections racing one claim gave one winner and no errors. The effect runs outside the engine with the claim key as its idempotency key. In the reference architecture a model's output never authorizes an action by itself. This replaces the policy in your prompts and handlers and the "already handled" rows.
 3. **Cancellation derived from state, not left to the model.** The need leaves the view when the facts or the policy stop supporting it, and the same loop that started the work cancels it.
 4. **Scope, then sharing.** Measured today for tens of concurrent sessions per tenant knowledge graph with per-session subscriptions; many agents asking the same question share one evaluation (64-subscriber fan-out p99 13.8 ms); per-session questions fan out from one subscription per process until the engine-side change lands.
@@ -169,9 +169,9 @@ The "before" is the stack a good team ships today: an agent framework, Postgres 
 
 | Concern | Best-practice stack today | With InputLayer in the loop |
 |---|---|---|
-| Where "is this order late?" is decided | A SQL view or a server function decides it once, too; what differs is liveness: the agent re-queries or re-runs it each turn | In the engine, as a rule the engine keeps current; the answer is a row the agent is pushed when it changes |
-| How the agent learns a fact changed | With Postgres plus webhooks: an event names a table row and the agent re-queries and re-reasons; with a reactive database: the query re-runs and the new result is pushed | A delta names the derived rows that entered and left the conclusion, so the agent knows which of its own actions the change invalidates |
-| What happens when a fact is corrected | Materialize emits retractions and Convex re-pushes the result, so the data layer knows; nothing connects the retraction to what the agent already did | The retraction withdraws the agent's own derived work: the need disappears and the running tool is cancelled |
+| Where "is this order late?" is decided | A SQL view or a server function decides it once, too; what differs is liveness: the agent re-queries or re-runs it each turn | In the engine, as a rule evaluated after each relevant commit; the answer is a row the agent is pushed when it changes |
+| How the agent learns a fact changed | With Postgres plus webhooks: an event names a table row and the agent re-queries and re-reasons; with a reactive database: the query re-runs and the new result is pushed | The engine also re-runs the query after each relevant commit; the difference is that the delta names the derived rows that entered and left the conclusion, so the agent knows which of its own actions the change invalidates |
+| What happens when a fact is corrected | Materialize emits retractions and Convex re-pushes the result, so the data layer knows; nothing connects the retraction to what the agent already did | The next evaluation recomputes from the remaining facts and the delta withdraws the agent's own derived work: the need disappears and the running tool is cancelled. Unlike Materialize, InputLayer does not maintain views incrementally today; it re-evaluates and diffs |
 | N agents watching one question (Postgres plus webhooks or CDC) | N queries per change, or a cache the team builds and invalidates | One evaluation shared across subscribers of the same question; per-session questions fan out from one subscription per process, scope as stated above |
 | Reconnect, missed event (Postgres plus webhooks or CDC) | Replay from an event log if there is one; otherwise a full re-read and a duplicate-suppression layer | Snapshot, deltas, and a fresh snapshot on reconnect; the same loop |
 | "May this tool run?" | Deterministic guardrails before the call (tool guardrails, LangGraph interrupts, Cedar, OPA): per-call policy over the request | Policy over live derived state (tool policy, kill switch, source health, consent), checked at commit by the claim, with cancellation derived when it changes mid-run |
@@ -205,7 +205,7 @@ Lab measurements on a shared 32-vCPU host, not a benchmark rig:
 - **Writer to delta:** 2 to 7 ms p50 for one shared question at 64 subscribers; about 25 ms p50 per session with the full reference rule pack at ten sessions.
 - **Shared questions:** 64-subscriber fan-out, p99 13.8 ms.
 - **The race:** twenty connections racing one guarded insert: one winner, nineteen no-ops, no errors.
-- **Recursive queries** (a recursive-query result, not an agent-latency figure): after inserting 100 edges into a 2,000-node graph with transitive-closure rules, the bound query `?reach(1, Y)` answers in **6.83 ms** against **11.3 s** for a full recompute, **1,652x** ([BENCHMARKS.md](BENCHMARKS.md)).
+- **Recursive queries** (a recursive-query result, not an agent-latency figure): after inserting 100 edges into a 2,000-node graph with transitive-closure rules, the bound query `?reach(1, Y)` (Magic Sets computes only the demanded slice) answers in **6.83 ms** against **11.3 s** for the full closure, **1,652x**; both are recomputations, not incremental maintenance ([BENCHMARKS.md](BENCHMARKS.md)).
 
 ---
 
@@ -321,7 +321,7 @@ InputLayer fits when your agent works over structured facts that change, when it
 
 ## Built On
 
-[Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow) by Frank McSherry. Incremental computation engine written in Rust. Single binary, no external dependencies.
+[Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow) by Frank McSherry, used today as the per-query execution engine: each query runs as a fresh dataflow over a snapshot of the facts, and persistent rules are re-derived on every read. Keeping deployed rules as incrementally maintained live views is planned in [milestone 9 (#305)](https://github.com/inputlayer/inputlayer/issues/305). Single binary, no external dependencies.
 
 ## Documentation
 

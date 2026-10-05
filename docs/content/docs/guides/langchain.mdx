@@ -2,7 +2,7 @@
 
 Most retrieval pipelines work in one direction: embed a question, find similar chunks, hand them to an LLM. That works when the answer lives inside a single document. But the moment your application needs to combine facts from different sources, enforce access rules, or explain why a particular result was returned, plain similarity search runs out of road.
 
-InputLayer's LangChain integration gives you a way to add structured reasoning to any LangChain chain or agent. You can start with a standard vector store (embed, search, retrieve) and layer in joins across relations, derived rules that the engine keeps up to date, and provenance traces that show the LLM exactly how a conclusion was reached. Everything plugs into LangChain's standard interfaces, so your existing chains, agents, and LCEL pipelines work without modification.
+InputLayer's LangChain integration gives you a way to add structured reasoning to any LangChain chain or agent. You can start with a standard vector store (embed, search, retrieve) and layer in joins across relations, derived rules that the engine evaluates on every query, and provenance traces that show the LLM exactly how a conclusion was reached. Everything plugs into LangChain's standard interfaces, so your existing chains, agents, and LCEL pipelines work without modification.
 
 This guide walks through the integration from first install to reasoning-powered retrieval. No prior Datalog or IQL experience required.
 
@@ -326,7 +326,7 @@ This is where InputLayer's integration becomes fundamentally different from a st
 
 ### Derived relations
 
-Say you want to flag employees whose salary falls outside their department's band. Instead of writing that logic in Python every time you query, you define it as a rule that InputLayer maintains automatically:
+Say you want to flag employees whose salary falls outside their department's band. Instead of writing that logic in Python every time you query, you define it once as a rule that InputLayer evaluates against the current facts on every query:
 
 ```python
 from typing import ClassVar

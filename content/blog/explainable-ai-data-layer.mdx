@@ -45,7 +45,7 @@ For enterprise AI to be genuinely explainable, the context retrieval layer needs
 
 InputLayer stores facts explicitly and expresses rules as versioned logic. Every derived conclusion traces back to the named rules and named facts that produced it. The `.why` command returns the complete reasoning chain for any result.
 
-When a fact is deleted, every conclusion derived from it disappears automatically. The system never serves context based on outdated data. When a fact changes, only the affected conclusions recompute.
+When a fact is deleted, every conclusion derived from it is absent from the next query, because every query derives its conclusions from the current facts. Nothing derived is stored, so the system never serves context based on outdated data.
 
 The result: for any past decision, you can reconstruct the complete chain. This output was produced by this model, operating on this context, which was derived by these rules from these facts, which were current as of this timestamp.
 

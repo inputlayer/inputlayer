@@ -50,11 +50,11 @@ More sophisticated queries can traverse relationships between concepts. A custom
 ```steps
 Visual style + conceptual content :: Customers can search by both simultaneously [success]
 Relationship-based discovery :: Find images based on how objects and people relate in the scene [primary]
-Incremental updates :: New images immediately queryable, removed images retract cleanly [success]
+Fresh results :: New images immediately queryable, removed images gone from the next query [success]
 Millions of images indexed :: Combined vector and structural queries at scale [primary]
 ```
 
-The incremental computation engine keeps the knowledge graph current as new images are processed. When the vision pipeline extracts structured data from a new image, the facts are added and immediately available for queries. When an image is removed, all its associated facts retract cleanly - no orphaned metadata.
+Every query is evaluated against the facts as they are when it runs, so results reflect new images as soon as they are processed. When the vision pipeline extracts structured data from a new image, the facts are added and immediately available for queries. When an image is removed, its facts are deleted and nothing derived from them appears in the next query - no orphaned metadata.
 
 ## Key technical insight
 

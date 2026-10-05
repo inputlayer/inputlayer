@@ -159,7 +159,7 @@ Clauses:
   2. reachable(X, Z) <- follows(X, Y), reachable(Y, Z)
 ```
 
-## Step 8: Add More Data and See Incremental Updates
+## Step 8: See the Derived Relation Reflect New Facts
 
 Add a new follows relationship:
 
@@ -182,7 +182,7 @@ Results: 4 rows
   (1, 5)
 ```
 
-User 1 can now reach user 5! InputLayer automatically recomputed the derived relation when you added new data.
+User 1 can now reach user 5! InputLayer recomputed `reachable` from the current facts when you queried it, not when you inserted the fact.
 
 ## Complete Program
 
@@ -220,7 +220,7 @@ Or use the `.load` command:
 1. **Facts** (`+relation(...)`) are base data you insert
 2. **Rules** (`+head(...) <- body`) derive new data from existing data
 3. **Queries** (`? pattern`) ask questions about your data
-4. **Incremental** - When you add/remove facts, derived data updates automatically
+4. **Always current** - Derived data is computed from the current facts at query time, so added or removed facts show up in the next query
 5. **Persistent** - Facts and rules are saved to disk
 
 ## What's Different from SQL?
