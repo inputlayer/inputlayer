@@ -10,7 +10,8 @@
 //!
 //! `stream` covers the notification stream and snapshot handoff contract,
 //! `delivery` results and deltas too large for one frame, `saturation`
-//! sessions' deltas while writers overload the engine. Expected failures
+//! sessions' deltas while writers overload the engine, `views` how reads of
+//! deployed rules are answered (the view work counters). Expected failures
 //! for defects the reactive plan still tracks go in a `known_defects` module
 //! (see `inputlayer_testkit::KnownDefect`); none is open.
 //!
@@ -23,6 +24,7 @@ mod delivery;
 mod reactive;
 mod saturation;
 mod stream;
+mod views;
 mod wire;
 
 use inputlayer_testkit::EngineBuilder;

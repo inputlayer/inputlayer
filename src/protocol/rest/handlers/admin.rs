@@ -265,6 +265,8 @@ pub async fn prometheus_metrics(
                 session_stats.total_ephemeral_rules
             ));
 
+            out.push_str(&crate::execution::view_counters().format_prometheus());
+
             out.push_str(&handler.timing_histograms().format_prometheus());
 
             out
@@ -503,6 +505,16 @@ mod tests {
         assert!(body.contains("inputlayer_queries_total 0"));
         assert!(body.contains("inputlayer_knowledge_graphs"));
         assert!(body.contains("inputlayer_sessions_total 0"));
+        for counter in [
+            "inputlayer_view_reads_total",
+            "inputlayer_rule_evaluations_total",
+            "inputlayer_view_maintenance_us_total",
+        ] {
+            assert!(
+                body.contains(&format!("# TYPE {counter} counter\n{counter} ")),
+                "{counter} is exported"
+            );
+        }
     }
 
     #[tokio::test]
