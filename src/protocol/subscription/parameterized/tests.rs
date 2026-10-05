@@ -192,13 +192,11 @@ mod rounds {
 
     const KG: &str = "rounds";
 
-    /// The fewest standing-query permits with which families probe.
+    /// The fewest compute permits with which families probe.
     fn handler() -> (Arc<Handler>, TempDir) {
         handler_with(super::super::MIN_PERMITS_FOR_PROBES)
     }
 
-    /// A handler of `permits` standing-query permits, and as many for
-    /// requests.
     fn handler_with(permits: usize) -> (Arc<Handler>, TempDir) {
         handler_capped(
             permits,
@@ -206,8 +204,7 @@ mod rounds {
         )
     }
 
-    /// A handler of `permits` standing-query permits, and as many for
-    /// requests, whose results hold at most `max_result_rows`.
+    /// A handler of `permits` whose results hold at most `max_result_rows`.
     fn handler_capped(permits: usize, max_result_rows: usize) -> (Arc<Handler>, TempDir) {
         let tmp = TempDir::new().unwrap();
         let mut config = Config::default();
@@ -216,7 +213,7 @@ mod rounds {
         let handler = Arc::new(
             Handler::from_config(config)
                 .unwrap()
-                .with_compute_permits(2 * permits),
+                .with_compute_permits(permits),
         );
         handler.get_storage().create_knowledge_graph(KG).unwrap();
         (handler, tmp)
@@ -240,7 +237,7 @@ mod rounds {
     }
 
     /// Views of `queries` that never refresh: bindings that, with the
-    /// views a test refreshes, outnumber [`handler`]'s standing-query permits.
+    /// views a test refreshes, outnumber [`handler`]'s compute permits.
     fn idle(
         families: &Families,
         handler: &Arc<Handler>,
@@ -722,7 +719,7 @@ mod rounds {
             .own_cost_us
             .store(1_000_000_000, Ordering::Relaxed);
 
-        let held = handler.hold_request_permits();
+        let held = handler.hold_compute_permits();
         Family::probe(&one.family, two.own.current_snapshot().unwrap());
         probed(&one.family).await;
         assert_eq!(metrics.shared_evaluations(), 1);
@@ -752,7 +749,7 @@ mod rounds {
     }
 
     /// Views of `?item("sK", X)` for `active`, refreshed once, plus idle
-    /// views so that the family outnumbers [`handler`]'s standing-query permits,
+    /// views so that the family outnumbers [`handler`]'s compute permits,
     /// sharing.
     async fn sharing_views(
         families: &Families,
@@ -896,7 +893,7 @@ mod rounds {
 
         // Requests queued for compute permits, such as a burst of writes
         // waiting for their graph's commit, hold up no standing query.
-        let held = handler.hold_request_permits();
+        let held = handler.hold_compute_permits();
         let shared = views[0].refresh().await.unwrap();
         assert_eq!(inserted(&shared), [json!(["s1", 3])]);
         views[1].family.sharing.store(false, Ordering::Relaxed);
@@ -907,7 +904,7 @@ mod rounds {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_family_whose_views_fit_on_the_compute_permits_never_shares() {
-        // 3 sessions on 4 standing-query permits: their own evaluations run at once.
+        // 3 sessions on 4 compute permits: their own evaluations run at once.
         let (handler, _tmp) = handler_with(4);
         write(&handler, "+item[(\"s1\", 1), (\"s2\", 2), (\"s3\", 3)]").await;
         let families = Families::default();

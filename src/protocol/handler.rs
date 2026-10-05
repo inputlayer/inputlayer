@@ -199,19 +199,14 @@ pub struct Handler {
     /// Prevents blocking-thread-pool explosion by capping CPU-bound parallelism
     /// at the hardware thread count. Tokio workers queue via async `acquire()`.
     query_semaphore: Arc<tokio::sync::Semaphore>,
-    /// CPU-bound computations that run at once: the width of
-    /// `query_semaphore` plus that of `standing_semaphore`, but for a single
-    /// permit, which both get.
+    /// Width of `query_semaphore`: queries that run at once.
     compute_permits: usize,
-    /// Width of `standing_semaphore`.
-    standing_permits: usize,
     /// Permits of standing-query sharing probes, apart from the compute
     /// permits so that a probe never takes one a query waits for.
     probe_semaphore: Arc<tokio::sync::Semaphore>,
-    /// Permits of standing-query evaluations, their share of the compute
-    /// permits (`subscriptions.evaluation_share`) apart from the requests':
-    /// a refresh never queues behind requests, nor a request behind
-    /// refreshes. Requests queue behind each other: a burst of writes
+    /// Permits of standing-query evaluations, as many as compute permits but
+    /// apart from them: a refresh never queues behind requests, nor a request
+    /// behind refreshes. Requests queue behind each other: a burst of writes
     /// to one knowledge graph holds compute permits while each waits for the
     /// graph's commit, and refreshes queued among them would deliver every
     /// delta late by the whole burst.
@@ -1027,18 +1022,6 @@ fn proof_timing(
     })
 }
 
-/// `compute_permits` split into request and standing-query permits:
-/// standing queries get `share` of them, rounded, and requests the rest, each
-/// at least one. A single permit cannot be split, so each side gets it.
-fn split_compute_permits(compute_permits: usize, share: f64) -> (usize, usize) {
-    if compute_permits <= 1 {
-        return (1, 1);
-    }
-    let standing =
-        ((compute_permits as f64 * share).round() as usize).clamp(1, compute_permits - 1);
-    (compute_permits - standing, standing)
-}
-
 impl Handler {
     /// Create a new handler with the given storage engine.
     pub fn new(storage: StorageEngine) -> Self {
@@ -1051,8 +1034,6 @@ impl Handler {
         // The rest are available for CPU-bound DD computations via spawn_blocking.
         let io_reserve = (ncpu / 4).max(2).min(ncpu - 1);
         let compute_permits = ncpu - io_reserve;
-        let (request_permits, standing_permits) =
-            split_compute_permits(compute_permits, config.subscriptions.evaluation_share);
         let total_query_memory = config.storage.performance.total_query_memory_bytes();
         Self {
             replication: Arc::new(super::replication::ReplicationStatus::new(
@@ -1065,11 +1046,10 @@ impl Handler {
             insert_count: Arc::new(AtomicU64::new(0)),
             sessions: SessionManager::default(),
             notifications,
-            query_semaphore: Arc::new(tokio::sync::Semaphore::new(request_permits)),
+            query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
-            standing_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
-            standing_semaphore: Arc::new(tokio::sync::Semaphore::new(standing_permits)),
+            standing_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             share_regardless_of_cost: false,
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
@@ -1094,8 +1074,7 @@ impl Handler {
         info!(
             query_memory_bytes = handler.config.storage.performance.max_query_memory_bytes,
             total_query_memory_bytes = handler.query_memory.budget(),
-            compute_permits = handler.compute_permits,
-            standing_permits = handler.standing_permits,
+            compute_permits = handler.query_semaphore.available_permits(),
             "query_memory_limits"
         );
         Ok(handler)
@@ -1111,8 +1090,6 @@ impl Handler {
         // Reserve ~25% of cores (min 2) for Tokio async I/O, health checks, WebSocket handling.
         let io_reserve = (ncpu / 4).max(2).min(ncpu - 1);
         let compute_permits = ncpu - io_reserve;
-        let (request_permits, standing_permits) =
-            split_compute_permits(compute_permits, config.subscriptions.evaluation_share);
         let total_query_memory = config.storage.performance.total_query_memory_bytes();
         Self {
             replication: Arc::new(super::replication::ReplicationStatus::new(
@@ -1125,11 +1102,10 @@ impl Handler {
             insert_count: Arc::new(AtomicU64::new(0)),
             sessions: SessionManager::new(session_config),
             notifications,
-            query_semaphore: Arc::new(tokio::sync::Semaphore::new(request_permits)),
+            query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
-            standing_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
-            standing_semaphore: Arc::new(tokio::sync::Semaphore::new(standing_permits)),
+            standing_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             share_regardless_of_cost: false,
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
@@ -1195,40 +1171,26 @@ impl Handler {
         &self.config
     }
 
-    /// The CPU budget: how many CPU-bound computations run at once, split
-    /// between requests and standing-query evaluations by
-    /// `subscriptions.evaluation_share`, each waiting for a permit of its
-    /// own side. A single permit cannot be split: requests and evaluations
-    /// then get one each.
+    /// How many queries run at once; more wait for a compute permit.
+    /// Standing-query evaluations have as many permits of their own.
     pub fn compute_permits(&self) -> usize {
         self.compute_permits
     }
 
-    /// How many standing-query evaluations run at once: their share of the
-    /// compute permits.
-    pub fn standing_permits(&self) -> usize {
-        self.standing_permits
-    }
-
-    /// Every request permit, held until the result drops.
+    /// Every compute permit, held until the result drops.
     #[cfg(test)]
-    pub(crate) fn hold_request_permits(&self) -> tokio::sync::OwnedSemaphorePermit {
-        let requests = (self.compute_permits - self.standing_permits).max(1);
+    pub(crate) fn hold_compute_permits(&self) -> tokio::sync::OwnedSemaphorePermit {
         Arc::clone(&self.query_semaphore)
-            .try_acquire_many_owned(requests as u32)
+            .try_acquire_many_owned(self.compute_permits as u32)
             .unwrap_or_else(|e| panic!("compute permits taken: {e}"))
     }
 
-    /// This handler running `permits` CPU-bound computations at once (by
-    /// default, one per core not reserved for I/O), split between requests
-    /// and standing-query evaluations by `subscriptions.evaluation_share`.
+    /// This handler running `permits` queries at once (by default, one per
+    /// core not reserved for I/O).
     pub fn with_compute_permits(mut self, permits: usize) -> Self {
-        let (requests, standing) =
-            split_compute_permits(permits, self.config.subscriptions.evaluation_share);
-        self.query_semaphore = Arc::new(tokio::sync::Semaphore::new(requests));
-        self.standing_semaphore = Arc::new(tokio::sync::Semaphore::new(standing));
+        self.query_semaphore = Arc::new(tokio::sync::Semaphore::new(permits));
+        self.standing_semaphore = Arc::new(tokio::sync::Semaphore::new(permits));
         self.compute_permits = permits;
-        self.standing_permits = standing;
         self
     }
 
@@ -6078,40 +6040,6 @@ mod tests {
             Handler::from_config(config).expect("handler creation failed"),
             tmp,
         )
-    }
-
-    #[test]
-    fn compute_permits_split_between_requests_and_standing_queries() {
-        // (share, compute permits) -> (request permits, standing permits)
-        for (share, permits, requests, standing) in [
-            (0.5, 1, 1, 1),
-            (0.5, 2, 1, 1),
-            (0.5, 6, 3, 3),
-            (0.5, 7, 3, 4),
-            (0.25, 8, 6, 2),
-            (0.01, 8, 7, 1),
-            (0.99, 8, 1, 7),
-            (0.99, 2, 1, 1),
-        ] {
-            let (mut config, _tmp) = make_test_config();
-            config.subscriptions.evaluation_share = share;
-            let handler = Handler::from_config(config)
-                .unwrap()
-                .with_compute_permits(permits);
-            let case = format!("share {share} of {permits}");
-            assert_eq!(handler.compute_permits(), permits, "{case}");
-            assert_eq!(handler.standing_permits(), standing, "{case}");
-            assert_eq!(
-                handler.standing_semaphore.available_permits(),
-                standing,
-                "{case}"
-            );
-            assert_eq!(
-                handler.query_semaphore.available_permits(),
-                requests,
-                "{case}"
-            );
-        }
     }
 
     /// Convenience: create a StorageEngine with isolated temp storage.

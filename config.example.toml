@@ -279,11 +279,6 @@ notification_buffer_size = 4096
 # still gets exactly its own rows. Turns itself off per query shape when sharing
 # is slower.
 share_parameterized = true
-# Share of the compute permits (one per core not reserved for I/O) that runs
-# standing-query evaluations, between 0 and 1 exclusive; requests get the rest.
-# Neither queues behind the other, but they share the CPU. Each side gets at
-# least one permit.
-evaluation_share = 0.5
 
 # =============================================================================
 # WARM-STANDBY REPLICATION

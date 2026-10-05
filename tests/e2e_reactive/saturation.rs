@@ -204,7 +204,6 @@ async fn saturated_sessions_get_every_delta_once_in_time_and_nothing_else() -> C
         let session = (probes * 37 + 11) % SESSIONS;
         probes += 1;
         if pending.contains_key(&session) {
-            tokio::time::sleep(PROBE_GAP).await;
             continue;
         }
         let eta = format!("e-{probes}");

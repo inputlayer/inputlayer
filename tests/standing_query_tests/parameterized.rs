@@ -107,12 +107,12 @@ impl Member {
 }
 
 /// Subscribers of `shape` (`S` for the session) for sessions `s{first}`
-/// up to one more than the standing-query permits: with them, a family has
-/// more bindings than permits, its own evaluations no longer all run at once, and
+/// up to one more than the compute permits: with them, a family has more
+/// bindings than permits, its own evaluations no longer all run at once, and
 /// a round pays even on a many-core host.
 async fn idle(server: &Server, shape: &str, first: usize) -> Vec<Member> {
     let mut idle = Vec::new();
-    for session in first..=server.handler.standing_permits() + 1 {
+    for session in first..=server.handler.compute_permits() + 1 {
         let query = shape.replace('S', &format!(r#""s{session}""#));
         idle.push(Member::subscribe(server, &query).await);
     }
