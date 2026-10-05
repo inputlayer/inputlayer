@@ -581,19 +581,6 @@ mod tests {
             0,
         );
         assert!(result.is_err(), "computed path has no path(1, _)");
-
-        // Likewise for a materialized relation, whose tuples are base data.
-        let ctx = ProofContext::new(&rules, &data, ProofConfig::default())
-            .with_materialized(["path".to_string()].into());
-        let result = prove_body(
-            &body,
-            bindings(),
-            &ctx,
-            &mut ProofTreeBuilder::new(),
-            &mut HashSet::new(),
-            0,
-        );
-        assert!(result.is_err(), "materialized path has no path(1, _)");
     }
 
     #[test]

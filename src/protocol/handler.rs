@@ -804,8 +804,7 @@ impl ProofSnapshot {
             config.clone(),
             index_info,
         )
-        .with_derived_data(&derived_data)
-        .with_materialized(self.snapshot.materialized_relations.as_ref().clone());
+        .with_derived_data(&derived_data);
 
         // Build wire rows and proof trees
         let schema = extract_query_schema(query, &result_tuples);
