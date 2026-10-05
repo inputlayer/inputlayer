@@ -35,8 +35,9 @@ const TRIANGLES: &str = "?edge(X, Y), edge(Y, Z), edge(Z, X)";
 const LONG_QUERY: Duration = Duration::from_millis(500);
 /// Writer commit to the subscriber's delta, while its own query runs.
 const DELTA_BUDGET: Duration = Duration::from_millis(1_000);
-/// CPU budget of the server, split between requests and standing queries.
-const COMPUTE_PERMITS: usize = 4;
+/// CPU budget of the server, split between requests and standing queries:
+/// the smallest that splits, as on a 4-core host.
+const COMPUTE_PERMITS: usize = 2;
 
 struct Server {
     handler: Arc<Handler>,
@@ -60,8 +61,8 @@ async fn start_server(configure: impl FnOnce(&mut Config)) -> Server {
     config.http.rate_limit.ws_max_messages_per_sec = 0;
     config.http.gui.enabled = false;
     configure(&mut config);
-    // Whatever the host's cores, a request runs beside a long query: the
-    // default half share leaves requests two of these.
+    // Whatever the host's cores, a request runs beside a long query: even
+    // the smallest split budget leaves requests two permits.
     let handler = Arc::new(
         Handler::from_config(config)
             .unwrap()
