@@ -1018,6 +1018,7 @@ impl Handler {
     /// Create a new handler from configuration.
     pub fn from_config(mut config: Config) -> Result<Self, String> {
         config.validate()?;
+        crate::parser::set_max_nesting_depth(config.storage.performance.max_nesting_depth);
         let storage =
             StorageEngine::new(config).map_err(|e| format!("Failed to create storage: {e}"))?;
         let handler = Self::new(storage);
