@@ -5,10 +5,13 @@ primary streams every committed change to it. The follower applies the
 changes in commit order and serves queries and subscriptions on the copy. It
 refuses every write.
 
-This release ships the stream and the follower. Shipping is **asynchronous**:
-the primary acknowledges a write once it is durable on the primary, then
-sends it on. Promotion (turning a follower into the primary) and automatic
-failover are not part of this release.
+This release ships the stream and the follower. Shipping is
+**asynchronous** by default: the primary acknowledges a write once it is
+durable on the primary, then sends it on. With **synchronous** shipping the
+primary acknowledges a write only once a follower holds it, so no
+acknowledged write is lost with the primary (see
+[Synchronous Shipping](#synchronous-shipping)). Promotion (turning a follower
+into the primary) and automatic failover are not part of this release.
 
 ## Setting Up
 
@@ -61,7 +64,9 @@ primary's numbers.
 
 With asynchronous shipping, a write the primary acknowledged can be lost if
 the primary is lost before the follower applied it. The window is the
-follower's lag, which the status endpoint reports at any time.
+follower's lag, which the status endpoint and the metrics report at any time
+(`primary.lag_events` and `primary.lag_ms`: the writes that losing the
+primary now would lose, and the age of the oldest).
 
 Measured with primary and follower on one 32-core host (release build,
 `immediate` durability):
@@ -78,8 +83,76 @@ A follower that cannot hear the primary (the primary died, or the network is
 cut) notices after `timeout_ms`. Writes the primary accepts in that time reach
 the follower only once the connection is back.
 
-Synchronous shipping, where the primary acknowledges a write only once a
-follower holds it (RPO zero), is planned.
+With synchronous shipping the RPO is zero for every acknowledged write while
+a follower keeps up: see below.
+
+## Synchronous Shipping
+
+```toml
+[replication]
+role = "primary"
+token = "a-long-random-secret"
+mode = "sync"
+sync_timeout_ms = 5000        # how long a write's reply waits for a follower
+on_follower_loss = "block"    # or "degrade"
+```
+
+In `sync` mode the primary answers a request that changed state (facts,
+rules, schemas, graphs, indexes, users, API keys, access grants) only once a
+follower has applied its changes and synced them to its WAL. If the primary
+is then lost, the follower holds every write a client was told succeeded.
+Reads never wait. Nothing changes on the follower: it acknowledges every
+applied batch after its WAL fsync in both modes.
+
+**What it costs.** Each write's reply waits one round trip to the follower
+plus the follower's fsync. Measured with primary and follower on one 32-core
+host (release build, `immediate` durability, the measurement lab in
+`tests/replication_tests.rs`):
+
+| Writes | Async (median / p99) | Sync (median / p99) |
+|---|---|---|
+| 1 writer, one commit at a time | 1.46 ms / 5.6 ms | 2.69 ms / 8.5 ms |
+| 4 writers at full speed | 4.7 ms / 13.2 ms, 766 commits/s | 5.2 ms / 14.6 ms, 770 commits/s |
+
+Async mode costs the same as before synchronous shipping existed (1.44 ms
+median for 1 writer, 763 commits/s for 4, on the previous release in the same
+runs). A standalone server takes 1.33 ms per commit.
+
+The follower applies every batch it has received with one fsync, so
+concurrent writers share the wait: throughput with several writers is close
+to async.
+
+**Kill-the-primary test.** Across 10 trials of killing the primary
+(`SIGKILL`) under 4 writers in `sync` mode, every write a client was told
+succeeded (about 2,000 per trial) was on the follower. The test runs on every
+change (`in_sync_mode_killing_the_primary_loses_no_acknowledged_write`).
+The same 10 trials in `async` mode also lost nothing on that host, but there
+the primary held 1 or 2 unconfirmed writes at each kill: a slower network or
+follower turns those into lost writes, and `sync` mode never does.
+
+### When No Follower Confirms
+
+The commit itself is already durable on the primary when the wait ends, so a
+timeout is never reported as a failed write. What happens is set by
+`on_follower_loss`:
+
+| `on_follower_loss` | A write no follower confirms within `sync_timeout_ms` | Later writes |
+|---|---|---|
+| `block` (default) | fails with code `replica_unconfirmed`: committed on the primary, not confirmed on a replica | keep waiting, then fail the same way, until a follower confirms again. RPO stays zero for every write reported as succeeded; availability of writes drops. |
+| `degrade` | succeeds after the wait; the primary logs `replication_sync_degraded` and falls back to asynchronous shipping | do not wait. Once a follower has caught up (it applied everything it was sent, including every change from before the fall back), the primary logs `replication_sync_rearmed` and waits again. |
+
+A client that gets `replica_unconfirmed` must not resend the write as if it
+had failed: it is applied on the primary and reaches the follower once one
+catches up. It could be lost only if the primary is lost first.
+
+Choose `block` when losing an acknowledged write is worse than refusing
+writes for a while, and `degrade` when writes must keep flowing. In both
+modes, alert on `inputlayer_replication_sync_state`.
+
+A follower that resyncs (it is new, or fell further behind than
+`retain_bytes`) confirms nothing until the copy is applied, so writes made
+meanwhile wait for it. Size `sync_timeout_ms` above the follower's usual
+reconnect time (a few seconds), not above a resync.
 
 ## When Things Go Wrong
 
@@ -125,7 +198,15 @@ On a primary it reports:
 
 - `primary.stream_id`: this run of the primary
 - `primary.head_lsn`: the number of the newest change
-- for each connected follower: `sent_lsn`, `acked_lsn` and `lag_events`
+- `primary.lag_events` and `primary.lag_ms`: the changes no follower has
+  confirmed applying, and how long ago the oldest of them committed (what
+  losing the primary now would lose)
+- `primary.sync`: `mode`, `state` (`async`, `sync`, `stalled` while `block`
+  times out, or `degraded`), `on_follower_loss`, `sync_timeout_ms`,
+  `confirmed_lsn` (every change up to it is on a follower), and the counters
+  `waits`, `wait_ms_total`, `unconfirmed`, `degrades` and `rearms`
+- for each connected follower: `sent_lsn`, `acked_lsn`, `lag_events` and
+  `lag_ms`
 - `resync_pin_overflows`: resyncs abandoned because writes during the copy
   outgrew 4 × `retain_bytes`
 
@@ -145,6 +226,23 @@ On a follower it reports:
 curl -H "Authorization: Bearer $INPUTLAYER_API_KEY" http://follower:8080/v1/replication/status
 ```
 
+The same report is the `replication` object of `GET /metrics` on a primary
+or follower. `GET /metrics/prometheus` exports it as
+`inputlayer_replication_*`:
+
+| Metric | Server | Meaning |
+|---|---|---|
+| `head_lsn`, `confirmed_lsn` | primary | newest change; newest change a follower confirmed |
+| `lag_events`, `lag_seconds` | primary | changes no follower confirmed, and the age of the oldest |
+| `followers` | primary | connected followers |
+| `sync_state{state="async\|sync\|stalled\|degraded"}` | primary | 1 for the current state |
+| `sync_waits_total`, `sync_wait_seconds_total` | primary | replies that waited for a follower, and the time spent |
+| `sync_unconfirmed_total` | primary | replies failed with `replica_unconfirmed` |
+| `sync_degrades_total`, `sync_rearms_total` | primary | falls back to async, and returns to sync |
+| `follower_streaming`, `follower_applied_lsn`, `follower_lag_events` | follower | stream state, position and lag |
+| `follower_last_contact_seconds` | follower | time since the primary was last heard |
+| `follower_resyncs_total`, `follower_reconnects_total` | follower | resyncs begun, reconnects |
+
 ## Settings
 
 | Setting | Role | Default | Meaning |
@@ -155,6 +253,9 @@ curl -H "Authorization: Bearer $INPUTLAYER_API_KEY" http://follower:8080/v1/repl
 | `heartbeat_ms` | primary | 500 | heartbeat interval on an idle stream |
 | `primary_url` | follower | none | the primary's base URL (`http://` only) |
 | `timeout_ms` | follower | 3000 | silence after which the follower reconnects; must exceed `heartbeat_ms` |
+| `mode` | primary | `async` | `async`, or `sync` to acknowledge a write only once a follower applied it |
+| `sync_timeout_ms` | primary | 5000 | how long a write's reply waits for a follower in `sync` mode |
+| `on_follower_loss` | primary | `block` | `block` or `degrade`: what a `sync` primary does when no follower confirms in time |
 
 Keep the primary on `durability_mode = "immediate"` (the default). With
 `batched` durability a crash can lose commits that the primary already sent.

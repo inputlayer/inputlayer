@@ -247,6 +247,14 @@ Nothing was applied, and the query may succeed once the others finish: retry it 
 
 A write fails with the same code when it would grow its knowledge graph's facts past `storage.performance.max_graph_memory_bytes`. Nothing is applied; deleting facts is always allowed, so free space and retry.
 
+### Not Confirmed on a Replica
+
+```
+Error: committed on the primary, but no replica confirmed it within 5000 ms: it is applied here and could be lost only with this server. Do not retry it as a failed write.
+```
+
+Code `replica_unconfirmed`. The primary ships synchronously (`replication.mode = "sync"` with `on_follower_loss = "block"`) and no follower confirmed the write within `replication.sync_timeout_ms`. The write **is** committed on the primary: reads there see it, and a follower receives it once one catches up. Until then it is not protected against losing the primary. Do not resend it as if it had failed. Check the follower (`GET /v1/replication/status`); see [Replication](../guides/replication#synchronous-shipping).
+
 ### Query Too Complex
 
 ```
