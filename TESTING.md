@@ -134,14 +134,16 @@ engine's work counters in one run, not each feature in isolation. New
 end-to-end coverage goes here as a module, not as a new `tests/*.rs` binary.
 
 ```bash
-cargo test --test scenarios                         # debug; also part of plain `cargo test`
+cargo test --test scenarios                         # debug; also part of plain `cargo test` (the PR gate)
 make e2e-reactive                                   # release build, writes latency samples
 INPUTLAYER_SCENARIO_VIEWS=maintained cargo test --test scenarios  # refused until V2 (#309)
 ```
 
 Modules: `reactive`, `stream`, `delivery` and `wire` (the agent path below),
 and `harness` (the testkit pieces scenarios build on, checked against a real
-engine). The suite runs in about 25 s in debug on 4 cores.
+engine). The suite runs in about 25 s in debug on 4 cores. `make test-all` and
+`make ci-test-all` run it once, in release through `make e2e-reactive`: their
+debug unit stage runs every other workspace test without the scenarios binary.
 
 ### Harness
 
@@ -170,7 +172,9 @@ engine). The suite runs in about 25 s in debug on 4 cores.
   aggregate (`Size::Vector` adds embeddings, the `emb_idx` HNSW index and the
   `near` rule; `Size::Lab` is about a million `link` edges for the benchmark
   host). Its anchors (order `o-42`, chains `i0`-`i4` and `i5`-`i9`) are
-  documented on the function. `Size::Small` installs in well under 200 ms.
+  documented on the function. The `harness` scenario prints the `Size::Small`
+  install time; the 200 ms target is enforced only in the perf tier on the
+  benchmark host, never as a wall-clock assert in a PR or coverage run.
 
 ### Reactive agent path
 

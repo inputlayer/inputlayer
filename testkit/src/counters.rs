@@ -36,7 +36,6 @@ impl Counters {
         let counter = |name: &str| {
             samples
                 .get(&format!("inputlayer_{name}_total"))
-                .or_else(|| samples.get(&format!("inputlayer_{name}")))
                 .copied()
         };
         Self {

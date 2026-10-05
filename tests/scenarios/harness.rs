@@ -3,7 +3,7 @@
 //! keys and `expect_revision` reach the engine as scenarios send them.
 
 use std::collections::BTreeSet;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use inputlayer_testkit::{
     Checked, Counters, Fixture, KnownDefect, Reproduction, Size, Violation, WsClient,
@@ -11,9 +11,6 @@ use inputlayer_testkit::{
 use serde_json::Value;
 
 use crate::engine;
-
-/// Install budget of `shop_pack(Size::Small)` on a debug engine.
-const SMALL_INSTALL_BUDGET: Duration = Duration::from_millis(200);
 
 /// Rows as strings, for set comparisons.
 fn rows(rows: &[Value]) -> BTreeSet<String> {
@@ -34,10 +31,6 @@ async fn shop_pack_installs_and_derives_its_anchors() -> Checked<()> {
     println!(
         "shop_pack(Small): {} statements in {install:?}",
         pack.statements.len()
-    );
-    assert!(
-        install < SMALL_INSTALL_BUDGET,
-        "shop_pack(Small) took {install:?} to install (budget {SMALL_INSTALL_BUDGET:?})"
     );
 
     let mut reader = WsClient::connect(&engine, &pack.knowledge_graph).await?;

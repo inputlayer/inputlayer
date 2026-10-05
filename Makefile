@@ -15,6 +15,13 @@ test-fast: check unit-test
 test: check unit-test e2e-test
 	@echo "All tests complete."
 
+# Every workspace test except the scenarios binary. test-all and ci-test-all
+# run the scenarios once, in release, through e2e-reactive.
+NON_SCENARIO_TESTS := $(addprefix --test ,$(filter-out scenarios,$(basename $(notdir $(wildcard tests/*.rs))) $(notdir $(patsubst %/main.rs,%,$(wildcard tests/*/main.rs)))))
+test_without_scenarios = { RUST_TEST_THREADS=$(1) cargo test --workspace --all-features --exclude inputlayer -- --test-threads=$(1) --format=pretty && \
+	RUST_TEST_THREADS=$(1) cargo test -p inputlayer --all-features --lib --bins $(NON_SCENARIO_TESTS) -- --test-threads=$(1) --format=pretty && \
+	RUST_TEST_THREADS=$(1) cargo test -p inputlayer --all-features --doc -- --test-threads=$(1) --format=pretty; }
+
 # Full verification (CI, pre-merge)
 # Runs everything: static analysis, build, unit+integration tests, snapshot E2E tests, coverage
 # All tests run in parallel. Zero ignored tests allowed. Cleanup verified.
@@ -42,7 +49,7 @@ test-all: check static-analysis
 	echo "=== Unit + Integration Tests ($$NCPU threads) ==="; \
 	UNIT_TMPFILE=$$(mktemp); \
 	set -o pipefail; \
-	RUST_TEST_THREADS=$$NCPU cargo test --workspace --all-features -- --test-threads=$$NCPU --format=pretty \
+	$(call test_without_scenarios,$$NCPU) \
 		2>&1 | tee "$$UNIT_TMPFILE"; \
 	UNIT_EXIT=$${PIPESTATUS[0]}; \
 	tail -5 "$$UNIT_TMPFILE"; \
@@ -206,7 +213,7 @@ ci-test-all:
 	echo "=== Unit Tests ==="; \
 	UNIT_TMPFILE=$$(mktemp); \
 	set -o pipefail; \
-	RUST_TEST_THREADS=$$CI_JOBS cargo test --workspace --all-features -- --test-threads=$$CI_JOBS --format=pretty \
+	$(call test_without_scenarios,$$CI_JOBS) \
 		2>&1 | tee "$$UNIT_TMPFILE"; \
 	UNIT_EXIT=$${PIPESTATUS[0]}; \
 	tail -5 "$$UNIT_TMPFILE"; \
