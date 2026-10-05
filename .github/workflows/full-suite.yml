@@ -7,7 +7,8 @@ name: Full suite
 #     is already covered by the branch push, so its PR run is skipped.
 #   - manual workflow_dispatch on main only, or with perf_gate_only on any
 #     ref, which runs the performance runs alone, the gate and the views
-#     benchmark (to measure a branch)
+#     benchmark (to measure a branch). The views benchmark runs only on
+#     perf_gate_only dispatches, never on a release checkpoint
 #   - v* tag pushes, through the Release workflow (publish.yml), which calls
 #     this workflow and publishes only if it passes
 # docker.yml uses the release triggers without manual dispatch.
@@ -22,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       perf_gate_only:
-        description: Run only the performance gate and the views benchmark (allowed on any ref)
+        description: Run only the performance gate and the views benchmark, which runs on no other trigger (allowed on any ref)
         type: boolean
         default: false
       perf_gate_aa:
@@ -418,14 +419,15 @@ jobs:
 
   # The views benchmark (perf-gate views, #308): write and read cost against
   # deployed rules by graph size, rule count and subscriber count, with the
-  # engine's view work counters. Part of the performance runs (it runs with
-  # perf_gate_only too) and report-only: it fails only when a delta never
-  # arrives or a step fails, never on latency. Numbers comparable with the
-  # incremental-views review come from the benchmark host:
-  # make bench-views-remote (perf-gate/README.md).
+  # engine's view work counters. It runs only on perf_gate_only dispatches,
+  # so it never runs on a release checkpoint and cannot block a release. It
+  # fails only when a delta never arrives or a step fails, never on latency.
+  # Numbers comparable with the incremental-views review come from the
+  # benchmark host: make bench-views-remote (perf-gate/README.md).
   views-bench:
     name: Views benchmark
     needs: gate
+    if: ${{ inputs.perf_gate_only }}
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 90
     steps:

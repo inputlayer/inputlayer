@@ -230,6 +230,8 @@ cancels out of the paired ratios. `scripts/perf-gate-ci.sh` drives it:
 To measure a branch before its checkpoint, dispatch the workflow with only
 the performance runs (the gate and the `Views benchmark` job):
 `gh workflow run full-suite.yml --ref <branch> -f perf_gate_only=true`.
+The `Views benchmark` job runs only on such dispatches, never on a release
+checkpoint.
 Add `-f perf_gate_aa=true` to measure the baseline against itself, which
 checks the runner's noise and records a calibration run for the baseline.
 
@@ -417,6 +419,10 @@ Each graph size runs on a fresh server with the gate's configuration plus
 caps lifted for 1,000 subscriber connections from one address. Durability is
 the default (`immediate`: one fsync per commit).
 
+This is the review's Section 4 matrix: unbound subscribers at 1 (P1, P3)
+and 100 (P2), keyed and recursive keyed counts as below, and 50 and 200
+filler rules.
+
 - **Graph.** Chains of four nodes (three edges each); every hundredth chain
   head is labelled hot.
 - **Rules.** `r1(X,Y) <- edge(X,Y), label(X,"hot")` (non-recursive), `path`
@@ -435,7 +441,12 @@ the default (`immediate`: one fsync per commit).
   of `r1`; P3 one unbound subscriber of `hot_reach`. P4 has keyed subscribers
   `?r1(K_i,Y)`, 1/10/100/1,000 (`--keyed`), and P5 keyed subscribers of the
   recursive view (`--recursive-keyed`, 1/100, or 1/10 from 1M edges). Each
-  write changes one key, and only that key's subscriber waits for it. P6 is
+  write changes one key, and only that key's subscriber waits for it. Each
+  keyed subscriber needs its own hot head, so a keyed count above the
+  graph's hot heads is skipped, with a note in the result: 10K edges (34
+  hot heads) runs P4 at 1/10 and P5 at 1, 100K (334) runs P4 at 1/10/100
+  and P5 at 1/100, and 1M (3,334) runs P4 at 1/10/100/1,000 and P5 at
+  1/10. P6 is
   one unbound `r1` subscriber after 50 and then 200 unrelated rules join the
   catalog (`--filler-rules`), with the `r1` idle reads repeated. Phases run
   30 writes each (`--writes`); at 1M edges or more, the subscriber phases run
@@ -445,17 +456,21 @@ the default (`immediate`: one fsync per commit).
   `inputlayer_rule_evaluations_total` (reads answered by evaluating deployed
   rules), `inputlayer_view_reads_total` (reads served from a view) and
   `inputlayer_view_maintenance_us_total`. Today every read of a deployed rule
-  is one rule evaluation. A standing query's refresh is one too, so P4 with
-  10 keyed subscribers shows 11 per write. The columns are empty for a server
+  is one rule evaluation, and so is each evaluation that refreshes standing
+  queries. A shared evaluation counts once, not once per subscriber: the
+  unbound view P2's 100 subscribers share, or the shared round of a
+  parameterized family of keyed subscribers. So P4 with 10 keyed subscribers
+  shows 11 per write only while each subscriber refreshes on its own. The columns are empty for a server
   that does not export the counters.
 
 A delta that does not arrive within 20 s of its write is **late**. A late
 delta, a failed subscription or a failed step fails the run (exit 1).
 `target/bench-views/latest/` holds `result.json` (schema
 `inputlayer-perf-gate/views/v1`) and `summary.md`, with tables in the review
-report's shape. Full-suite runs include it as the `Views benchmark` job,
-report-only, on the perf gate's 32-vCPU runner. Numbers comparable with the
-review come from the benchmark host.
+report's shape. The full suite runs it as the `Views benchmark` job on the
+perf gate's 32-vCPU runner only when dispatched with `perf_gate_only`, so it
+never runs on a release checkpoint. Numbers comparable with the review come
+from the benchmark host.
 
 The headroom reference is `cargo bench --bench view_maintenance_benchmarks`.
 It is the review's differential-dataflow micro-benchmark: the same graph and
