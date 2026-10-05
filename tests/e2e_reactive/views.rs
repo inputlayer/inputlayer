@@ -136,6 +136,28 @@ async fn every_read_of_a_deployed_rule_evaluates_it_once() -> Checked<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_read_in_a_session_with_session_facts_evaluates_its_deployed_rule_once() -> Checked<()> {
+    let engine = engine().start().await.expect("start engine");
+    reachability_chain(KG, 5).install(&engine).await?;
+    let mut writer = WsClient::connect(&engine, KG).await?;
+    writer
+        .commit("+hop2(X, Z) <- edge(X, Y), edge(Y, Z)")
+        .await?;
+    let mut reader = WsClient::connect(&engine, KG).await?;
+    reader.commit("edge(5, 6)").await?;
+
+    let before = scrape(&engine).await;
+    let result = reader.query("?hop2(0, Z)").await?;
+    assert!(!result.rows.is_empty(), "the read has results");
+    assert_eq!(
+        scrape(&engine).await.since(before),
+        Counters::evaluations(1),
+        "a read in a dirty session evaluates once"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_subscription_evaluates_its_deployed_rule_on_every_relevant_commit() -> Checked<()> {
     let engine = engine().start().await.expect("start engine");
     reachability_chain(KG, 4).install(&engine).await?;

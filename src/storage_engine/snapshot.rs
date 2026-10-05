@@ -422,12 +422,25 @@ impl KnowledgeGraphSnapshot {
         session_facts: Vec<(String, Tuple)>,
         timing_mode: TimingMode,
     ) -> Result<(Vec<Tuple>, RelationMap, Option<TimingBreakdown>), String> {
+        self.evaluate_program(query, rule_set, output, session_facts, timing_mode, true)
+    }
+
+    /// `run_program`, recording a rule evaluation only when `counted`.
+    fn evaluate_program(
+        &self,
+        query: Program,
+        rule_set: RuleSet,
+        output: Output,
+        session_facts: Vec<(String, Tuple)>,
+        timing_mode: TimingMode,
+        counted: bool,
+    ) -> Result<(Vec<Tuple>, RelationMap, Option<TimingBreakdown>), String> {
         let start = Instant::now();
         let session_fact_count = session_facts.len();
         let (mut engine, combined) =
             self.prepare(query, rule_set, output, session_facts, timing_mode)?;
         let rules = combined.program.rules.len();
-        if combined.evaluates_rules {
+        if counted && combined.evaluates_rules {
             crate::execution::view_counters().record_rule_evaluation();
         }
         let result = engine.execute_program_profiled(combined.program);
@@ -450,6 +463,23 @@ impl KnowledgeGraphSnapshot {
             Output::Result,
             Vec::new(),
             TimingMode::Off,
+        )
+        .map(|(tuples, _, _)| tuples)
+    }
+
+    /// [`Self::execute_program_with_rules`] as an internal re-run of a read
+    /// that already counted its rule evaluation: records none.
+    pub fn execute_program_with_rules_uncounted(
+        &self,
+        query: Program,
+    ) -> Result<Vec<Tuple>, String> {
+        self.evaluate_program(
+            query,
+            RuleSet::WithPersistent,
+            Output::Result,
+            Vec::new(),
+            TimingMode::Off,
+            false,
         )
         .map(|(tuples, _, _)| tuples)
     }
