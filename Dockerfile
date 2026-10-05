@@ -22,6 +22,11 @@ FROM rust:1.88-bookworm AS builder
 
 WORKDIR /build
 
+# jemalloc (the engine's allocator) fixes its page size at build time and
+# refuses to start on a kernel with larger pages: build the arm64 image for
+# 64 KiB pages, which also runs on 4 KiB-page kernels.
+ARG TARGETARCH
+
 # Cache dependencies: copy manifests first, build dummy targets to cache deps
 COPY Cargo.toml ./
 COPY gateway/Cargo.toml ./gateway/
@@ -39,6 +44,7 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs && \
     mkdir -p ws-protocol/src && echo "" > ws-protocol/src/lib.rs && \
     mkdir -p testkit/src && echo "" > testkit/src/lib.rs && \
     cargo generate-lockfile && \
+    if [ "$TARGETARCH" = arm64 ]; then export JEMALLOC_SYS_WITH_LG_PAGE=16; fi && \
     (cargo build --release -p inputlayer --bin inputlayer-server && \
      cargo build --release -p inputlayer-gateway --bin inputlayer-gateway) 2>/dev/null || true && \
     rm -rf src gateway/src ontology-client/src ws-protocol/src testkit/src
@@ -55,6 +61,7 @@ COPY ws-protocol/ ws-protocol/
 COPY testkit/ testkit/
 COPY docs/ docs/
 RUN find src gateway/src ontology-client/src ws-protocol/src -type f -exec touch {} + && \
+    if [ "$TARGETARCH" = arm64 ]; then export JEMALLOC_SYS_WITH_LG_PAGE=16; fi && \
     cargo build --all-features --release -p inputlayer --bin inputlayer-server --bin inputlayer-backup && \
     cargo build --release -p inputlayer-gateway --bin inputlayer-gateway && \
     strip target/release/inputlayer-server target/release/inputlayer-backup target/release/inputlayer-gateway
