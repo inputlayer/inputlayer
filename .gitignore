@@ -2,6 +2,7 @@
 
 # Rust build artifacts
 /target/
+/perf-gate/target/
 **/*.rs.bk
 *.pdb
 
