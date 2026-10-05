@@ -464,6 +464,34 @@ pub enum ReplicationRole {
     Follower,
 }
 
+/// How a primary ships commits to its followers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReplicationMode {
+    /// A commit is acknowledged once it is durable on the primary; followers
+    /// receive it right after (the default).
+    #[default]
+    Async,
+    /// A commit is acknowledged only once a follower has applied it
+    /// durably: no acknowledged write is lost with the primary.
+    Sync,
+}
+
+/// What a primary in synchronous mode does when no follower confirms a
+/// commit within `sync_timeout_ms`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FollowerLoss {
+    /// Every write waits for a follower, then fails as not confirmed on a
+    /// replica: no acknowledged write is ever unreplicated, and writes stop
+    /// succeeding while no follower keeps up (the default).
+    #[default]
+    Block,
+    /// Fall back to asynchronous shipping with an alert, and return to
+    /// synchronous once a follower has caught up.
+    Degrade,
+}
+
 /// Warm-standby replication (`[replication]`): a primary streams every
 /// committed change to followers, which apply it and serve reads.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -498,6 +526,22 @@ pub struct ReplicationConfig {
     /// partition). Must exceed `heartbeat_ms`.
     #[serde(default = "default_replication_timeout_ms")]
     pub timeout_ms: u64,
+
+    /// Primary: `async` acknowledges a commit once it is durable here;
+    /// `sync` only once a follower has applied it durably.
+    #[serde(default)]
+    pub mode: ReplicationMode,
+
+    /// Primary, `sync` mode: how long a commit's reply waits for a follower
+    /// before `on_follower_loss` applies.
+    #[serde(default = "default_replication_sync_timeout_ms")]
+    pub sync_timeout_ms: u64,
+
+    /// Primary, `sync` mode: `block` (writes fail as not confirmed on a
+    /// replica) or `degrade` (fall back to `async` until a follower catches
+    /// up).
+    #[serde(default)]
+    pub on_follower_loss: FollowerLoss,
 }
 
 fn default_replication_retain_bytes() -> usize {
@@ -512,6 +556,10 @@ fn default_replication_timeout_ms() -> u64 {
     3000
 }
 
+fn default_replication_sync_timeout_ms() -> u64 {
+    5000
+}
+
 impl Default for ReplicationConfig {
     fn default() -> Self {
         Self {
@@ -521,6 +569,9 @@ impl Default for ReplicationConfig {
             heartbeat_ms: default_replication_heartbeat_ms(),
             primary_url: None,
             timeout_ms: default_replication_timeout_ms(),
+            mode: ReplicationMode::Async,
+            sync_timeout_ms: default_replication_sync_timeout_ms(),
+            on_follower_loss: FollowerLoss::Block,
         }
     }
 }
@@ -550,6 +601,9 @@ impl ReplicationConfig {
         }
         if self.heartbeat_ms == 0 {
             return Err("replication.heartbeat_ms must be greater than 0".to_string());
+        }
+        if self.sync_timeout_ms == 0 {
+            return Err("replication.sync_timeout_ms must be greater than 0".to_string());
         }
         if self.role == ReplicationRole::Follower {
             // The stream client has no TLS: reach the primary over a private
@@ -1470,6 +1524,18 @@ mod tests {
             config
                 .validate()
                 .expect("a complete follower section is valid");
+            assert_eq!(config.replication.mode, ReplicationMode::Async);
+            assert_eq!(config.replication.on_follower_loss, FollowerLoss::Block);
+
+            jail.create_file(
+                "primary.toml",
+                "[replication]\nrole = \"primary\"\nmode = \"sync\"\n\
+                 sync_timeout_ms = 250\non_follower_loss = \"degrade\"\n",
+            )?;
+            let config = Config::from_file("primary.toml").expect("parse must succeed");
+            assert_eq!(config.replication.mode, ReplicationMode::Sync);
+            assert_eq!(config.replication.sync_timeout_ms, 250);
+            assert_eq!(config.replication.on_follower_loss, FollowerLoss::Degrade);
             Ok(())
         });
     }
@@ -1507,6 +1573,12 @@ mod tests {
             ReplicationConfig {
                 role: ReplicationRole::Primary,
                 heartbeat_ms: 0,
+                ..follower.clone()
+            },
+            ReplicationConfig {
+                role: ReplicationRole::Primary,
+                mode: ReplicationMode::Sync,
+                sync_timeout_ms: 0,
                 ..follower.clone()
             },
         ];

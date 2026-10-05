@@ -32,11 +32,7 @@ const MIN_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 /// `GET /v1/replication/status`: this server's replication state.
 pub async fn status(Extension(handler): Extension<Arc<Handler>>) -> Json<StatusReport> {
     let log = handler.get_storage().replication_log().cloned();
-    Json(
-        handler
-            .replication_status()
-            .report(log.map(|log| (log.stream_id(), log.head()))),
-    )
+    Json(handler.replication_status().report(log.as_deref()))
 }
 
 /// `GET /v1/replication/stream`: a follower's stream. Only a primary serves
@@ -242,6 +238,7 @@ async fn stream_to(
                 if log.head() != cursor {
                     continue;
                 }
+                status.follower_drained(id, cursor);
                 tokio::select! {
                     _ = head_changed.changed() => {}
                     _ = gone.changed() => {}

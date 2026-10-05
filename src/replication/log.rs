@@ -18,6 +18,7 @@
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::watch;
 
 /// How far pinned events may grow the log, as a multiple of its byte budget.
@@ -47,8 +48,9 @@ pub enum Read {
 struct Retained {
     /// LSN of the newest event (0 before the first).
     head: u64,
-    /// Events `head - lines.len() + 1 ..= head`.
-    lines: VecDeque<Line>,
+    /// Events `head - lines.len() + 1 ..= head`, with when each was
+    /// appended.
+    lines: VecDeque<(Line, Instant)>,
     bytes: usize,
     /// Pinned LSNs (with their pin counts): events after the lowest are
     /// kept until the log reaches its pin cap.
@@ -102,6 +104,9 @@ impl Drop for LogPin<'_> {
 pub struct ReplicationLog {
     stream_id: u64,
     retain_bytes: usize,
+    /// Note each LSN for the client request that appended it (see
+    /// [`writes`](super::writes)).
+    track_writes: bool,
     retained: Mutex<Retained>,
     head: watch::Sender<u64>,
 }
@@ -114,6 +119,7 @@ impl ReplicationLog {
             // Never 0, so a follower's "no position" can never match.
             stream_id: rand::random::<u64>().max(1),
             retain_bytes,
+            track_writes: false,
             retained: Mutex::new(Retained {
                 head: 0,
                 lines: VecDeque::new(),
@@ -122,6 +128,14 @@ impl ReplicationLog {
             }),
             head: watch::channel(0).0,
         }
+    }
+
+    /// Note every appended LSN for the client request appending it, so the
+    /// request can wait for followers to apply it (synchronous shipping).
+    #[must_use]
+    pub fn tracking_writes(mut self) -> Self {
+        self.track_writes = true;
+        self
     }
 
     /// This incarnation's stream id: positions from another one are void.
@@ -162,21 +176,36 @@ impl ReplicationLog {
         let mut retained = self.retained.lock();
         retained.head += 1;
         retained.bytes += line.len();
-        retained.lines.push_back(line.into());
+        retained.lines.push_back((line.into(), Instant::now()));
         let pinned_after = retained.pins.keys().next().copied();
         while retained.bytes > self.retain_bytes && retained.lines.len() > 1 {
             let oldest = retained.head + 1 - retained.lines.len() as u64;
             if pinned_after.is_some_and(|pin| oldest > pin) && retained.bytes <= self.pin_cap() {
                 break;
             }
-            if let Some(old) = retained.lines.pop_front() {
+            if let Some((old, _)) = retained.lines.pop_front() {
                 retained.bytes -= old.len();
             }
         }
         let head = retained.head;
         drop(retained);
+        if self.track_writes {
+            super::writes::note(head);
+        }
         self.head.send_replace(head);
         head
+    }
+
+    /// When event `lsn` was appended, or when the oldest retained one was if
+    /// `lsn` is no longer retained; `None` past the head.
+    pub fn appended_at(&self, lsn: u64) -> Option<Instant> {
+        let retained = self.retained.lock();
+        if lsn > retained.head || lsn == 0 {
+            return None;
+        }
+        let oldest = retained.head + 1 - retained.lines.len() as u64;
+        let index = usize::try_from(lsn.saturating_sub(oldest)).ok()?;
+        retained.lines.get(index).map(|(_, at)| *at)
     }
 
     /// The events after `lsn`, up to about `max_bytes` (always at least one
@@ -193,7 +222,7 @@ impl ReplicationLog {
         let skip = usize::try_from(lsn + 1 - oldest).unwrap_or(usize::MAX);
         let mut lines = Vec::new();
         let mut bytes = 0;
-        for line in retained.lines.iter().skip(skip) {
+        for (line, _) in retained.lines.iter().skip(skip) {
             if !lines.is_empty() && bytes + line.len() > max_bytes {
                 break;
             }
@@ -315,6 +344,36 @@ mod tests {
             vec!["ffff".to_string(), "gggg".into()]
         );
         assert_eq!(log.read_after(log.head() - 3, 100), Read::Unavailable);
+    }
+
+    #[test]
+    fn appends_are_stamped_and_a_dropped_event_reads_as_the_oldest_retained() {
+        let log = ReplicationLog::new(8);
+        assert_eq!(log.appended_at(1), None);
+        log.append(line("aaaa"));
+        let first = log.appended_at(1).unwrap();
+        log.append(line("bbbb"));
+        log.append(line("cccc"));
+        let second = log.appended_at(2).unwrap();
+        assert!(second >= first);
+        assert_eq!(log.appended_at(1), Some(second), "event 1 was dropped");
+        assert!(log.appended_at(3).unwrap() >= second);
+        assert_eq!(log.appended_at(4), None);
+    }
+
+    #[tokio::test]
+    async fn a_tracking_log_notes_each_lsn_for_the_appending_request() {
+        let log = ReplicationLog::new(64).tracking_writes();
+        let (head, lsn) = super::super::writes::track(async {
+            log.append(line("a"));
+            log.append(line("b"))
+        })
+        .await;
+        assert_eq!(lsn, Some(head));
+
+        let plain = ReplicationLog::new(64);
+        let (_, lsn) = super::super::writes::track(async { plain.append(line("a")) }).await;
+        assert_eq!(lsn, Some(0), "an untracking log notes nothing");
     }
 
     #[test]

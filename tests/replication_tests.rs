@@ -20,6 +20,7 @@ const KG: &str = "default";
 const TOKEN: &str = "replication-test-token-0123456789";
 const HEARTBEAT_MS: u64 = 100;
 const TIMEOUT_MS: u64 = 800;
+const SYNC_TIMEOUT_MS: u64 = 1000;
 /// Longest wait for a follower to catch up.
 const CONVERGE: Duration = Duration::from_secs(30);
 
@@ -28,6 +29,16 @@ fn server() -> EngineBuilder {
 }
 
 async fn primary(retain_bytes: Option<usize>) -> Engine {
+    start_primary(retain_bytes, None).await
+}
+
+/// A primary shipping synchronously: replies wait up to `SYNC_TIMEOUT_MS`
+/// for a follower, then `on_follower_loss` applies.
+async fn sync_primary(on_follower_loss: &'static str) -> Engine {
+    start_primary(None, Some(on_follower_loss)).await
+}
+
+async fn start_primary(retain_bytes: Option<usize>, sync: Option<&'static str>) -> Engine {
     server()
         .replication(Replication {
             role: "primary",
@@ -36,6 +47,9 @@ async fn primary(retain_bytes: Option<usize>) -> Engine {
             retain_bytes,
             heartbeat_ms: Some(HEARTBEAT_MS),
             timeout_ms: Some(TIMEOUT_MS),
+            mode: sync.map(|_| "sync"),
+            sync_timeout_ms: sync.map(|_| SYNC_TIMEOUT_MS),
+            on_follower_loss: sync,
         })
         .start()
         .await
@@ -51,6 +65,9 @@ async fn follower(primary_url: String, token: &str, api_key: &str) -> Engine {
             retain_bytes: None,
             heartbeat_ms: Some(HEARTBEAT_MS),
             timeout_ms: Some(TIMEOUT_MS),
+            mode: None,
+            sync_timeout_ms: None,
+            on_follower_loss: None,
         })
         .start()
         .await
@@ -538,4 +555,179 @@ async fn api_keys_issued_and_revoked_on_the_primary_apply_on_the_follower() {
         .query("?x(X)")
         .await
         .expect("the admin session on the follower is still open");
+}
+
+// Synchronous shipping (`mode = "sync"`): a write is acknowledged only once
+// the follower applied it durably.
+
+/// Commit `program` on `engine`; the error message when it fails.
+async fn try_commit(engine: &Engine, program: &str) -> Result<(), String> {
+    let mut client = WsClient::connect(engine, KG)
+        .await
+        .map_err(|e| format!("connect: {e:?}"))?;
+    let result = client.commit(program).await.map(drop);
+    client.close().await;
+    result.map_err(|e| format!("{e:?}"))
+}
+
+/// Wait until the primary's synchronous shipping is in `state`.
+async fn wait_sync_state(primary: &Engine, state: &str) -> Value {
+    let deadline = tokio::time::Instant::now() + CONVERGE;
+    loop {
+        let status = status_of(primary).await;
+        if status["primary"]["sync"]["state"] == state {
+            return status;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "primary never reached sync state {state}: {status}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn in_sync_mode_killing_the_primary_loses_no_acknowledged_write() {
+    const WRITERS: u64 = 4;
+    const TRIALS: u64 = 3;
+    let mut primary = sync_primary("block").await;
+    let follower = follower(primary.http_url(), TOKEN, primary.api_key()).await;
+    caught_up(&follower).await;
+    wait_sync_state(&primary, "sync").await;
+
+    let mut acknowledged = BTreeSet::new();
+    for trial in 0..TRIALS {
+        // Concurrent writers, each committing w(trial, writer, i) in order;
+        // kill the primary while they run.
+        let acked = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let mut writers = Vec::new();
+        for writer in 0..WRITERS {
+            let mut client = WsClient::connect(&primary, KG).await.expect("connect");
+            let acked = Arc::clone(&acked);
+            writers.push(tokio::spawn(async move {
+                for i in 0.. {
+                    let program = format!("+w({trial}, {writer}, {i})");
+                    if client.commit(&program).await.is_err() {
+                        break;
+                    }
+                    acked.lock().push(json!([trial, writer, i]).to_string());
+                }
+            }));
+        }
+        while acked.lock().len() < 200 {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        primary.stop().await.expect("kill primary");
+        for writer in writers {
+            writer.await.expect("writer task");
+        }
+        acknowledged.extend(acked.lock().drain(..));
+
+        // Everything any writer was told is committed is on the follower.
+        wait_status(&follower, "a lost primary", |f| f["state"] == "connecting").await;
+        let held = rows(&follower, "?w(T, W, I)").await;
+        let lost: Vec<_> = acknowledged.difference(&held).collect();
+        assert!(
+            lost.is_empty(),
+            "trial {trial}: {} acknowledged writes missing on the follower, e.g. {:?}",
+            lost.len(),
+            lost.iter().take(5).collect::<Vec<_>>()
+        );
+
+        primary.restart().await.expect("restart primary");
+        caught_up(&follower).await;
+        wait_sync_state(&primary, "sync").await;
+    }
+    // The restarted primary kept every acknowledged write too.
+    let on_primary = rows(&primary, "?w(T, W, I)").await;
+    assert!(acknowledged.is_subset(&on_primary));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn block_fails_writes_no_follower_confirms_and_recovers_when_one_returns() {
+    let primary = sync_primary("block").await;
+    let mut follower = follower(primary.http_url(), TOKEN, primary.api_key()).await;
+    caught_up(&follower).await;
+    try_commit(&primary, "+edge(1, 2)")
+        .await
+        .expect("confirmed write");
+    let status = wait_sync_state(&primary, "sync").await;
+    assert!(status["primary"]["sync"]["waits"].as_u64().unwrap() >= 1);
+
+    // No follower: the write waits, then is reported as not confirmed on a
+    // replica. It is committed on the primary all the same.
+    follower.stop().await.expect("kill follower");
+    let started = std::time::Instant::now();
+    let error = try_commit(&primary, "+edge(2, 3)")
+        .await
+        .expect_err("acknowledged without a follower");
+    assert!(error.contains("no replica confirmed"), "{error}");
+    assert!(started.elapsed() >= Duration::from_millis(SYNC_TIMEOUT_MS));
+    assert_eq!(rows(&primary, "?edge(X, Y)").await.len(), 2);
+    let status = wait_sync_state(&primary, "stalled").await;
+    assert_eq!(status["primary"]["sync"]["unconfirmed"], 1);
+    assert!(status["primary"]["lag_events"].as_u64().unwrap() >= 1);
+
+    let metrics = reqwest::Client::new()
+        .get(format!("{}/metrics/prometheus", primary.http_url()))
+        .bearer_auth(primary.api_key())
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        metrics.contains("inputlayer_replication_sync_state{state=\"stalled\"} 1"),
+        "{metrics}"
+    );
+    assert!(metrics.contains("inputlayer_replication_sync_unconfirmed_total 1"));
+
+    // The follower returns, catches up (the unconfirmed write included), and
+    // writes are confirmed again.
+    follower.restart().await.expect("restart follower");
+    caught_up(&follower).await;
+    converge(&primary, &follower, "?edge(X, Y)").await;
+    try_commit(&primary, "+edge(3, 4)")
+        .await
+        .expect("confirmed write");
+    wait_sync_state(&primary, "sync").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn degrade_falls_back_to_async_and_rearms_once_the_follower_catches_up() {
+    let primary = sync_primary("degrade").await;
+    let mut follower = follower(primary.http_url(), TOKEN, primary.api_key()).await;
+    caught_up(&follower).await;
+    try_commit(&primary, "+edge(1, 2)")
+        .await
+        .expect("confirmed write");
+
+    // The first write without a follower waits out the timeout, then
+    // succeeds; shipping falls back to async and later writes do not wait.
+    follower.stop().await.expect("kill follower");
+    let started = std::time::Instant::now();
+    try_commit(&primary, "+edge(2, 3)")
+        .await
+        .expect("degraded write");
+    assert!(started.elapsed() >= Duration::from_millis(SYNC_TIMEOUT_MS));
+    let status = wait_sync_state(&primary, "degraded").await;
+    assert_eq!(status["primary"]["sync"]["degrades"], 1);
+    let started = std::time::Instant::now();
+    for i in 0..10 {
+        try_commit(&primary, &format!("+edge(9, {i})"))
+            .await
+            .expect("async write");
+    }
+    assert!(started.elapsed() < Duration::from_millis(SYNC_TIMEOUT_MS));
+
+    // The follower catches up and shipping is synchronous again.
+    follower.restart().await.expect("restart follower");
+    caught_up(&follower).await;
+    let status = wait_sync_state(&primary, "sync").await;
+    assert_eq!(status["primary"]["sync"]["rearms"], 1);
+    try_commit(&primary, "+edge(3, 4)")
+        .await
+        .expect("confirmed write");
+    converge(&primary, &follower, "?edge(X, Y)").await;
 }

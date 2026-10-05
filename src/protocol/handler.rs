@@ -611,6 +611,10 @@ mod credential_mutation_tests;
 #[allow(clippy::unwrap_used)]
 mod scoped_roles_tests;
 
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod sync_replication_tests;
+
 /// Self-contained snapshot of Handler state for executing a single query on a blocking thread.
 /// All fields are `Arc`-wrapped (`Send + Sync`), allowing the job to be moved into
 /// `tokio::task::spawn_blocking` without holding any `!Send` lock guards across `.await` points.
@@ -1035,7 +1039,8 @@ impl Handler {
         let total_query_memory = config.storage.performance.total_query_memory_bytes();
         Self {
             replication: Arc::new(super::replication::ReplicationStatus::new(
-                config.replication.role,
+                &config.replication,
+                storage.replication_log().cloned(),
             )),
             storage: Arc::new(RwLock::new(storage)),
             config,
@@ -1091,7 +1096,8 @@ impl Handler {
         let total_query_memory = config.storage.performance.total_query_memory_bytes();
         Self {
             replication: Arc::new(super::replication::ReplicationStatus::new(
-                config.replication.role,
+                &config.replication,
+                storage.replication_log().cloned(),
             )),
             storage: Arc::new(RwLock::new(storage)),
             config,
@@ -1361,6 +1367,17 @@ impl Handler {
     /// Warm-standby replication state.
     pub fn replication_status(&self) -> &super::replication::ReplicationStatus {
         &self.replication
+    }
+
+    /// The replication report for `/metrics`, `None` on a standalone server.
+    pub fn replication_report(
+        &self,
+        storage: &StorageEngine,
+    ) -> Option<super::replication::StatusReport> {
+        (self.config.replication.role != crate::config::ReplicationRole::Standalone).then(|| {
+            self.replication
+                .report(storage.replication_log().map(AsRef::as_ref))
+        })
     }
 
     /// Get access to the storage engine (for HTTP handlers).
@@ -2446,9 +2463,43 @@ impl Handler {
         program: String,
     ) -> Result<QueryResult, String> {
         let control = self.request_control(None);
-        self.run_program(knowledge_graph, program, None, None, &control)
+        self.replicated(self.run_program(knowledge_graph, program, None, None, &control))
             .await
             .map_err(|e| e.message)
+    }
+
+    /// Run `request`. On a primary shipping synchronously, its reply waits
+    /// until a follower has applied the events it appended; under
+    /// `on_follower_loss = "block"` a reply no follower confirmed in time
+    /// fails with `replica_unconfirmed`, though its commit stands here.
+    async fn replicated<T>(
+        &self,
+        request: impl std::future::Future<Output = Result<T, ProgramError>>,
+    ) -> Result<T, ProgramError> {
+        let sync = self.replication.sync();
+        if !sync.enabled() {
+            return request.await;
+        }
+        let (result, lsn) = crate::replication::writes::track(request).await;
+        let Some(lsn) = lsn.filter(|&lsn| lsn > 0) else {
+            return result;
+        };
+        match sync.confirm(lsn).await {
+            super::replication::Confirmation::Confirmed => result,
+            // A failure says more than the missing confirmation: it already
+            // tells the client to read the state back.
+            super::replication::Confirmation::Unconfirmed { waited } => result.and_then(|_| {
+                Err(ProgramError {
+                    message: format!(
+                        "committed on the primary, but no replica confirmed it within {} ms: \
+                         it is applied here and could be lost only with this server. \
+                         Do not retry it as a failed write.",
+                        waited.as_millis()
+                    ),
+                    code: Some(ErrorCode::ReplicaUnconfirmed),
+                })
+            }),
+        }
     }
 
     /// `query_program` with `statements` already parsed by `parse_program`,
@@ -3792,9 +3843,11 @@ impl Handler {
         program: String,
     ) -> Result<QueryResult, String> {
         let control = self.request_control(None);
-        self.run_program_with_session(session_id, None, program, None, None, &control)
-            .await
-            .map_err(|e| e.message)
+        self.replicated(
+            self.run_program_with_session(session_id, None, program, None, None, &control),
+        )
+        .await
+        .map_err(|e| e.message)
     }
 
     /// `query_program_with_session` on `kg` instead of the session's binding,
@@ -4196,7 +4249,14 @@ impl Handler {
     ) -> Result<QueryResult, ProgramError> {
         let single_statement = program_statement_count(&program) == 1;
         let result = self
-            .run_execute_program(session_id, knowledge_graph, program, params, auth, control)
+            .replicated(self.run_execute_program(
+                session_id,
+                knowledge_graph,
+                program,
+                params,
+                auth,
+                control,
+            ))
             .await?;
         // A stop that won the race discards a result that changed nothing; a
         // later one is too late.

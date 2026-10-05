@@ -62,7 +62,7 @@ pub use write_program::{
     StagedStatement, StatementEffect, StatementOutcome, WriteProgram,
 };
 
-use crate::config::{Config, ReplicationRole};
+use crate::config::{Config, ReplicationMode, ReplicationRole};
 use crate::index_manager::IndexManager;
 use crate::naming;
 use crate::replication::{EngineEvent, ReplicationLog};
@@ -312,7 +312,10 @@ impl StorageEngine {
         // client writes from the start.
         match engine.config.replication.role {
             ReplicationRole::Primary => {
-                let log = ReplicationLog::new(engine.config.replication.retain_bytes);
+                let mut log = ReplicationLog::new(engine.config.replication.retain_bytes);
+                if engine.config.replication.mode == ReplicationMode::Sync {
+                    log = log.tracking_writes();
+                }
                 engine.persist.attach_replication_log(Arc::new(log));
             }
             ReplicationRole::Follower => engine.replica.store(true, Ordering::SeqCst),

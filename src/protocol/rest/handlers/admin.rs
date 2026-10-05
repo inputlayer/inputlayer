@@ -102,6 +102,7 @@ pub async fn stats(
         tokio::task::spawn_blocking(move || {
             let storage = handler.get_storage();
             let totals = KgTotals::of(&storage.knowledge_graph_summaries());
+            let replication = handler.replication_report(&storage);
             drop(storage);
             let KgTotals {
                 knowledge_graphs,
@@ -125,6 +126,7 @@ pub async fn stats(
                     total_ephemeral_facts: session_stats.total_ephemeral_facts,
                     total_ephemeral_rules: session_stats.total_ephemeral_rules,
                 },
+                replication,
             }
         }),
     )
@@ -184,6 +186,7 @@ fn prometheus_text(handler: &Handler) -> String {
     let summaries = storage.knowledge_graph_summaries();
     let (kg_loads, kg_unloads) = storage.knowledge_graph_residency_counts();
     let persist = storage.persist_stats();
+    let replication = handler.replication_report(&storage);
     drop(storage);
     let totals = KgTotals::of(&summaries);
     let session_stats = handler.session_stats();
@@ -457,6 +460,9 @@ fn prometheus_text(handler: &Handler) -> String {
     handler.server_metrics().format_prometheus(&mut out);
 
     out.raw(&handler.timing_histograms().format_prometheus());
+    if let Some(replication) = &replication {
+        out.raw(&replication.format_prometheus());
+    }
     out.finish()
 }
 

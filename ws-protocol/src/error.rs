@@ -41,6 +41,12 @@ pub enum ErrorCode {
     /// its writes would grow the knowledge graph past its memory budget. It
     /// was refused and nothing was applied.
     ResourceExhausted,
+    /// The request committed on the primary, but no replica confirmed
+    /// applying it within `replication.sync_timeout_ms` (synchronous
+    /// replication with `on_follower_loss = "block"`). Its changes are
+    /// applied on the primary; they could be lost if the primary is lost
+    /// before a replica receives them. Do not retry it as if it failed.
+    ReplicaUnconfirmed,
 }
 
 /// A failed statement of a program.

@@ -108,6 +108,13 @@ pub struct Replication {
     pub heartbeat_ms: Option<u64>,
     /// `timeout_ms`; `None` keeps the default.
     pub timeout_ms: Option<u64>,
+    /// `mode` (`"async"` or `"sync"`); `None` keeps the default (async).
+    pub mode: Option<&'static str>,
+    /// `sync_timeout_ms`; `None` keeps the default.
+    pub sync_timeout_ms: Option<u64>,
+    /// `on_follower_loss` (`"block"` or `"degrade"`); `None` keeps the
+    /// default.
+    pub on_follower_loss: Option<&'static str>,
 }
 
 /// Configures and starts an [`Engine`].
@@ -569,6 +576,15 @@ impl Engine {
             }
             if let Some(ms) = replication.timeout_ms {
                 section.insert("timeout_ms".into(), integer_u64(ms)?);
+            }
+            if let Some(mode) = replication.mode {
+                section.insert("mode".into(), mode.into());
+            }
+            if let Some(ms) = replication.sync_timeout_ms {
+                section.insert("sync_timeout_ms".into(), integer_u64(ms)?);
+            }
+            if let Some(on_loss) = replication.on_follower_loss {
+                section.insert("on_follower_loss".into(), on_loss.into());
             }
             config.insert("replication".into(), section.into());
         }
