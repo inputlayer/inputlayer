@@ -84,6 +84,10 @@ Options:
 | `-j N` | Parallel jobs (default: 4, use 1 for sequential) |
 | `-v` | Verbose mode with full diffs (forces sequential) |
 | `-u` | Update mode  - regenerate `.iql.out` files |
+| `--skip-build` | Use the binaries already built |
+| `--profile NAME` | Cargo profile of the binaries (default `release`; `dev` runs `target/debug`) |
+
+`make plan-snapshots` runs the `.debug` query-plan specs (`33_meta/17_debug_join`, `18_debug_recursive`, `26_debug_complex`) with the dev binaries `make unit-test` builds; the fast PR gate runs it after the tests, so a planner change that alters a plan fails the PR until its snapshots are updated.
 
 Environment variables:
 | Variable | Default | Description |

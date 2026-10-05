@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check perf-gate-remote bench-engine-remote bench-sessions-remote secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check perf-gate-remote bench-engine-remote bench-sessions-remote secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions test test-fast test-release unit-test integration-test oracle-test e2e-test plan-snapshots e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -317,6 +317,12 @@ oracle-test:
 # Tier 3: E2E snapshot tests (parallel, against live server)
 e2e-test:
 	./scripts/run_snapshot_tests.sh
+
+# The .debug query-plan snapshots, gated on every PR by the fast gate's test
+# job. Runs the dev binaries `make unit-test` builds, so build those first.
+PLAN_SNAPSHOTS := 33_meta/\(17_debug_join\|18_debug_recursive\|26_debug_complex\)\.iql$$
+plan-snapshots:
+	./scripts/run_snapshot_tests.sh --skip-build --profile dev -j 1 -f '$(PLAN_SNAPSHOTS)'
 
 # Reactive agent path E2E: real engine processes, agents subscribed over /ws,
 # independent writers; release build for representative latency. Known

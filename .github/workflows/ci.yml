@@ -56,6 +56,7 @@ jobs:
               - 'Makefile'
               - 'deny.toml'
               - '.cargo/audit.toml'
+              - 'scripts/run_snapshot_tests.sh'
               - '.github/workflows/ci.yml'
             python:
               - 'packages/inputlayer-py/**'
@@ -225,6 +226,10 @@ jobs:
 
       - name: Run unit + integration tests
         run: make unit-test
+
+      # Reuses the dev binaries the tests built.
+      - name: Run query-plan snapshots
+        run: make plan-snapshots
 
   # The Python SDK's unit tests, including the connection core against a
   # mock server replaying packages/conformance. The live tests run in the

@@ -53,6 +53,9 @@ DIRTY=0
 # Mode flags
 UPDATE_MODE=0
 SKIP_BUILD=0
+# Cargo profile of the server and client binaries (dev reuses the binaries
+# `cargo test` builds)
+PROFILE=release
 VERBOSE=0
 FILTER=""
 
@@ -429,6 +432,7 @@ while [[ $# -gt 0 ]]; do
         -f|--filter)    FILTER="$2"; shift 2 ;;
         -u|--update)    UPDATE_MODE=1; shift ;;
         --skip-build)   SKIP_BUILD=1; shift ;;
+        --profile)      PROFILE="$2"; shift 2 ;;
         -j|--jobs)      PARALLEL_JOBS="$2"; shift 2 ;;
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
@@ -439,6 +443,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -u, --update     Update .out files with actual output (forces sequential)"
             echo "  -j, --jobs N     Parallel jobs (default: $PARALLEL_JOBS, 0 or 1 = sequential)"
             echo "  --skip-build     Skip cargo build"
+            echo "  --profile NAME   Cargo profile of the binaries (default: release; dev = target/debug)"
             echo "  -h, --help       Show this help message"
             exit 0
             ;;
@@ -457,9 +462,9 @@ if [[ "$SKIP_BUILD" == "1" ]]; then
     echo "Skipping build (--skip-build)..."
 else
     echo "Building project..."
-    if ! cargo build --bin inputlayer-client --bin inputlayer-server --release --quiet 2>/dev/null; then
+    if ! cargo build --bin inputlayer-client --bin inputlayer-server --profile "$PROFILE" --quiet 2>/dev/null; then
         echo -e "${RED}Build failed!${NC}"
-        cargo build --bin inputlayer-client --bin inputlayer-server --release 2>&1 | grep -v "^warning" || true
+        cargo build --bin inputlayer-client --bin inputlayer-server --profile "$PROFILE" 2>&1 | grep -v "^warning" || true
         echo -e "${RED}Aborting tests due to build failure.${NC}"
         exit 1
     fi
@@ -472,8 +477,13 @@ if [[ -z "$TARGET_DIR" ]]; then
     TARGET_DIR="$PROJECT_DIR/target"
 fi
 
-CLIENT_BIN="$TARGET_DIR/release/inputlayer-client"
-SERVER_BIN="$TARGET_DIR/release/inputlayer-server"
+# Cargo writes the dev profile to target/debug, every other profile to its name
+PROFILE_DIR="$PROFILE"
+if [[ "$PROFILE" == "dev" ]]; then
+    PROFILE_DIR=debug
+fi
+CLIENT_BIN="$TARGET_DIR/$PROFILE_DIR/inputlayer-client"
+SERVER_BIN="$TARGET_DIR/$PROFILE_DIR/inputlayer-server"
 
 if [[ ! -x "$CLIENT_BIN" ]] || [[ ! -x "$SERVER_BIN" ]]; then
     echo -e "${RED}Binaries not found after build!${NC}"
@@ -543,6 +553,13 @@ if [[ -z "$TEST_FILES" ]]; then
     TEST_TOTAL=0
 else
     TEST_TOTAL=$(echo "$TEST_FILES" | wc -l | tr -d ' ')
+fi
+
+# A filter that matches nothing would pass vacuously (a renamed spec drops
+# out of its gate), so fail it
+if [[ -n "$FILTER" ]] && [[ "$TEST_TOTAL" == "0" ]]; then
+    echo -e "${RED}No tests match filter: $FILTER${NC}"
+    exit 1
 fi
 
 PENDING_COUNT=$(find "$EXAMPLES_DIR" -name "*_pending_*.iql" -type f | wc -l | tr -d ' ')
