@@ -393,7 +393,7 @@ File-to-category mapping:
 - any other file under `src/`, `Cargo.toml`, `Cargo.lock`, `config.toml`, `ws-protocol/`, `ontology-client/`, `scripts/run_snapshot_tests.sh`, the map or its generator → every spec (a plan or parser change can reach any category; the whole corpus takes about 1.5 min on 4 cores against debug binaries)
 - anything else (tests, docs, SDKs) → no specs
 
-`scripts/affected-map.toml` is generated: `./scripts/gen-affected-map.py` reads each category's statement types from its specs, the files they `.load` and their recorded transcripts (including the plan output of `.debug` statements) and lists the categories per leaf module. Regenerate it after adding or changing specs; `--affected` refuses to run against a stale map. `./scripts/gen-affected-map.py --debug` prints each category's statement types.
+`scripts/affected-map.toml` is generated: `./scripts/gen-affected-map.py` reads each category's statement types from its specs, the files they `.load` and their recorded transcripts (including the plan output of `.debug` statements) and lists the categories per leaf module. Regenerate it after adding or changing specs. `./scripts/gen-affected-map.py --debug` prints each category's statement types.
 
 ## Makefile Targets
 

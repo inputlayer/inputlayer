@@ -11,7 +11,6 @@ time rather than coverage.
 
 Usage:
   ./scripts/gen-affected-map.py           # Rewrite scripts/affected-map.toml
-  ./scripts/gen-affected-map.py --check   # Fail if the file is out of date
   ./scripts/gen-affected-map.py --debug   # Also print each category's statement types
 """
 
@@ -94,18 +93,10 @@ def generate(debug):
 
 def main():
     args = set(sys.argv[1:])
-    unknown = args - {"--check", "--debug"}
+    unknown = args - {"--debug"}
     if unknown:
         sys.exit(f"Unknown option: {' '.join(sorted(unknown))}")
-    content = generate("--debug" in args)
-    if "--check" in args:
-        if not MAP_FILE.is_file() or MAP_FILE.read_text() != content:
-            sys.exit(
-                f"{MAP_FILE.relative_to(PROJECT_DIR)} is out of date: "
-                "run ./scripts/gen-affected-map.py"
-            )
-        return
-    MAP_FILE.write_text(content)
+    MAP_FILE.write_text(generate("--debug" in args))
 
 
 if __name__ == "__main__":

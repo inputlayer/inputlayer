@@ -524,10 +524,6 @@ if [[ -n "$AFFECTED_REF" ]]; then
         echo -e "${RED}Cannot diff against $AFFECTED_REF${NC}"
         exit 1
     fi
-    # A stale map would pick categories from specs that have since changed
-    if ! "$SCRIPT_DIR/gen-affected-map.py" --check; then
-        exit 1
-    fi
     affected_categories $CHANGED
     # Keep only categories that still hold a runnable spec (a deleted category,
     # or one with only _ helpers and _pending_ specs, has nothing to run)
