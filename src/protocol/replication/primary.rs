@@ -87,6 +87,9 @@ enum End {
     Gone(String),
     /// The follower fell behind the retained log; it reconnects and resyncs.
     Behind,
+    /// Changes made while the checkpoint was sent outgrew the log's pin cap;
+    /// the follower retries the resync after a backoff.
+    PinOverflowed,
 }
 
 async fn serve(handler: Arc<Handler>, log: Arc<ReplicationLog>, socket: WebSocket, addr: String) {
@@ -151,6 +154,22 @@ async fn serve(handler: Arc<Handler>, log: Arc<ReplicationLog>, socket: WebSocke
             };
             let _ = send_json(&mut sink, &message, send_timeout).await;
         }
+        End::PinOverflowed => {
+            status.resync_pin_overflowed();
+            warn!(
+                follower = %name,
+                pin_cap_bytes = log.pin_cap(),
+                "replication_resync_pin_overflowed"
+            );
+            let message = PrimaryMessage::Error {
+                message: format!(
+                    "the primary's changes during the checkpoint outgrew {} bytes; \
+                     the resync is retried",
+                    log.pin_cap()
+                ),
+            };
+            let _ = send_json(&mut sink, &message, send_timeout).await;
+        }
         End::Gone(reason) => info!(follower = %name, reason, "replication_follower_disconnected"),
     }
     let _ = sink.close().await;
@@ -182,6 +201,9 @@ async fn stream_to(
     if let Err(e) = send_json(sink, &start, send_timeout).await {
         return End::Gone(e);
     }
+    // Keep the events the follower tails after the checkpoint until it has
+    // caught up with them.
+    let mut pin = resync.then(|| log.pin_head());
     let mut cursor = if resync {
         match send_checkpoint(handler, sink, send_timeout).await {
             Ok(head) => head,
@@ -206,8 +228,12 @@ async fn stream_to(
                 }
                 cursor = last;
                 status.follower_sent(id, cursor);
+                if let Some(pin) = &mut pin {
+                    pin.advance(cursor);
+                }
             }
             Read::UpToDate => {
+                pin = None;
                 head_changed.mark_unchanged();
                 if log.head() != cursor {
                     continue;
@@ -223,6 +249,7 @@ async fn stream_to(
                     }
                 }
             }
+            Read::Unavailable if pin.is_some() => return End::PinOverflowed,
             Read::Unavailable => return End::Behind,
         }
     }

@@ -99,6 +99,24 @@ facts in 3.7 s. A restarted follower caught up on 20,000 missed commits in
 are removed. A partly applied or stale follower is repaired the same way as
 an empty one.
 
+While a checkpoint is sent, the primary keeps every change committed after
+it, even past `retain_bytes`, so the follower can catch up once the copy is
+applied. That backlog may grow to 4 × `retain_bytes`. If writes outgrow it
+during the copy, the primary abandons that resync, logs
+`replication_resync_pin_overflowed`, and counts it in
+`primary.resync_pin_overflows`. The follower counts the attempt in
+`resync_failures` and waits longer before each retry: 1 s, doubling up to
+60 s. The wait resets once a resync finishes and streaming starts. If the
+counters keep rising, raise `retain_bytes` to cover the writes made during
+one resync.
+
+**Known limit.** The follower stops reading the stream while it applies one graph from a
+checkpoint. If a single graph takes longer to apply than the primary waits
+for a stalled follower (`timeout_ms`, at least 10 s), the primary drops the
+connection and the resync starts over. Graphs of a few million facts are
+affected. This is tracked in
+[#356](https://github.com/inputlayer/inputlayer/issues/356).
+
 ## Monitoring
 
 `GET /v1/replication/status` (any valid API key) reports this server's role.
@@ -108,6 +126,8 @@ On a primary it reports:
 - `primary.stream_id`: this run of the primary
 - `primary.head_lsn`: the number of the newest change
 - for each connected follower: `sent_lsn`, `acked_lsn` and `lag_events`
+- `resync_pin_overflows`: resyncs abandoned because writes during the copy
+  outgrew 4 × `retain_bytes`
 
 On a follower it reports:
 
@@ -115,7 +135,8 @@ On a follower it reports:
 - `applied_lsn` and `primary_head_lsn`
 - `lag_events`
 - `last_contact_ms`: time since the primary was last heard
-- `resyncs` and `reconnects`, counted since the follower started
+- `resyncs` (begun), `resync_failures` (ended before streaming started)
+  and `reconnects`, counted since the follower started
 - `last_error`
 
 ```bash
@@ -137,3 +158,7 @@ Keep the primary on `durability_mode = "immediate"` (the default). With
 `batched` durability a crash can lose commits that the primary already sent.
 The follower would then hold commits that the restarted primary no longer
 has. The resync that follows removes them from the follower.
+
+A follower must be durable: it refuses to start with
+`durability_mode = "async"`, which writes no WAL, because after a crash it
+would resume past changes it lost. Use `immediate` or `batched`.

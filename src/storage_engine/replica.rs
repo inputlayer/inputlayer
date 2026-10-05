@@ -224,12 +224,24 @@ impl StorageEngine {
                 Ok(ReplicaChange::graph(&kg, GraphEvent::Restructured))
             }
             EngineEvent::CreateIndex { kg, index } => {
-                let mut db = self.lock_kg(&kg)?;
+                let mut db = match self.lock_kg(&kg) {
+                    Ok(db) => db,
+                    Err(StorageError::KnowledgeGraphNotFound(_)) => {
+                        return Ok(ReplicaChange::new(&kg));
+                    }
+                    Err(e) => return Err(e),
+                };
                 db.install_index(index).map_err(StorageError::Other)?;
                 Ok(ReplicaChange::graph(&kg, GraphEvent::Restructured))
             }
             EngineEvent::DropIndex { kg, name } => {
-                let mut db = self.lock_kg(&kg)?;
+                let mut db = match self.lock_kg(&kg) {
+                    Ok(db) => db,
+                    Err(StorageError::KnowledgeGraphNotFound(_)) => {
+                        return Ok(ReplicaChange::new(&kg));
+                    }
+                    Err(e) => return Err(e),
+                };
                 if !db.indexes.contains(&name) {
                     return Ok(ReplicaChange::new(&kg));
                 }

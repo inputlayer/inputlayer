@@ -17,6 +17,7 @@ pub struct ReplicationStatus {
 struct Inner {
     next_follower: u64,
     followers: BTreeMap<u64, FollowerEntry>,
+    resync_pin_overflows: u64,
     follower: FollowerSide,
 }
 
@@ -39,6 +40,7 @@ struct FollowerSide {
     primary_revision: u64,
     last_contact: Option<Instant>,
     resyncs: u64,
+    resync_failures: u64,
     reconnects: u64,
     last_error: Option<String>,
 }
@@ -74,6 +76,9 @@ pub struct PrimaryReport {
     pub stream_id: String,
     pub head_lsn: u64,
     pub followers: Vec<ConnectedFollower>,
+    /// Resyncs abandoned because the changes made while their checkpoint
+    /// was sent outgrew the log's pin cap.
+    pub resync_pin_overflows: u64,
 }
 
 /// One follower connected to this primary.
@@ -104,7 +109,10 @@ pub struct FollowerReport {
     /// Milliseconds since the primary was last heard from.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_contact_ms: Option<u64>,
+    /// Resyncs begun.
     pub resyncs: u64,
+    /// Resyncs that ended before the checkpoint was applied.
+    pub resync_failures: u64,
     pub reconnects: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
@@ -165,6 +173,10 @@ impl ReplicationStatus {
         self.inner.lock().followers.remove(&id);
     }
 
+    pub(super) fn resync_pin_overflowed(&self) {
+        self.inner.lock().resync_pin_overflows += 1;
+    }
+
     // Follower side
 
     pub(super) fn set_state(&self, state: FollowerState) {
@@ -197,6 +209,10 @@ impl ReplicationStatus {
         side.last_contact = Some(Instant::now());
     }
 
+    pub(super) fn resync_failed(&self) {
+        self.inner.lock().follower.resync_failures += 1;
+    }
+
     pub(super) fn failed(&self, error: &str) {
         self.inner.lock().follower.last_error = Some(error.to_string());
     }
@@ -221,6 +237,7 @@ impl ReplicationStatus {
                     resynced: f.resynced,
                 })
                 .collect(),
+            resync_pin_overflows: inner.resync_pin_overflows,
         });
         let follower = (self.role == ReplicationRole::Follower).then(|| {
             let side = &inner.follower;
@@ -233,6 +250,7 @@ impl ReplicationStatus {
                 primary_revision: side.primary_revision,
                 last_contact_ms: side.last_contact.map(millis),
                 resyncs: side.resyncs,
+                resync_failures: side.resync_failures,
                 reconnects: side.reconnects,
                 last_error: side.last_error.clone(),
             }

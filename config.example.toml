@@ -63,6 +63,7 @@ buffer_size = 10000
 # - immediate: Sync to disk on each write (safest, slowest)
 # - batched: Periodic sync (balanced performance/safety)
 # - async: Fire-and-forget (fastest, may lose recent data on crash)
+# A replication follower must use immediate or batched (async is refused).
 durability_mode = "immediate"
 
 # Compaction window: retain this many historical versions (0 = keep all)

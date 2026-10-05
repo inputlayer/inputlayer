@@ -10,11 +10,18 @@
 //! whose position is still retained catches up from here; one further
 //! behind, or from another incarnation of the primary (`stream_id`), is
 //! brought up to date from a checkpoint instead.
+//!
+//! While a checkpoint is sent, a [`LogPin`] keeps the events after its head,
+//! which the follower tails next, past the byte budget, up to
+//! [`PIN_CAP_FACTOR`] times it.
 
 use parking_lot::Mutex;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::watch;
+
+/// How far pinned events may grow the log, as a multiple of its byte budget.
+pub const PIN_CAP_FACTOR: usize = 4;
 
 /// One retained event line.
 pub type Line = Arc<[u8]>;
@@ -43,6 +50,51 @@ struct Retained {
     /// Events `head - lines.len() + 1 ..= head`.
     lines: VecDeque<Line>,
     bytes: usize,
+    /// Pinned LSNs (with their pin counts): events after the lowest are
+    /// kept until the log reaches its pin cap.
+    pins: BTreeMap<u64, usize>,
+}
+
+impl Retained {
+    fn pin(&mut self, lsn: u64) {
+        *self.pins.entry(lsn).or_default() += 1;
+    }
+
+    fn unpin(&mut self, lsn: u64) {
+        if let Some(count) = self.pins.get_mut(&lsn) {
+            *count -= 1;
+            if *count == 0 {
+                self.pins.remove(&lsn);
+            }
+        }
+    }
+}
+
+/// Keeps the log's events after an LSN until dropped (see
+/// [`ReplicationLog::pin_head`]).
+#[derive(Debug)]
+pub struct LogPin<'a> {
+    log: &'a ReplicationLog,
+    lsn: u64,
+}
+
+impl LogPin<'_> {
+    /// Keep only the events after `lsn` from now on.
+    pub fn advance(&mut self, lsn: u64) {
+        if lsn <= self.lsn {
+            return;
+        }
+        let mut retained = self.log.retained.lock();
+        retained.unpin(self.lsn);
+        retained.pin(lsn);
+        self.lsn = lsn;
+    }
+}
+
+impl Drop for LogPin<'_> {
+    fn drop(&mut self) {
+        self.log.retained.lock().unpin(self.lsn);
+    }
 }
 
 /// The primary's numbered, bounded log of recent replication events.
@@ -66,6 +118,7 @@ impl ReplicationLog {
                 head: 0,
                 lines: VecDeque::new(),
                 bytes: 0,
+                pins: BTreeMap::new(),
             }),
             head: watch::channel(0).0,
         }
@@ -86,14 +139,36 @@ impl ReplicationLog {
         self.head.subscribe()
     }
 
+    /// The byte size pinned events may grow the log to.
+    pub fn pin_cap(&self) -> usize {
+        self.retain_bytes.saturating_mul(PIN_CAP_FACTOR)
+    }
+
+    /// Keep the events after the current head, past the byte budget up to
+    /// [`pin_cap`](Self::pin_cap), until the pin is dropped. Past the cap
+    /// the oldest events go anyway and a reader of them finds them
+    /// unavailable.
+    pub fn pin_head(&self) -> LogPin<'_> {
+        let mut retained = self.retained.lock();
+        let lsn = retained.head;
+        retained.pin(lsn);
+        LogPin { log: self, lsn }
+    }
+
     /// Append one encoded event line and return its LSN. Drops the oldest
-    /// lines while over the byte budget.
+    /// lines while over the byte budget, unless they are pinned and the log
+    /// is within its pin cap.
     pub fn append(&self, line: Vec<u8>) -> u64 {
         let mut retained = self.retained.lock();
         retained.head += 1;
         retained.bytes += line.len();
         retained.lines.push_back(line.into());
+        let pinned_after = retained.pins.keys().next().copied();
         while retained.bytes > self.retain_bytes && retained.lines.len() > 1 {
+            let oldest = retained.head + 1 - retained.lines.len() as u64;
+            if pinned_after.is_some_and(|pin| oldest > pin) && retained.bytes <= self.pin_cap() {
+                break;
+            }
             if let Some(old) = retained.lines.pop_front() {
                 retained.bytes -= old.len();
             }
@@ -204,6 +279,42 @@ mod tests {
         let log = ReplicationLog::new(2);
         log.append(line("aaaa"));
         assert_eq!(texts(log.read_after(0, 100)), (1, vec!["aaaa".into()]));
+    }
+
+    #[test]
+    fn a_pin_keeps_the_events_after_it_up_to_the_cap() {
+        let log = ReplicationLog::new(8);
+        log.append(line("aaaa"));
+        let mut pin = log.pin_head();
+        log.append(line("bbbb"));
+        log.append(line("cccc"));
+        log.append(line("dddd"));
+        assert_eq!(
+            texts(log.read_after(1, 100)),
+            (2, vec!["bbbb".into(), "cccc".into(), "dddd".into()])
+        );
+        assert_eq!(log.read_after(0, 100), Read::Unavailable);
+
+        // Advancing releases what the reader has passed.
+        pin.advance(2);
+        log.append(line("eeee"));
+        assert_eq!(log.read_after(1, 100), Read::Unavailable);
+        assert_eq!(texts(log.read_after(2, 100)).0, 3);
+
+        // Past the cap (4 x 8 bytes) the pinned events go too.
+        for _ in 0..8 {
+            log.append(line("ffff"));
+        }
+        assert_eq!(log.read_after(2, 100), Read::Unavailable);
+
+        // Dropped, the log is back within its budget on the next append.
+        drop(pin);
+        log.append(line("gggg"));
+        assert_eq!(
+            texts(log.read_after(log.head() - 2, 100)).1,
+            vec!["ffff".to_string(), "gggg".into()]
+        );
+        assert_eq!(log.read_after(log.head() - 3, 100), Read::Unavailable);
     }
 
     #[test]

@@ -212,6 +212,15 @@ fn write_everything(primary: &StorageEngine) {
     primary
         .insert_tuples_into("doomed", "x", vec![pair(1, 1)])
         .unwrap();
+    primary
+        .register_schema_in("doomed", vector_schema())
+        .unwrap();
+    primary
+        .insert_tuples_into("doomed", "doc", vec![doc(1, 0.0, 1.0)])
+        .unwrap();
+    primary.create_index_in("doomed", &index_options()).unwrap();
+    primary.drop_index_in("doomed", "doc_emb").unwrap();
+    primary.create_index_in("doomed", &index_options()).unwrap();
     primary.drop_knowledge_graph("doomed").unwrap();
 }
 

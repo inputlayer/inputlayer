@@ -6,6 +6,9 @@
 //! Silence longer than `replication.timeout_ms`, a gap in LSNs, or any error
 //! ends the connection; it reconnects with backoff. A failed apply or a gap
 //! clears the position, so the next connection resyncs from a checkpoint.
+//! Consecutive resyncs that end before their checkpoint is applied back off
+//! further, up to `MAX_RESYNC_BACKOFF`, so a resync that cannot finish does
+//! not cost the primary a checkpoint every few seconds.
 
 use super::{
     decode_frame, FollowerMessage, FollowerState, PrimaryMessage, StartMode, MAX_FRAME_BYTES,
@@ -30,6 +33,8 @@ const MIN_BACKOFF: Duration = Duration::from_millis(100);
 /// Bytes of already-received events applied as one batch.
 const BATCH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_BACKOFF: Duration = Duration::from_secs(2);
+const MIN_RESYNC_BACKOFF: Duration = Duration::from_secs(1);
+const MAX_RESYNC_BACKOFF: Duration = Duration::from_secs(60);
 
 /// Start the follower task (a no-op future when this is not a follower).
 pub fn spawn(handler: Arc<Handler>) -> JoinHandle<()> {
@@ -55,6 +60,7 @@ async fn run(handler: Arc<Handler>) {
         path,
         handler,
         streamed: false,
+        resyncing: false,
     };
     info!(
         primary = config.primary_url.as_deref().unwrap_or(""),
@@ -65,11 +71,12 @@ async fn run(handler: Arc<Handler>) {
     let handler = Arc::clone(&follower.handler);
     let status = handler.replication_status();
     let mut backoff = MIN_BACKOFF;
+    let mut resync_backoff = Duration::ZERO;
     loop {
         status.set_state(FollowerState::Connecting);
         let result = follower.session(&config).await;
-        let streamed = follower.streamed;
-        follower.streamed = false;
+        let streamed = std::mem::take(&mut follower.streamed);
+        let resync_failed = std::mem::take(&mut follower.resyncing);
         if let Err(e) = result {
             warn!(error = %e, "replication_follower_disconnected");
             status.failed(&e);
@@ -79,7 +86,17 @@ async fn run(handler: Arc<Handler>) {
         } else {
             (backoff * 2).min(MAX_BACKOFF)
         };
-        tokio::time::sleep(backoff).await;
+        if resync_failed {
+            status.resync_failed();
+            resync_backoff = (resync_backoff * 2).clamp(MIN_RESYNC_BACKOFF, MAX_RESYNC_BACKOFF);
+            warn!(
+                retry_ms = u64::try_from(resync_backoff.as_millis()).unwrap_or(u64::MAX),
+                "replication_resync_failed"
+            );
+        } else if streamed {
+            resync_backoff = Duration::ZERO;
+        }
+        tokio::time::sleep(backoff.max(resync_backoff)).await;
     }
 }
 
@@ -89,6 +106,9 @@ struct Follower {
     position: Position,
     /// The last session applied something (resets the backoff).
     streamed: bool,
+    /// The last session began a resync and has not streamed past its
+    /// checkpoint yet.
+    resyncing: bool,
 }
 
 /// A checkpoint being received.
@@ -176,11 +196,17 @@ impl Follower {
                                 // A crash mid-resync must not resume from the old position.
                                 self.save_position(Position::default(), true)?;
                                 resync = Some(Resync::default());
+                                self.resyncing = true;
                             } else {
                                 status.set_state(FollowerState::Streaming);
                             }
                         }
-                        PrimaryMessage::Heartbeat { head } => status.contact(head),
+                        PrimaryMessage::Heartbeat { head } => {
+                            status.contact(head);
+                            if resync.is_none() {
+                                self.resyncing = false;
+                            }
+                        }
                         PrimaryMessage::Error { message } => return Err(message),
                     }
                 }
@@ -244,7 +270,9 @@ impl Follower {
                                 None => break,
                             }
                         }
-                        self.apply_events(stream_id, first, batch).await?
+                        let lsn = self.apply_events(stream_id, first, batch).await?;
+                        self.resyncing = false;
+                        lsn
                     };
                     self.streamed = true;
                     let ack = FollowerMessage::Ack { lsn };

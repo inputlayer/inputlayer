@@ -303,7 +303,6 @@ impl CatalogDelta {
         entries: impl IntoIterator<Item = CatalogEntry>,
     ) -> Self {
         let mut delta = CatalogDelta::default();
-        let mut staged: Option<SchemaCatalog> = None;
         for entry in entries {
             match entry {
                 CatalogEntry::Rule { name, definition } => {
@@ -320,13 +319,13 @@ impl CatalogDelta {
                 }
             }
         }
-        if !delta.schemas.is_empty() {
-            let staged = staged.get_or_insert_with(|| schemas.clone());
+        delta.schema_catalog = (!delta.schemas.is_empty()).then(|| {
+            let mut staged = schemas.clone();
             for (relation, schema) in &delta.schemas {
                 staged.set_persistent(relation, schema.clone());
             }
-        }
-        delta.schema_catalog = staged;
+            staged
+        });
         delta
     }
 

@@ -1130,6 +1130,16 @@ impl Config {
         }
 
         self.replication.validate()?;
+        if self.replication.role == ReplicationRole::Follower
+            && self.storage.persist.durability_mode == DurabilityMode::Async
+        {
+            return Err(
+                "a follower must be durable: storage.persist.durability_mode = \"async\" writes \
+                 no WAL, so a restarted follower would resume past changes it lost; use \
+                 \"immediate\" or \"batched\""
+                    .to_string(),
+            );
+        }
 
         // Warn about extremely high WS connection limits
         if self.http.rate_limit.max_ws_connections > 100_000 {
@@ -1510,6 +1520,27 @@ mod tests {
             ..follower
         };
         assert!(standalone.validate().is_ok());
+    }
+
+    #[test]
+    fn test_a_follower_refuses_async_durability() {
+        let mut config = Config::default();
+        config.replication = ReplicationConfig {
+            role: ReplicationRole::Follower,
+            token: Some("0123456789abcdef".into()),
+            primary_url: Some("http://primary:8080".into()),
+            ..ReplicationConfig::default()
+        };
+        for mode in [DurabilityMode::Immediate, DurabilityMode::Batched] {
+            config.storage.persist.durability_mode = mode;
+            assert!(config.validate().is_ok(), "{mode:?}");
+        }
+        config.storage.persist.durability_mode = DurabilityMode::Async;
+        let err = config.validate().unwrap_err();
+        assert!(err.contains("follower must be durable"), "{err}");
+        // A primary may still trade durability for latency.
+        config.replication.role = ReplicationRole::Primary;
+        assert!(config.validate().is_ok());
     }
 
     #[test]
