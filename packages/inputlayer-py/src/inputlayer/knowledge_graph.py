@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -49,14 +49,19 @@ from inputlayer.session import Session
 from inputlayer.subscription import (
     DEFAULT_QUEUE,
     Change,
+    GroupSubscription,
     Live,
+    ReadResult,
+    Shape,
     Subscription,
     SubscriptionHandle,
+    check_names,
     iql_shape,
     plan_shape,
     run_callback,
     watch_changes,
 )
+from inputlayer.subscription import read as read_snapshot
 
 R = TypeVar("R", bound=Relation)
 
@@ -752,27 +757,10 @@ class KnowledgeGraph:
                 if not change.verified:
                     pause()
         """
-        if iql is not None:
-            if select or join or on or where or computed:
-                raise CompileError(
-                    "subscribe takes a query or iql=, not both",
-                    hint="put the whole query in iql=, or drop iql=",
-                )
-            shape = iql_shape(iql)
-        else:
-            if limit is not None or offset is not None:
-                raise SubscriptionRejected(
-                    "A subscription tracks the whole result: remove limit and offset "
-                    "from the query.",
-                    "limit_offset",
-                )
-            del order_by  # a result is a set: its order means nothing to deltas
-            plan, relation_cls = self._plan(
-                *select, join=join, on=on, where=where,
-                order_by=None, limit=None, offset=None, **computed,
-            )
-            aggregate = any(isinstance(s, AggExpr) for s in (*select, *computed.values()))
-            shape = plan_shape(plan, relation_cls, aggregate=aggregate)
+        shape = self._shape(
+            *select, join=join, on=on, where=where, order_by=order_by,
+            limit=limit, offset=offset, iql=iql, read=False, **computed,
+        )
         return Subscription(
             self._conn,
             shape,
@@ -780,6 +768,153 @@ class KnowledgeGraph:
             timeout=timeout,
             session_rules=self._session.list_rules,
         )
+
+    def subscribe_group(
+        self,
+        members: Mapping[str, Any],
+        *,
+        queue: int = DEFAULT_QUEUE,
+        timeout: float | None = None,
+    ) -> GroupSubscription:
+        """Subscribe to several queries kept current together: an async
+        iterator of ``GroupChange`` events, with every member's change under
+        its name. ``members`` maps a name to a target (see ``read``).
+
+        After every verified event (``snapshot``, ``delta``, ``resync``),
+        every member is its query's exact answer at the event's one
+        ``revision``: rows two members share move in the same event. A
+        ``delta`` lists every member, ``unchanged`` when its rows did not
+        change (a change outside a member's projection is no change); a
+        refresh that changes no member delivers nothing. ``unverified`` and
+        ``resync`` cover the whole group, as for ``subscribe``, and so do
+        ``queue`` and ``timeout``. Commits coalesce: a row that appears and
+        disappears between two refreshes is never seen.
+
+        Raises ``SubscriptionRejected`` for a member ``subscribe`` refuses,
+        and for no members or an empty name::
+
+            async for change in kg.subscribe_group({"orders": Order, "eta": Eta}):
+                orders, eta = change.members["orders"], change.members["eta"]
+                ...  # both are exact at change.revision
+        """
+        shapes = self._shapes(members, read=False)
+        return GroupSubscription(
+            self._conn,
+            shapes,
+            queue=queue,
+            timeout=timeout,
+            session_rules=self._session.list_rules,
+        )
+
+    async def read(
+        self, queries: Mapping[str, Any], *, timeout: float | None = None
+    ) -> ReadResult:
+        """Run several queries on one snapshot: every result is its query's
+        exact answer at ``result.revision``, whatever commits meanwhile.
+
+        ``queries`` maps a name to a target: a relation class, a column or
+        expression, a tuple of them (the arguments of ``query``), a dict of
+        ``query``'s arguments (``{"select": [Order.id], "where": ...,
+        "limit": 10}``), or raw IQL (``"?order(S, O)"``). Rows are shaped as
+        ``subscribe`` shapes them, in the engine's order: ``order_by``,
+        ``limit`` and ``offset`` apply. A read sees persistent data only, as
+        a subscription does: session facts and rules are not visible.
+
+        ``timeout`` (seconds) is the whole read's deadline. The read fails as
+        a whole, with the error naming the failing query; ``truncated`` names
+        the results a ``limit`` or the engine's result cap cut. Raises
+        ``SubscriptionRejected``, naming the query, for a target that is not
+        one ``?`` query (an OR condition, an aggregate, a negated constant, a
+        page of a projection, ``offset`` without ``limit``) or that reads a
+        session rule (checked alongside the read, at no extra round trip)::
+
+            snap = await kg.read({"orders": Order, "eta": Eta})
+            snap.results["orders"], snap.results["eta"]  # both at snap.revision
+        """
+        return await read_snapshot(
+            self._conn,
+            self._shapes(queries, read=True),
+            timeout=timeout,
+            session_rules=lambda: self._session.list_rules(timeout=timeout),
+        )
+
+    def _shapes(self, targets: Mapping[str, Any], *, read: bool) -> dict[str, Shape]:
+        """Each target's shape by name; a refusal names its query."""
+        check_names(list(targets))
+        shapes: dict[str, Shape] = {}
+        for name, target in targets.items():
+            try:
+                shapes[name] = self._target_shape(target, read=read)
+            except SubscriptionRejected as err:
+                raise SubscriptionRejected(
+                    f"Query '{name}': {err.message}", err.reason, query=err.query
+                ) from None
+            except CompileError as err:
+                named = CompileError(f"Query '{name}': {err}")
+                named.hint = err.hint
+                raise named from None
+        return shapes
+
+    def _target_shape(self, target: Any, *, read: bool) -> Shape:
+        """The shape of one target of ``read`` or ``subscribe_group``."""
+        if isinstance(target, str):
+            return iql_shape(target, read=read)
+        if isinstance(target, Mapping):
+            options = dict(target)
+            select = options.pop("select", ())
+            if not isinstance(select, (list, tuple)):
+                select = (select,)
+            return self._shape(*select, read=read, **options)
+        if isinstance(target, (list, tuple)):
+            return self._shape(*target, read=read)
+        return self._shape(target, read=read)
+
+    def _shape(
+        self,
+        *select: Any,
+        join: list[type[Relation] | RelationRef] | None = None,
+        on: Callable[..., Any] | None = None,
+        where: Callable[..., Any] | None = None,
+        order_by: ColumnProxy | OrderedColumn | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        iql: str | None = None,
+        read: bool,
+        **computed: Any,
+    ) -> Shape:
+        """The one ``?`` query of a subscription, or of a read (which keeps
+        order and pagination), refusing what cannot be one."""
+        if iql is not None:
+            if select or join or on or where or computed:
+                raise CompileError(
+                    f"{'read' if read else 'subscribe'} takes a query or iql=, not both",
+                    hint="put the whole query in iql=, or drop iql=",
+                )
+            if limit is not None or offset is not None or (read and order_by is not None):
+                raise SubscriptionRejected(
+                    "iql= takes the whole query as written: drop limit, offset and order_by.",
+                    "limit_offset",
+                )
+            return iql_shape(iql, read=read)
+        if read and offset is not None and limit is None:
+            raise SubscriptionRejected(
+                "A read pages with limit: give offset together with limit, or drop offset.",
+                "limit_offset",
+            )
+        if not read:
+            if limit is not None or offset is not None:
+                raise SubscriptionRejected(
+                    "A subscription tracks the whole result: remove limit and offset "
+                    "from the query.",
+                    "limit_offset",
+                )
+            order_by = None  # a result is a set: its order means nothing to deltas
+        plan, relation_cls = self._plan(
+            *select, join=join, on=on, where=where,
+            order_by=order_by, limit=limit, offset=offset, **computed,
+        )
+        aggregate = any(isinstance(s, AggExpr) for s in (*select, *computed.values()))
+        return plan_shape(plan, relation_cls, aggregate=aggregate, read=read)
 
     def watch(self, *select: Any, **kwargs: Any) -> AsyncIterator[Live[Any]]:
         """The whole current result of a subscription (the arguments of

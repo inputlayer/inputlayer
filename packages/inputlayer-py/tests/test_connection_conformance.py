@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from inputlayer._protocol import NamedQuery, SnapshotResponse
 from inputlayer.connection import Connection
 from inputlayer.exceptions import (
     Cancelled,
@@ -68,9 +69,26 @@ def _play(steps: list[dict[str, Any]], done: asyncio.Event) -> Any:
     return handler
 
 
+def _issue(conn: Connection, call: dict[str, Any]) -> Any:
+    """Start the request a fixture call describes."""
+    if "execute" in call:
+        return conn.execute(call["execute"], timeout=10)
+    if "read" in call:
+        return conn.read([NamedQuery(**q) for q in call["read"]], timeout=10)
+    queries = [NamedQuery(**q) for q in call["queries"]]
+    return conn.subscribe(call["subscribe"], queries, timeout=10)
+
+
 def _check_call(expect: dict[str, Any], outcome: Any) -> None:
     if "error" not in expect:
         assert not isinstance(outcome, BaseException), outcome
+        if isinstance(outcome, SnapshotResponse):
+            assert outcome.revision == expect["revision"]
+            results = [
+                {"name": r.name, "columns": r.columns, "rows": r.rows} for r in outcome.results
+            ]
+            assert results == expect["results"]
+            return
         assert outcome.rows == expect["rows"]
         if "columns" in expect:
             assert outcome.columns == expect["columns"]
@@ -109,10 +127,7 @@ async def test_connection_fixture(fixture: Path) -> None:
                 ),
             )
         await conn.connect()
-        calls = [
-            asyncio.ensure_future(conn.execute(call["execute"], timeout=10))
-            for call in spec["calls"]
-        ]
+        calls = [asyncio.ensure_future(_issue(conn, call)) for call in spec["calls"]]
         outcomes = await asyncio.gather(*calls, return_exceptions=True)
         await asyncio.wait_for(done.wait(), 5)
         await asyncio.sleep(0.05)  # let pushes sent after the last reply arrive

@@ -561,7 +561,8 @@ pub struct RateLimitConfig {
     #[serde(default = "default_ws_max_lifetime_secs")]
     pub ws_max_lifetime_secs: u64,
 
-    /// Maximum standing-query subscriptions per WebSocket connection (0 = unlimited)
+    /// Maximum standing-query subscriptions per WebSocket connection (0 = unlimited).
+    /// A subscription group counts once per query.
     #[serde(default = "default_ws_max_subscriptions")]
     pub ws_max_subscriptions: usize,
 

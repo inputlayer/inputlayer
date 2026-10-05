@@ -1,0 +1,318 @@
+{
+  "name": "group_subscribe_routes",
+  "description": "A subscription group's route adopts the generation its snapshot reply names (streamed here); group deltas, one frame or streamed, of that generation reach it, any other generation or subscription is dropped and counted.",
+  "routes": [
+    "g1"
+  ],
+  "calls": [
+    {
+      "subscribe": "g1",
+      "queries": [
+        {
+          "name": "orders",
+          "query": "?order(S, O)"
+        },
+        {
+          "name": "eta",
+          "query": "?eta(O, T)"
+        }
+      ],
+      "expect": {
+        "revision": 5,
+        "results": [
+          {
+            "name": "orders",
+            "columns": [
+              "S",
+              "O"
+            ],
+            "rows": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "name": "eta",
+            "columns": [
+              "O",
+              "T"
+            ],
+            "rows": []
+          }
+        ]
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "subscribe",
+        "subscription": "g1",
+        "queries": [
+          {
+            "name": "orders",
+            "query": "?order(S, O)"
+          },
+          {
+            "name": "eta",
+            "query": "?eta(O, T)"
+          }
+        ]
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "snapshot_start",
+        "id": "$q",
+        "knowledge_graph": "default",
+        "revision": 5,
+        "results": [
+          {
+            "name": "orders",
+            "columns": [
+              "S",
+              "O"
+            ],
+            "row_count": 1,
+            "total_count": 1,
+            "truncated": false
+          },
+          {
+            "name": "eta",
+            "columns": [
+              "O",
+              "T"
+            ],
+            "row_count": 0,
+            "total_count": 0,
+            "truncated": false
+          }
+        ],
+        "execution_time_ms": 1,
+        "subscribed": {
+          "subscription": "g1",
+          "generation": 3,
+          "revision": 5
+        }
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_chunk",
+        "id": "$q",
+        "result": 0,
+        "chunk_index": 0,
+        "rows": [
+          [
+            1,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_end",
+        "id": "$q",
+        "chunk_count": 1
+      }
+    },
+    {
+      "send": {
+        "type": "subscription_group_delta",
+        "subscription": "g1",
+        "generation": 2,
+        "knowledge_graph": "default",
+        "seq": 1,
+        "revision": 6,
+        "members": [
+          {
+            "name": "orders",
+            "unchanged": false,
+            "columns": [
+              "S",
+              "O"
+            ],
+            "inserted": [
+              [
+                1,
+                9
+              ]
+            ],
+            "retracted": []
+          },
+          {
+            "name": "eta",
+            "unchanged": true,
+            "columns": [
+              "O",
+              "T"
+            ],
+            "inserted": [],
+            "retracted": []
+          }
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "subscription_group_delta",
+        "subscription": "g1",
+        "generation": 3,
+        "knowledge_graph": "default",
+        "seq": 1,
+        "revision": 6,
+        "members": [
+          {
+            "name": "orders",
+            "unchanged": false,
+            "columns": [
+              "S",
+              "O"
+            ],
+            "inserted": [
+              [
+                1,
+                9
+              ]
+            ],
+            "retracted": []
+          },
+          {
+            "name": "eta",
+            "unchanged": true,
+            "columns": [
+              "O",
+              "T"
+            ],
+            "inserted": [],
+            "retracted": []
+          }
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "subscription_group_delta_start",
+        "subscription": "g1",
+        "generation": 3,
+        "knowledge_graph": "default",
+        "seq": 2,
+        "revision": 7,
+        "members": [
+          {
+            "name": "orders",
+            "unchanged": true,
+            "columns": [
+              "S",
+              "O"
+            ],
+            "inserted_count": 0,
+            "retracted_count": 0
+          },
+          {
+            "name": "eta",
+            "unchanged": false,
+            "columns": [
+              "O",
+              "T"
+            ],
+            "inserted_count": 1,
+            "retracted_count": 0
+          }
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "subscription_group_delta_chunk",
+        "subscription": "g1",
+        "generation": 3,
+        "seq": 2,
+        "chunk_index": 0,
+        "member": 1,
+        "inserted": [
+          [
+            1,
+            10
+          ]
+        ],
+        "retracted": []
+      }
+    },
+    {
+      "send": {
+        "type": "subscription_group_delta_end",
+        "subscription": "g1",
+        "generation": 3,
+        "seq": 2,
+        "chunk_count": 1
+      }
+    },
+    {
+      "send": {
+        "type": "subscription_group_delta",
+        "subscription": "g9",
+        "generation": 1,
+        "knowledge_graph": "default",
+        "seq": 1,
+        "revision": 6,
+        "members": [
+          {
+            "name": "orders",
+            "unchanged": false,
+            "columns": [
+              "S",
+              "O"
+            ],
+            "inserted": [
+              [
+                1,
+                9
+              ]
+            ],
+            "retracted": []
+          },
+          {
+            "name": "eta",
+            "unchanged": true,
+            "columns": [
+              "O",
+              "T"
+            ],
+            "inserted": [],
+            "retracted": []
+          }
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "pushes": [
+      {
+        "subscription": "g1",
+        "generation": 3,
+        "seq": 1
+      },
+      {
+        "subscription": "g1",
+        "generation": 3,
+        "seq": 2
+      },
+      {
+        "subscription": "g1",
+        "generation": 3,
+        "seq": 2
+      },
+      {
+        "subscription": "g1",
+        "generation": 3,
+        "seq": 2
+      }
+    ],
+    "stale_pushes": 2
+  }
+}

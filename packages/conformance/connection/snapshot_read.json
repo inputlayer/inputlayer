@@ -1,0 +1,98 @@
+{
+  "name": "snapshot_read",
+  "description": "A read is answered by one snapshot: every query's result, in request order, at one revision.",
+  "calls": [
+    {
+      "read": [
+        {
+          "name": "orders",
+          "query": "?order(S, O)"
+        },
+        {
+          "name": "eta",
+          "query": "?eta(O, T)"
+        }
+      ],
+      "expect": {
+        "revision": 7,
+        "results": [
+          {
+            "name": "orders",
+            "columns": [
+              "S",
+              "O"
+            ],
+            "rows": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "name": "eta",
+            "columns": [
+              "O",
+              "T"
+            ],
+            "rows": []
+          }
+        ]
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "read",
+        "queries": [
+          {
+            "name": "orders",
+            "query": "?order(S, O)"
+          },
+          {
+            "name": "eta",
+            "query": "?eta(O, T)"
+          }
+        ]
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "snapshot",
+        "id": "$q",
+        "knowledge_graph": "default",
+        "revision": 7,
+        "results": [
+          {
+            "name": "orders",
+            "columns": [
+              "S",
+              "O"
+            ],
+            "rows": [
+              [
+                1,
+                2
+              ]
+            ],
+            "total_count": 1,
+            "truncated": false
+          },
+          {
+            "name": "eta",
+            "columns": [
+              "O",
+              "T"
+            ],
+            "rows": [],
+            "total_count": 0,
+            "truncated": false
+          }
+        ],
+        "execution_time_ms": 2
+      }
+    }
+  ]
+}

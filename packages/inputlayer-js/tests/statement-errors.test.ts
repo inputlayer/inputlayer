@@ -94,7 +94,7 @@ class ScriptedEngine {
               knowledge_graph: kg ?? 'other',
               version: 'test',
               role: 'admin',
-              protocol_version: 4,
+              protocol_version: 5,
               stream_epoch: '00112233aabbccdd',
             }),
           );

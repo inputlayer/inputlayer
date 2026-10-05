@@ -40,7 +40,10 @@ async fn a_failed_refresh_keeps_the_result_and_a_new_subscriber_reevaluates_once
     let failed = latest(&attachment);
     assert!(matches!(&failed.outcome, Outcome::Failed(m) if m == "boom"));
     assert_eq!((failed.result_number, failed.revision), (1, 1));
-    assert!(Arc::ptr_eq(&failed.result, &attachment.publication.result));
+    assert!(Arc::ptr_eq(
+        &failed.results[0].rows,
+        &attachment.publication.results[0].rows
+    ));
 
     let (Attach::Waiting(Some(retry)), _m2) = attach(&mut registry, "?a(X)", 2, vec![]) else {
         panic!("a failed view reevaluates for a new subscriber");
@@ -54,7 +57,10 @@ async fn a_failed_refresh_keeps_the_result_and_a_new_subscriber_reevaluates_once
     for (_, reply) in completed.replies {
         let joined = reply.unwrap();
         assert!(Arc::ptr_eq(&joined.cell, &attachment.cell));
-        assert_eq!(joined.publication.result.sorted_rows(), rows(&[1, 2]));
+        assert_eq!(
+            joined.publication.results[0].rows.sorted_rows(),
+            rows(&[1, 2])
+        );
     }
     let recovered = latest(&attachment);
     assert!(matches!(&recovered.outcome, Outcome::Delta { base: 1, .. }));
@@ -153,7 +159,7 @@ async fn a_failed_retry_answers_its_waiters_with_the_new_error() {
     assert!(matches!(&completed.replies[..], [(3, Ok(_))]));
     assert!(matches!(
         &latest(&attachment).outcome,
-        Outcome::Delta { inserted, retracted, .. } if inserted.is_empty() && retracted.is_empty()
+        Outcome::Delta { changes, .. } if changes.iter().all(RowChange::is_empty)
     ));
 }
 

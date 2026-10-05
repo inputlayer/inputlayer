@@ -66,6 +66,14 @@ impl DependencyClosure {
         self.relations.iter().map(String::as_str)
     }
 
+    /// Add every relation of the closed set `other`: the union of two closed
+    /// sets over the same rules is closed.
+    pub fn merge(&mut self, other: &DependencyClosure) {
+        self.relations.extend(other.relations.iter().cloned());
+        self.frontier.extend(other.frontier.iter().cloned());
+        self.reads_untracked_state |= other.reads_untracked_state;
+    }
+
     /// Whether some body reads state that relation names do not track.
     pub fn reads_untracked_state(&self) -> bool {
         self.reads_untracked_state

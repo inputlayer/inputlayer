@@ -60,9 +60,9 @@ class Session:
                 for statement in (*compiled.constants, compiled.clause):
                     await self._conn.execute(statement, params=params_of(statement, params))
 
-    async def list_rules(self) -> list[str]:
+    async def list_rules(self, *, timeout: float | None = None) -> list[str]:
         """List session rules, one clause per entry, in definition order."""
-        result = await self._conn.execute(_meta.session_list())
+        result = await self._conn.execute(_meta.session_list(), timeout=timeout)
         return _meta.session_rules(result.rows)
 
     async def drop_rule(

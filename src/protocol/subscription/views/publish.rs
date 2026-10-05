@@ -1,27 +1,38 @@
-//! A view's publications: its first result, and the news of each later refresh.
+//! A view's publications: its first results, and the news of each later refresh.
 
 use std::sync::Arc;
 
-use super::super::publication::{Outcome, Publication, SubscriberId, ViewCell};
+use super::super::publication::{
+    Outcome, Publication, RowChange, SubscriberId, ViewCell, ViewResult,
+};
 use super::super::{Refresh, Row};
 use super::{Live, View};
 
-/// Make `refresh` the view's first publication; returns its rows, sorted.
-pub(super) fn start(view: &mut View, refresh: Refresh) -> Arc<Vec<Row>> {
+/// Make `refresh` the view's first publication; returns its rows, sorted, one
+/// list per query.
+pub(super) fn start(view: &mut View, refresh: Refresh) -> Arc<Vec<Vec<Row>>> {
     view.dependencies = refresh.dependencies;
+    let mut results = Vec::with_capacity(refresh.queries.len());
+    let mut rows = Vec::with_capacity(refresh.queries.len());
+    for query in refresh.queries {
+        results.push(ViewResult {
+            columns: query.columns,
+            rows: query.result,
+        });
+        rows.push(query.inserted);
+    }
     let publication = Arc::new(Publication {
         number: 1,
         revision: refresh.revision,
         result_number: 1,
-        columns: refresh.columns,
-        result: refresh.result,
+        results: results.into(),
         outcome: Outcome::Snapshot,
     });
     view.live = Some(Live {
         cell: Arc::new(ViewCell::new(Arc::clone(&publication))),
         latest: publication,
     });
-    Arc::new(refresh.inserted)
+    Arc::new(rows)
 }
 
 /// Mark the view's result exact at `revision` too: no news for subscribers.
@@ -29,8 +40,7 @@ pub(super) fn advance(live: &mut Live, revision: u64) {
     let last = &live.latest;
     let publication = Arc::new(Publication {
         revision,
-        columns: last.columns.clone(),
-        result: Arc::clone(&last.result),
+        results: Arc::clone(&last.results),
         outcome: last.outcome.clone(),
         ..**last
     });
@@ -57,16 +67,26 @@ pub(super) fn publish(
                 advance(live, refresh.revision);
                 return Vec::new();
             }
+            let mut results = Vec::with_capacity(refresh.queries.len());
+            let mut changes = Vec::with_capacity(refresh.queries.len());
+            for query in refresh.queries {
+                results.push(ViewResult {
+                    columns: query.columns,
+                    rows: query.result,
+                });
+                changes.push(RowChange {
+                    inserted: query.inserted,
+                    retracted: query.retracted,
+                });
+            }
             Publication {
                 number,
                 revision: refresh.revision,
                 result_number: number,
-                columns: refresh.columns,
-                result: refresh.result,
+                results: results.into(),
                 outcome: Outcome::Delta {
                     base: last.result_number,
-                    inserted: refresh.inserted,
-                    retracted: refresh.retracted,
+                    changes,
                 },
             }
         }
@@ -75,8 +95,7 @@ pub(super) fn publish(
             number,
             revision: last.revision,
             result_number: last.result_number,
-            columns: last.columns.clone(),
-            result: Arc::clone(&last.result),
+            results: Arc::clone(&last.results),
             outcome: Outcome::Failed(message),
         },
     };

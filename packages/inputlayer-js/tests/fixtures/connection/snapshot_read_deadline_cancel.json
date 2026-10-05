@@ -1,0 +1,57 @@
+{
+  "name": "snapshot_read_deadline_cancel",
+  "about": "A read carries its deadline as timeout_ms; with no reply at the deadline the client sends cancel naming it, and the engine's deadline_exceeded fails the whole read typed; the ack after it is absorbed.",
+  "options": {
+    "timeoutMs": 50,
+    "timeoutGraceMs": 50
+  },
+  "calls": [
+    {
+      "read": [
+        {
+          "name": "orders",
+          "query": "?order(S, O)"
+        },
+        {
+          "name": "etas",
+          "query": "?eta(O, T)"
+        }
+      ]
+    }
+  ],
+  "server": [
+    {
+      "await": {
+        "cancel": 0
+      }
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$r0",
+        "code": "deadline_exceeded",
+        "message": "Request deadline exceeded before it began committing; nothing was applied"
+      }
+    },
+    {
+      "send": {
+        "type": "cancel_ack",
+        "id": "$c0",
+        "target": "$r0",
+        "outcome": "cancelled"
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "DeadlineExceededError",
+        "code": "deadline_exceeded"
+      }
+    ],
+    "sentTimeoutMs": 50,
+    "stats": {
+      "staleReplies": 0
+    }
+  }
+}

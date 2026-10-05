@@ -4,7 +4,8 @@ A single reader task reads every frame the server sends and routes it:
 
 - replies (they echo the request's ``id``) complete the call waiting on that
   id; a streamed result (``result_start``, ``result_chunk``s, ``result_end``)
-  is assembled there and checked against the counts its end announces;
+  or snapshot (``snapshot_start``, ``snapshot_chunk``s, ``snapshot_end``) is
+  assembled there and checked against the counts it announces;
 - standing-query pushes go to the route registered for their
   ``subscription``, and only when their ``generation`` is the route's; any
   other push is dropped and counted;
@@ -27,7 +28,7 @@ import asyncio
 import contextlib
 import logging
 import random
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 from urllib.parse import quote
@@ -36,6 +37,7 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 
 from inputlayer._protocol import (
+    GROUPS_PROTOCOL_VERSION,
     PARAMS_PROTOCOL_VERSION,
     AuthenticatedResponse,
     AuthenticateMessage,
@@ -45,20 +47,34 @@ from inputlayer._protocol import (
     ErrorResponse,
     ExecuteMessage,
     LoginMessage,
+    NamedQuery,
+    NamedResult,
+    NamedResultHeader,
     NoticeResponse,
     NotificationResponse,
     PingMessage,
     PongResponse,
+    ReadMessage,
     ResultChunkResponse,
     ResultEndResponse,
     ResultResponse,
     ResultStartResponse,
     ServerMessage,
+    SnapshotChunkResponse,
+    SnapshotEndResponse,
+    SnapshotResponse,
+    SnapshotStartResponse,
+    Subscribed,
+    SubscribeMessage,
     SubscriptionDeltaChunkResponse,
     SubscriptionDeltaEndResponse,
     SubscriptionDeltaResponse,
     SubscriptionDeltaStartResponse,
     SubscriptionErrorResponse,
+    SubscriptionGroupDeltaChunkResponse,
+    SubscriptionGroupDeltaEndResponse,
+    SubscriptionGroupDeltaResponse,
+    SubscriptionGroupDeltaStartResponse,
     SubscriptionPush,
     SubscriptionResetResponse,
     deserialize_message,
@@ -91,9 +107,22 @@ _SUBSCRIPTION_PUSHES = (
     SubscriptionDeltaStartResponse,
     SubscriptionDeltaChunkResponse,
     SubscriptionDeltaEndResponse,
+    SubscriptionGroupDeltaResponse,
+    SubscriptionGroupDeltaStartResponse,
+    SubscriptionGroupDeltaChunkResponse,
+    SubscriptionGroupDeltaEndResponse,
     SubscriptionErrorResponse,
     SubscriptionResetResponse,
 )
+
+# Replies to ``read`` and ``subscribe``, and to ``execute``.
+_SNAPSHOT_REPLIES = (
+    SnapshotResponse,
+    SnapshotStartResponse,
+    SnapshotChunkResponse,
+    SnapshotEndResponse,
+)
+_RESULT_REPLIES = (ResultResponse, ResultStartResponse, ResultChunkResponse, ResultEndResponse)
 
 # The server's default ``http.rate_limit.ws_max_in_flight_requests`` is 16;
 # keeping one slot free lets a ``cancel`` through when every other is taken.
@@ -110,7 +139,8 @@ _RATE_LIMIT_WINDOW = 1.0
 _FINAL_NOTICES = frozenset({"credential_revoked", "credential_expired"})
 
 _State = Literal["idle", "connecting", "open", "reconnecting", "closed"]
-_Kind = Literal["execute", "ping", "cancel"]
+_Kind = Literal["execute", "read", "subscribe", "ping", "cancel"]
+_Request = ExecuteMessage | ReadMessage | SubscribeMessage | PingMessage | CancelMessage
 
 PushSink = Callable[[SubscriptionPush], None]
 ReconnectHook = Callable[["Connection"], Awaitable[None]]
@@ -151,6 +181,17 @@ class _Stream:
 
 
 @dataclass
+class _SnapshotStream:
+    """A streamed snapshot being assembled: each result's rows, in order."""
+
+    start: SnapshotStartResponse
+    rows: list[list[list[Any]]]
+    chunks: int = 0
+    # The result the last chunk held: results stream in order.
+    result: int = 0
+
+
+@dataclass
 class _Pending:
     """A request awaiting its reply."""
 
@@ -158,8 +199,12 @@ class _Pending:
     kind: _Kind
     future: asyncio.Future[Any]
     program: str | None = None
+    # Whether it could change server state if it ran (a write, or a
+    # subscribe that registers): unanswered, its outcome is unknown.
+    writes: bool = False
     holds_slot: bool = False
     stream: _Stream | None = None
+    snapshot: _SnapshotStream | None = None
     # The caller stopped waiting (local deadline or cancellation): its reply,
     # when it comes, is read and discarded.
     abandoned: bool = False
@@ -535,28 +580,108 @@ class Connection:
         A ``rate_limited`` refusal is retried once after the rate window, when
         the deadline leaves time for it.
         """
+        params = params or None
+        result: ResultResponse = await self._request(
+            "execute",
+            lambda id, timeout_ms: ExecuteMessage(
+                program=program, id=id, timeout_ms=timeout_ms, params=params
+            ),
+            label=program,
+            writes=_may_write(program),
+            timeout=timeout,
+            requires=None if params is None else (PARAMS_PROTOCOL_VERSION, "parameters"),
+        )
+        return result
+
+    async def read(
+        self, queries: Sequence[NamedQuery], *, timeout: float | None = None
+    ) -> SnapshotResponse:
+        """Run *queries* (each one ``?`` query) on one snapshot of the bound
+        knowledge graph and await their results, all at one revision.
+
+        Persistent data only: session facts and rules are not visible. The
+        deadline and cancellation work as for ``execute`` and stop the whole
+        read, which fails as a whole.
+        """
+        named = tuple(queries)
+        reply: SnapshotResponse = await self._request(
+            "read",
+            lambda id, timeout_ms: ReadMessage(queries=named, id=id, timeout_ms=timeout_ms),
+            label=describe_queries(named),
+            writes=False,
+            timeout=timeout,
+            requires=(GROUPS_PROTOCOL_VERSION, "reads and subscription groups"),
+        )
+        return reply
+
+    async def subscribe(
+        self,
+        subscription: str,
+        queries: Sequence[NamedQuery],
+        *,
+        timeout: float | None = None,
+    ) -> SnapshotResponse:
+        """Open the subscription group *subscription* and await its snapshot.
+
+        Register its route first (``add_route``): the reader adopts the
+        reply's generation before it reads the next frame. The server takes
+        no deadline for a ``subscribe``; past the local one the SDK sends
+        ``cancel`` and, with no reply, raises ``OutcomeUnknownError`` (the
+        group may be registered).
+        """
+        named = tuple(queries)
+        reply: SnapshotResponse = await self._request(
+            "subscribe",
+            lambda id, _: SubscribeMessage(subscription=subscription, queries=named, id=id),
+            label=describe_queries(named),
+            writes=True,
+            timeout=timeout,
+            requires=(GROUPS_PROTOCOL_VERSION, "reads and subscription groups"),
+        )
+        return reply
+
+    async def _request(
+        self,
+        kind: _Kind,
+        message: Callable[[str, int | None], _Request],
+        *,
+        label: str,
+        writes: bool,
+        timeout: float | None,
+        requires: tuple[int, str] | None = None,
+    ) -> Any:
+        """Send ``message(id, timeout_ms)`` under one deadline and await its
+        reply, retrying a ``rate_limited`` refusal once (see ``execute``).
+        ``requires`` is the engine protocol version the request needs and
+        what needs it."""
         if timeout is None:
             timeout = self._default_timeout
         deadline = None if timeout is None else asyncio.get_running_loop().time() + timeout
-        params = params or None
         try:
-            return await self._execute_once(program, deadline, params)
+            return await self._request_once(kind, message, label, writes, deadline, requires)
         except RateLimited:
             remaining = self._remaining(deadline)
             if remaining is not None and remaining <= _RATE_LIMIT_WINDOW:
                 raise
             await asyncio.sleep(_RATE_LIMIT_WINDOW)
-            return await self._execute_once(program, deadline, params)
+            return await self._request_once(kind, message, label, writes, deadline, requires)
 
-    async def _execute_once(
-        self, program: str, deadline: float | None, params: dict[str, Any] | None
-    ) -> ResultResponse:
-        await self._ensure_open(deadline, program)
-        if params is not None and (self._protocol_version or 0) < PARAMS_PROTOCOL_VERSION:
-            # An older engine ignores params and fails on the `$name` references.
+    async def _request_once(
+        self,
+        kind: _Kind,
+        message: Callable[[str, int | None], _Request],
+        label: str,
+        writes: bool,
+        deadline: float | None,
+        requires: tuple[int, str] | None,
+    ) -> Any:
+        await self._ensure_open(deadline, label)
+        if requires is not None and (self._protocol_version or 0) < requires[0]:
+            # An older engine would refuse the frame or misread it.
+            version, what = requires
             raise ConnectionError(
-                f"The engine speaks /ws protocol {self._protocol_version}; parameters need "
-                f"version {PARAMS_PROTOCOL_VERSION}. Upgrade the engine."
+                f"The engine speaks /ws protocol {self._protocol_version}; {what} need "
+                f"version {version}. Upgrade the engine."
             )
         slots, _, _ = self._primitives()
         try:
@@ -564,16 +689,13 @@ class Connection:
         except asyncio.TimeoutError:
             raise DeadlineExceeded(
                 "No request slot freed before the deadline; nothing was sent",
-                query=program,
+                query=label,
             ) from None
-        pending = self._register("execute", program=program, holds_slot=True)
+        pending = self._register(kind, program=label, writes=writes, holds_slot=True)
         remaining = self._remaining(deadline)
         timeout_ms = None if remaining is None else max(1, int(remaining * 1000))
-        await self._send(
-            ExecuteMessage(program=program, id=pending.id, timeout_ms=timeout_ms, params=params)
-        )
-        result: ResultResponse = await self._await_reply(pending, deadline)
-        return result
+        await self._send(message(pending.id, timeout_ms))
+        return await self._await_reply(pending, deadline)
 
     async def ping(self) -> None:
         """Send an application-level ping and await its ``pong``."""
@@ -628,6 +750,7 @@ class Connection:
         kind: _Kind,
         *,
         program: str | None = None,
+        writes: bool = False,
         holds_slot: bool = False,
         target: str | None = None,
     ) -> _Pending:
@@ -636,13 +759,14 @@ class Connection:
             kind=kind,
             future=asyncio.get_running_loop().create_future(),
             program=program,
+            writes=writes,
             holds_slot=holds_slot,
             target=target,
         )
         self._pending[pending.id] = pending
         return pending
 
-    async def _send(self, msg: ExecuteMessage | PingMessage | CancelMessage) -> None:
+    async def _send(self, msg: _Request) -> None:
         ws = self._ws
         if ws is None:
             self._fail_unsent(msg)
@@ -656,7 +780,7 @@ class Connection:
             return
         self._loop_last_send = asyncio.get_running_loop().time()
 
-    def _fail_unsent(self, msg: ExecuteMessage | PingMessage | CancelMessage) -> None:
+    def _fail_unsent(self, msg: _Request) -> None:
         pending = self._pending.get(msg.id or "")
         if pending is not None:
             self._finish(
@@ -717,7 +841,12 @@ class Connection:
         if pending.future.done():
             return pending.future.result()
         pending.abandoned = True
-        if not stopped and pending.program is not None and _may_write(pending.program):
+        if not stopped and pending.writes:
+            if pending.kind == "subscribe":
+                raise OutcomeUnknownError(
+                    "No reply to the subscribe before the deadline; the subscription "
+                    "may be registered"
+                )
             raise OutcomeUnknownError(
                 "No reply before the deadline and no confirmation that the cancel "
                 "stopped it; the write may have committed: read back before retrying"
@@ -886,6 +1015,11 @@ class Connection:
             self._finish(pending, error=e)
 
     def _apply_reply(self, pending: _Pending, frame: ServerMessage) -> None:
+        snapshot_reply = isinstance(frame, _SNAPSHOT_REPLIES)
+        if snapshot_reply != (pending.kind in ("read", "subscribe")) and (
+            snapshot_reply or isinstance(frame, _RESULT_REPLIES)
+        ):
+            raise InternalError(f"Unexpected reply to {pending.kind}: {frame!r}")
         if isinstance(frame, ResultResponse):
             self._finish(pending, result=self._accept(frame))
         elif isinstance(frame, ResultStartResponse):
@@ -906,6 +1040,19 @@ class Connection:
                 stream.provenance.extend(frame.row_provenance)
         elif isinstance(frame, ResultEndResponse):
             self._finish(pending, result=self._accept(self._assemble(pending, frame)))
+        elif isinstance(frame, SnapshotResponse):
+            self._adopt(frame.subscribed)
+            self._finish(pending, result=frame)
+        elif isinstance(frame, SnapshotStartResponse):
+            if pending.snapshot is not None:
+                raise InternalError("A second snapshot_start arrived inside a streamed snapshot")
+            pending.snapshot = _SnapshotStream(start=frame, rows=[[] for _ in frame.results])
+        elif isinstance(frame, SnapshotChunkResponse):
+            self._take_snapshot_chunk(pending, frame)
+        elif isinstance(frame, SnapshotEndResponse):
+            snapshot = self._assemble_snapshot(pending, frame)
+            self._adopt(snapshot.subscribed)
+            self._finish(pending, result=snapshot)
         elif isinstance(frame, ErrorResponse):
             self._finish(pending, error=_query_error(frame))
         elif isinstance(frame, (PongResponse, CancelAckResponse)):
@@ -940,18 +1087,82 @@ class Connection:
             id=start.id,
         )
 
+    def _take_snapshot_chunk(self, pending: _Pending, chunk: SnapshotChunkResponse) -> None:
+        stream = pending.snapshot
+        if stream is None:
+            raise InternalError("snapshot_chunk arrived without a snapshot_start")
+        if chunk.chunk_index != stream.chunks:
+            raise InternalError(
+                f"Streamed snapshot chunk {chunk.chunk_index} arrived, expected {stream.chunks}"
+            )
+        headers = stream.start.results
+        if not stream.result <= chunk.result < len(headers):
+            raise InternalError(
+                f"Streamed snapshot chunk {chunk.chunk_index} holds result {chunk.result}, "
+                f"after result {stream.result} of {len(headers)}"
+            )
+        # A result is complete before the next one's rows begin.
+        for i in range(stream.result, chunk.result):
+            _check_result_rows(headers[i], len(stream.rows[i]))
+        rows = stream.rows[chunk.result]
+        if not chunk.rows or len(rows) + len(chunk.rows) > headers[chunk.result].row_count:
+            raise InternalError(
+                f"Streamed snapshot chunk {chunk.chunk_index} holds {len(chunk.rows)} row(s) "
+                f"for result {chunk.result}, which announces {headers[chunk.result].row_count} "
+                f"and has {len(rows)}"
+            )
+        stream.chunks += 1
+        stream.result = chunk.result
+        rows.extend(chunk.rows)
+
+    def _assemble_snapshot(self, pending: _Pending, end: SnapshotEndResponse) -> SnapshotResponse:
+        stream = pending.snapshot
+        if stream is None:
+            raise InternalError("snapshot_end arrived without a snapshot_start")
+        if end.chunk_count != stream.chunks:
+            raise InternalError(
+                f"Incomplete streamed snapshot: {stream.chunks} chunk(s) arrived, "
+                f"end announces {end.chunk_count}"
+            )
+        start = stream.start
+        for header, rows in zip(start.results, stream.rows, strict=True):
+            _check_result_rows(header, len(rows))
+        return SnapshotResponse(
+            knowledge_graph=start.knowledge_graph,
+            revision=start.revision,
+            results=[
+                NamedResult(
+                    name=header.name,
+                    columns=header.columns,
+                    rows=rows,
+                    total_count=header.total_count,
+                    truncated=header.truncated,
+                )
+                for header, rows in zip(start.results, stream.rows, strict=True)
+            ],
+            execution_time_ms=start.execution_time_ms,
+            subscribed=start.subscribed,
+            id=start.id,
+        )
+
+    def _adopt(self, subscribed: Subscribed | None) -> None:
+        """Give a subscription's route the generation its reply names, and
+        deliver the pushes held until then. Runs in the reader, in reply order."""
+        if subscribed is None:
+            return
+        route = self._routes.get(subscribed.subscription)
+        if route is not None:
+            route.generation = subscribed.generation
+            early, route.early = route.early, []
+            for frame in early:
+                self._push_to(route, frame)
+
     def _accept(self, result: ResultResponse) -> ResultResponse:
         """Track a KG switch and a new subscription generation, then raise if
         any statement failed. Runs in the reader, in reply order."""
         if result.switched_kg:
             self._current_kg = result.switched_kg
-        if result.subscribed is not None:
-            route = self._routes.get(result.subscribed.subscription)
-            if route is not None:
-                route.generation = result.subscribed.generation
-                early, route.early = route.early, []
-                for frame in early:
-                    self._push_to(route, frame)
+        self._adopt(result.subscribed)
         for code, error_type in (
             ("outcome_unknown", OutcomeUnknownError),
             ("store_read_only", StoreReadOnlyError),
@@ -1017,11 +1228,8 @@ class Connection:
             self._keepalive_task.cancel()
             self._keepalive_task = None
         for pending in list(self._pending.values()):
-            committed = (
-                pending.kind == "execute"
-                and pending.program is not None
-                and _may_write(pending.program)
-            )
+            # A subscribe's registration ends with the connection.
+            committed = pending.kind == "execute" and pending.writes
             self._finish(
                 pending,
                 error=ConnectionLost(
@@ -1107,6 +1315,20 @@ class Connection:
                 )
             return
         self._give_up(code)
+
+
+def describe_queries(queries: Sequence[NamedQuery]) -> str:
+    """The queries of a ``read`` or ``subscribe``, one ``name: query`` per line,
+    for error messages."""
+    return "\n".join(f"{q.name}: {q.query}" for q in queries)
+
+
+def _check_result_rows(header: NamedResultHeader, received: int) -> None:
+    if received != header.row_count:
+        raise InternalError(
+            f"Incomplete streamed snapshot: result {header.name!r} announces "
+            f"{header.row_count} row(s), {received} arrived"
+        )
 
 
 def _query_error(response: ErrorResponse) -> QueryError:

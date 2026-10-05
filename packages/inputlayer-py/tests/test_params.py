@@ -14,7 +14,7 @@ import pytest
 
 from inputlayer import CompileError, KnowledgeGraph, Relation
 from inputlayer._literal import collect_params, encode, literal, params_of
-from inputlayer._protocol import ExecuteMessage, ResultResponse
+from inputlayer._protocol import ExecuteMessage, NamedQuery, ResultResponse
 from inputlayer.compiler import compile_insert
 from inputlayer.connection import Connection
 from inputlayer.exceptions import ConnectionError
@@ -194,5 +194,19 @@ class TestWire:
         conn._protocol_version = 3
         with pytest.raises(ConnectionError, match="protocol 3; parameters need version 4"):
             await conn.execute("+r($p0)", params={"p0": 1})
+        assert wire.sent == []
+        await conn.close()
+
+    async def test_reads_and_groups_need_protocol_5(self) -> None:
+        wire = ScriptedWire()
+        conn = attach(Connection("ws://unused", api_key="k"), wire)
+        conn._protocol_version = 4
+        queries = [NamedQuery(name="a", query="?a(X)")]
+        with pytest.raises(
+            ConnectionError, match="protocol 4; reads and subscription groups need version 5"
+        ):
+            await conn.read(queries)
+        with pytest.raises(ConnectionError, match="need version 5"):
+            await conn.subscribe("g", queries)
         assert wire.sent == []
         await conn.close()

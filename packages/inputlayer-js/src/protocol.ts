@@ -1,6 +1,6 @@
 /**
  * WebSocket wire protocol: message serialization and deserialization.
- * Matches the AsyncAPI spec at docs/spec/asyncapi.yaml (protocol version 3,
+ * Matches the AsyncAPI spec at docs/spec/asyncapi.yaml (protocol version 5,
  * defined by the `inputlayer-ws-protocol` crate).
  *
  * Any request may carry an `id`; every reply to it echoes it. Pushes
@@ -9,10 +9,13 @@
  */
 
 /** The `/ws` protocol version this SDK speaks (`authenticated.protocol_version`). */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /** The first protocol version whose `execute` takes `params`. */
 export const PARAMS_PROTOCOL_VERSION = 4;
+
+/** The first protocol version with `read` and `subscribe` (subscription groups). */
+export const GROUPS_PROTOCOL_VERSION = 5;
 
 // ── Client -> Server messages ───────────────────────────────────────
 
@@ -60,6 +63,38 @@ export interface ExecuteMessage {
   timeout_ms?: number;
 }
 
+/** One query of a `read` or `subscribe`, and the name its result goes by (unique within the request). */
+export interface NamedQuery {
+  name: string;
+  /** One `?` query. */
+  query: string;
+}
+
+/**
+ * Run several queries on one pinned snapshot of the knowledge graph, so
+ * every result is exact at one revision; answered by a `snapshot`. Reads
+ * persistent data only, as a subscription does. `timeout_ms` and `cancel`
+ * stop the whole read; it fails as a whole.
+ */
+export interface ReadMessage {
+  type: 'read';
+  id?: string;
+  queries: NamedQuery[];
+  timeout_ms?: number;
+}
+
+/**
+ * Subscribe to a group of queries kept current together; answered by a
+ * `snapshot` naming the subscription, then pushed
+ * `subscription_group_delta`s. Ended by `.unsubscribe <subscription>`.
+ */
+export interface SubscribeMessage {
+  type: 'subscribe';
+  id?: string;
+  subscription: string;
+  queries: NamedQuery[];
+}
+
 /** Cancel the unanswered request `target`; answered by `cancel_ack` after the target's own reply. */
 export interface CancelMessage {
   type: 'cancel';
@@ -76,6 +111,8 @@ export type ClientMessage =
   | LoginMessage
   | AuthenticateMessage
   | ExecuteMessage
+  | ReadMessage
+  | SubscribeMessage
   | CancelMessage
   | PingMessage;
 
@@ -147,7 +184,7 @@ export interface StatementError {
   message: string;
 }
 
-/** The subscription a `.subscribe` registered; pushes for it carry this generation. */
+/** The subscription a `.subscribe` or `subscribe` registered; pushes for it carry this generation. */
 export interface Subscribed {
   subscription: string;
   generation: number;
@@ -216,6 +253,78 @@ export interface ResultEndResponse {
   type: 'result_end';
   id?: string;
   row_count: number;
+  chunk_count: number;
+}
+
+/** One query's result in a `snapshot`. */
+export interface NamedResult {
+  name: string;
+  columns: string[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rows: any[][];
+  /** Rows before the result cap. */
+  total_count: number;
+  /** Whether the result cap cut the rows; never set in a subscription group's snapshot. */
+  truncated: boolean;
+}
+
+/**
+ * Results of several queries, all exact at `revision`, one per query in
+ * request order: the reply to `read`, and to `subscribe` (then with
+ * `subscribed`).
+ */
+export interface SnapshotResponse {
+  type: 'snapshot';
+  id?: string;
+  knowledge_graph: string;
+  revision: number;
+  results: NamedResult[];
+  execution_time_ms: number;
+  subscribed?: Subscribed;
+}
+
+/** One query's result in a `snapshot_start`: `NamedResult` without its rows. */
+export interface NamedResultHeader {
+  name: string;
+  columns: string[];
+  /** Rows the result's chunks carry, in total. */
+  row_count: number;
+  total_count: number;
+  truncated: boolean;
+}
+
+/**
+ * Header of a snapshot streamed in chunks; complete only at its
+ * `snapshot_end` (an `error` for the same request before then discards it).
+ */
+export interface SnapshotStartResponse {
+  type: 'snapshot_start';
+  id?: string;
+  knowledge_graph: string;
+  revision: number;
+  results: NamedResultHeader[];
+  execution_time_ms: number;
+  subscribed?: Subscribed;
+}
+
+/**
+ * Rows of result `result` (its index in the request) of a streamed snapshot.
+ * `chunk_index` counts from 0 across all results; results stream in order,
+ * and a result without rows has no chunk.
+ */
+export interface SnapshotChunkResponse {
+  type: 'snapshot_chunk';
+  id?: string;
+  result: number;
+  chunk_index: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rows: any[][];
+}
+
+/** End of a streamed snapshot: the chunks it had. */
+export interface SnapshotEndResponse {
+  type: 'snapshot_end';
+  id?: string;
   chunk_count: number;
 }
 
@@ -321,6 +430,80 @@ export interface SubscriptionResetResponse {
   message: string;
 }
 
+/** One member of a `subscription_group_delta`, in the group's order. */
+export interface GroupMemberDelta {
+  name: string;
+  /** Whether the member's result did not change: `inserted` and `retracted` are then empty. */
+  unchanged: boolean;
+  columns: string[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  inserted: any[][];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  retracted: any[][];
+}
+
+/**
+ * The results of a subscription group changed: every member listed, after
+ * which each is its query's exact answer at `revision`. The group's pushes
+ * share one gapless `seq`.
+ */
+export interface SubscriptionGroupDeltaResponse {
+  type: 'subscription_group_delta';
+  subscription: string;
+  generation: number;
+  knowledge_graph: string;
+  seq: number;
+  revision: number;
+  members: GroupMemberDelta[];
+}
+
+/** One member of a `subscription_group_delta_start`: `GroupMemberDelta` with row counts for rows. */
+export interface GroupMemberDeltaHeader {
+  name: string;
+  unchanged: boolean;
+  columns: string[];
+  inserted_count: number;
+  retracted_count: number;
+}
+
+/** Header of a group delta streamed in chunks; it applies only at its end. */
+export interface SubscriptionGroupDeltaStartResponse {
+  type: 'subscription_group_delta_start';
+  subscription: string;
+  generation: number;
+  knowledge_graph: string;
+  seq: number;
+  revision: number;
+  members: GroupMemberDeltaHeader[];
+}
+
+/**
+ * Rows of member `member` (its index in the group) of a streamed group
+ * delta. `chunk_index` counts from 0 across all members; members stream in
+ * order.
+ */
+export interface SubscriptionGroupDeltaChunkResponse {
+  type: 'subscription_group_delta_chunk';
+  subscription: string;
+  generation: number;
+  seq: number;
+  chunk_index: number;
+  member: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  inserted: any[][];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  retracted: any[][];
+}
+
+/** End of a streamed group delta: the chunks it had; each member's must add up to its header counts. */
+export interface SubscriptionGroupDeltaEndResponse {
+  type: 'subscription_group_delta_end';
+  subscription: string;
+  generation: number;
+  seq: number;
+  chunk_count: number;
+}
+
 /** A standing query failed to re-evaluate; it stays registered. */
 export interface SubscriptionErrorResponse {
   type: 'subscription_error';
@@ -353,6 +536,10 @@ export type ServerMessage =
   | ResultStartResponse
   | ResultChunkResponse
   | ResultEndResponse
+  | SnapshotResponse
+  | SnapshotStartResponse
+  | SnapshotChunkResponse
+  | SnapshotEndResponse
   | PongResponse
   | CancelAckResponse
   | NoticeResponse
@@ -361,6 +548,10 @@ export type ServerMessage =
   | SubscriptionDeltaStartResponse
   | SubscriptionDeltaChunkResponse
   | SubscriptionDeltaEndResponse
+  | SubscriptionGroupDeltaResponse
+  | SubscriptionGroupDeltaStartResponse
+  | SubscriptionGroupDeltaChunkResponse
+  | SubscriptionGroupDeltaEndResponse
   | SubscriptionErrorResponse
   | SubscriptionResetResponse;
 
@@ -372,6 +563,10 @@ export type PushMessage =
   | SubscriptionDeltaStartResponse
   | SubscriptionDeltaChunkResponse
   | SubscriptionDeltaEndResponse
+  | SubscriptionGroupDeltaResponse
+  | SubscriptionGroupDeltaStartResponse
+  | SubscriptionGroupDeltaChunkResponse
+  | SubscriptionGroupDeltaEndResponse
   | SubscriptionErrorResponse
   | SubscriptionResetResponse;
 
@@ -385,6 +580,10 @@ const PUSH_TYPES: ReadonlySet<string> = new Set([
   'subscription_delta_start',
   'subscription_delta_chunk',
   'subscription_delta_end',
+  'subscription_group_delta',
+  'subscription_group_delta_start',
+  'subscription_group_delta_chunk',
+  'subscription_group_delta_end',
   'subscription_error',
   'subscription_reset',
 ]);
@@ -441,6 +640,18 @@ export function deserializeMessage(data: string): ServerMessage {
   if (type === 'result_end') {
     return obj as ResultEndResponse;
   }
+  if (type === 'snapshot') {
+    return obj as SnapshotResponse;
+  }
+  if (type === 'snapshot_start') {
+    return obj as SnapshotStartResponse;
+  }
+  if (type === 'snapshot_chunk') {
+    return obj as SnapshotChunkResponse;
+  }
+  if (type === 'snapshot_end') {
+    return obj as SnapshotEndResponse;
+  }
   if (type === 'pong') {
     return obj as PongResponse;
   }
@@ -461,6 +672,18 @@ export function deserializeMessage(data: string): ServerMessage {
   }
   if (type === 'subscription_delta_end') {
     return obj as SubscriptionDeltaEndResponse;
+  }
+  if (type === 'subscription_group_delta') {
+    return obj as SubscriptionGroupDeltaResponse;
+  }
+  if (type === 'subscription_group_delta_start') {
+    return obj as SubscriptionGroupDeltaStartResponse;
+  }
+  if (type === 'subscription_group_delta_chunk') {
+    return obj as SubscriptionGroupDeltaChunkResponse;
+  }
+  if (type === 'subscription_group_delta_end') {
+    return obj as SubscriptionGroupDeltaEndResponse;
   }
   if (type === 'subscription_error') {
     return obj as SubscriptionErrorResponse;

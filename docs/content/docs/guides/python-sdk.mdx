@@ -695,6 +695,25 @@ A standing query tracks the whole result of persistent rules, so `subscribe()` r
 
 `kg.watch()` yields the whole current result (`Live`: `rows`, `revision`, `verified`) each time it changes. `kg.on(Late, callback)` calls `callback` with every `Change` and returns a handle; `await handle.close()` stops it. On `InputLayerSync`, `kg.subscribe()` and `kg.watch()` are blocking iterators, and the `on()` callback runs on the client's background thread.
 
+### Several results at one revision
+
+Two subscriptions refresh independently, so an event of one can be ahead of the other. When an agent decides on several results together, read or subscribe to them together. `kg.read()` runs several queries on one snapshot, and `kg.subscribe_group()` keeps several queries current as one subscription. Both take a mapping from a name to a target (a relation, a column, a tuple or dict of `query()` arguments, or raw IQL):
+
+```python
+snap = await kg.read({"orders": Order, "eta": Eta})
+print(snap.revision, snap.results["orders"], snap.truncated)
+
+async for change in kg.subscribe_group({"orders": Order, "eta": Eta}):
+    for name, member in change.members.items():
+        if not member.unchanged:
+            apply(name, member.retracted, member.inserted)
+```
+
+- Every result of a read is its query's exact answer at `snap.revision`, whatever commits meanwhile. After every verified group event (`snapshot`, `delta`, `resync`), every member is its query's exact answer at `change.revision`: a program that changes two members shows up in both in the same event.
+- A `delta` lists every member, `unchanged` when its rows did not move; a refresh that changes no member delivers nothing. `unverified` and `resync` cover the whole group.
+- Reads and groups see persistent data only and refuse a target that is not one `?` query, with `SubscriptionRejected`. A read keeps `order_by`, `limit` and `offset` and names the results a limit or the result cap cut in `snap.truncated`; a group tracks whole results. Commits coalesce: a row that appears and disappears between two refreshes is never seen.
+- On `InputLayerSync`, `kg.read()` blocks and `kg.subscribe_group()` is a blocking iterator. See [Snapshot Reads](/docs/guides/websocket-api#snapshot-reads) and [Subscription Groups](/docs/guides/websocket-api#subscription-groups) for the wire protocol.
+
 ## Notifications
 
 Subscribe to live events as data changes in the knowledge graph. This is useful for event-driven pipelines, dashboards, or audit logs. To be told when a rule-derived answer changes, use [subscriptions](#subscriptions).

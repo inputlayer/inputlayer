@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { serializeMessage, deserializeMessage, isPush } from '../src/protocol';
+import { PROTOCOL_VERSION, serializeMessage, deserializeMessage, isPush } from '../src/protocol';
 
 describe('serializeMessage', () => {
   it('serializes login message', () => {
@@ -194,9 +194,44 @@ describe('request ids and pushes', () => {
       '{"type":"subscription_delta_end","subscription":"s","generation":2,"seq":2,"chunk_count":1,"inserted_count":1,"retracted_count":0}',
       '{"type":"subscription_reset","subscription":"s","generation":2,"message":"gone"}',
       '{"type":"kg_change","knowledge_graph":"kg","operation":"created","timestamp_ms":1,"seq":1}',
+      '{"type":"subscription_group_delta","subscription":"g","generation":3,"knowledge_graph":"kg","seq":1,"revision":7,"members":[{"name":"a","unchanged":true,"columns":["x"],"inserted":[],"retracted":[]}]}',
+      '{"type":"subscription_group_delta_start","subscription":"g","generation":3,"knowledge_graph":"kg","seq":2,"revision":8,"members":[{"name":"a","unchanged":false,"columns":["x"],"inserted_count":1,"retracted_count":0}]}',
+      '{"type":"subscription_group_delta_chunk","subscription":"g","generation":3,"seq":2,"chunk_index":0,"member":0,"inserted":[[1]],"retracted":[]}',
+      '{"type":"subscription_group_delta_end","subscription":"g","generation":3,"seq":2,"chunk_count":1}',
     ];
     for (const frame of frames) {
       expect(isPush(deserializeMessage(frame))).toBe(true);
+    }
+  });
+});
+
+describe('snapshot reads and subscription groups (protocol 5)', () => {
+  it('speaks protocol version 5', () => {
+    expect(PROTOCOL_VERSION).toBe(5);
+  });
+
+  it('serializes read and subscribe requests', () => {
+    const queries = [{ name: 'orders', query: '?order(S, O)' }, { name: 'eta', query: '?eta(O, T)' }];
+    expect(JSON.parse(serializeMessage({ type: 'read', id: 'r1', queries, timeout_ms: 500 }))).toEqual({
+      type: 'read', id: 'r1', queries, timeout_ms: 500,
+    });
+    expect(JSON.parse(serializeMessage({ type: 'subscribe', id: 's1', subscription: 'win', queries }))).toEqual({
+      type: 'subscribe', id: 's1', subscription: 'win', queries,
+    });
+  });
+
+  it('deserializes snapshot replies, which are never pushes', () => {
+    const frames = [
+      '{"type":"snapshot","id":"s1","knowledge_graph":"default","revision":5,"results":[{"name":"orders","columns":["S","O"],"rows":[[1,2]],"total_count":1,"truncated":false}],"execution_time_ms":2,"subscribed":{"subscription":"win","generation":1,"revision":5}}',
+      '{"type":"snapshot_start","id":"s1","knowledge_graph":"default","revision":5,"results":[{"name":"orders","columns":["S","O"],"row_count":3000,"total_count":3000,"truncated":false}],"execution_time_ms":2}',
+      '{"type":"snapshot_chunk","id":"s1","result":0,"chunk_index":0,"rows":[[1,2]]}',
+      '{"type":"snapshot_end","id":"s1","chunk_count":1}',
+    ];
+    for (const frame of frames) {
+      const msg = deserializeMessage(frame);
+      expect(msg.type).toBe(JSON.parse(frame).type);
+      expect(isPush(msg)).toBe(false);
+      expect((msg as { id?: string }).id).toBe('s1');
     }
   });
 });

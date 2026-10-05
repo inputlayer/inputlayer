@@ -56,12 +56,12 @@ On success:
   "knowledge_graph": "default",
   "version": "0.1.0",
   "role": "admin",
-  "protocol_version": 4,
+  "protocol_version": 5,
   "stream_epoch": "3f9c2a7e01b4d865"
 }
 ```
 
-`protocol_version` is the version of this protocol the server speaks (currently 4; version 4 added [parameters](#parameters)). `stream_epoch` identifies this run of the engine: notification `seq` numbers and knowledge graph revisions belong to it, and a restarted engine has a new one (see [Reconnection](#reconnection)).
+`protocol_version` is the version of this protocol the server speaks (currently 5; version 4 added [parameters](#parameters), version 5 [snapshot reads](#snapshot-reads) and [subscription groups](#subscription-groups)). `stream_epoch` identifies this run of the engine: notification `seq` numbers and knowledge graph revisions belong to it, and a restarted engine has a new one (see [Reconnection](#reconnection)).
 
 On failure:
 
@@ -138,7 +138,7 @@ Any request (`login`, `authenticate`, `execute`, `ping`) may carry an `id`, a no
 {"type": "execute", "id": "42", "program": "?edge(X, Y)"}
 ```
 
-Every frame answering it echoes the `id`: `authenticated`, `auth_error`, `result`, `result_start`, `result_chunk`, `result_end`, `error` and `pong`. A request without an `id` gets replies without one. An `id` must be unique among your requests still awaiting a reply; it can be reused once answered. A request reusing an `id` that is still awaiting its reply gets an `invalid_request` error and does not run.
+Every frame answering it echoes the `id`: `authenticated`, `auth_error`, `result`, `result_start`, `result_chunk`, `result_end`, `snapshot`, `snapshot_start`, `snapshot_chunk`, `snapshot_end`, `error`, `cancel_ack` and `pong`. A request without an `id` gets replies without one. An `id` must be unique among your requests still awaiting a reply; it can be reused once answered. A request reusing an `id` that is still awaiting its reply gets an `invalid_request` error and does not run.
 
 Frames you did not ask for never carry an `id` and have their own types, so they cannot be read as a reply: [notifications](#notifications), [standing-query pushes](#standing-queries) and [notices](#notices).
 
@@ -149,15 +149,15 @@ A request that is not a valid frame (bad JSON, unknown `type`, a missing field, 
 A client may send several requests without waiting for each reply:
 
 - **Replies come back in request order**, one reply (or one streamed `result_start` ... `result_end` sequence) per request, even when a later request finishes first.
-- **Queries overlap.** A program made only of queries (`?...`) runs concurrently with the connection's other queries.
-- **Everything else runs alone, in order**: inserts, deletes, rules, session rules and facts, meta commands such as `.kg use`, `.session clear`, `.subscribe` and `.unsubscribe`. Such a request starts only after every earlier request has replied, and no later request starts before it replies. A query sent after `.kg use other` therefore always reads `other`, and an insert sent after it always writes there.
+- **Queries overlap.** A program made only of queries (`?...`), and a [`read`](#snapshot-reads), runs concurrently with the connection's other queries.
+- **Everything else runs alone, in order**: inserts, deletes, rules, session rules and facts, meta commands such as `.kg use`, `.session clear`, `.subscribe` and `.unsubscribe`, and the [`subscribe`](#subscription-groups) frame. Such a request starts only after every earlier request has replied, and no later request starts before it replies. A query sent after `.kg use other` therefore always reads `other`, and an insert sent after it always writes there.
 - **Pushes are not held up by requests.** Notifications and subscription deltas are delivered while the connection's own requests run, between replies (never inside a streamed result).
 - At most `http.rate_limit.ws_max_in_flight_requests` requests (default 16) are admitted and not yet answered; at that bound the server stops reading the connection until a reply goes out.
 - Closing the connection abandons its running queries and stops their computation; a running write finishes before the session is closed.
 
 ### Deadlines and Cancellation
 
-Every `execute` runs under **one deadline**, counted from when the server reads it: waiting behind earlier requests, waiting for a compute slot and computing all count against it. The deadline is `storage.performance.query_timeout_ms` (default 30 s), or the request's own `timeout_ms` when that is sooner:
+Every `execute` and `read` runs under **one deadline**, counted from when the server reads it: waiting behind earlier requests, waiting for a compute slot and computing all count against it. The deadline is `storage.performance.query_timeout_ms` (default 30 s), or the request's own `timeout_ms` when that is sooner:
 
 ```json
 {"type": "execute", "id": "q1", "program": "?path(X, Y)", "timeout_ms": 2000}
@@ -557,9 +557,90 @@ Subscriptions are also removed when the connection closes and when it switches k
 ### Scope and limits
 
 - Subscriptions see **persistent data only**: session facts and session rules are excluded, as with `.why`.
-- At most `http.rate_limit.ws_max_subscriptions` per connection (default 64, 0 = unlimited).
+- At most `http.rate_limit.ws_max_subscriptions` per connection (default 64, 0 = unlimited); a [subscription group](#subscription-groups) counts once per query.
 - No frame exceeds the 16 MiB message limit: large snapshots and deltas are streamed, and a change that still cannot be delivered (a single row over the limit) resets the subscription.
 - The server writes one frame at a time. A client that leaves a frame unread for `http.ws_send_timeout_ms` (default 30 seconds) is disconnected, so a client that stops reading holds no server resources and never delays other connections.
+
+## Snapshot Reads
+
+A caller that renders one state from several queries (an agent's context window, a dashboard) needs them all at the **same revision**: separate queries, or separate subscriptions, can each see a different set of commits. `read` answers several named queries from one pinned snapshot of the connection's knowledge graph:
+
+```json
+{"type": "read", "id": "w1", "timeout_ms": 500, "queries": [
+  {"name": "orders", "query": "?order(Session, Order)"},
+  {"name": "eta", "query": "?eta(Order, Day)"}
+]}
+```
+
+```json
+{"type": "snapshot", "id": "w1", "knowledge_graph": "default", "revision": 17,
+ "results": [
+   {"name": "orders", "columns": ["Session", "Order"], "rows": [["s1", 1042]], "total_count": 1, "truncated": false},
+   {"name": "eta", "columns": ["Order", "Day"], "rows": [[1042, "2026-10-05"]], "total_count": 1, "truncated": false}
+ ],
+ "execution_time_ms": 2}
+```
+
+- Every result is its query's exact answer at `revision`, whatever commits while the read runs. `results` is in request order.
+- A read sees **persistent data only**, like a subscription: session facts and session rules are not visible, so a `read` and a `subscribe` of the same queries agree at the same revision.
+- Each query is one `?` query; it may use `limit`/`offset` and sort annotations, and a result cut at `storage.performance.max_result_rows` says so with `truncated`. Names are required, non-empty and unique within the request.
+- The queries run concurrently, under the request's one [deadline](#deadlines-and-cancellation); a `cancel` or the deadline stops all of them. A read fails as a whole with one `error` that names the failing query (`Query 'eta': ...`).
+- A snapshot whose frame would exceed 1 MiB is streamed as `snapshot_start` (each result's name, columns and `row_count`), `snapshot_chunk`s and `snapshot_end`. Each chunk holds rows of one result, named by its index in `result`; `chunk_index` counts from 0 across all results; results stream in order and a result without rows has no chunks. The snapshot is complete only at `snapshot_end`, once every result's chunks add up to its `row_count` and `chunk_count` matches; an `error` with the request's `id` before then means discard what arrived.
+
+```json
+{"type": "snapshot_start", "id": "w1", "knowledge_graph": "default", "revision": 17, "execution_time_ms": 40,
+ "results": [{"name": "orders", "columns": ["Session", "Order"], "row_count": 3000, "total_count": 3000, "truncated": false}]}
+{"type": "snapshot_chunk", "id": "w1", "result": 0, "chunk_index": 0, "rows": [["s1", 1042], "..."]}
+{"type": "snapshot_end", "id": "w1", "chunk_count": 6}
+```
+
+## Subscription Groups
+
+A subscription group keeps several queries current **together**. An unchanged standing query pushes nothing, so with separate subscriptions a client cannot tell whether a quiet view is still current at the revision another view just reached. A group answers that: every push names one revision at which **all** members are exact.
+
+### Subscribe to a group
+
+```json
+{"type": "subscribe", "id": "s1", "subscription": "window", "queries": [
+  {"name": "orders", "query": "?order(Session, Order)"},
+  {"name": "eta", "query": "?eta(Order, Day)"}
+]}
+```
+
+The reply is a [`snapshot`](#snapshot-reads) of every member at one revision, with `subscribed`:
+
+```json
+{"type": "snapshot", "id": "s1", "knowledge_graph": "default", "revision": 17,
+ "results": [{"name": "orders", "...": "..."}, {"name": "eta", "...": "..."}],
+ "execution_time_ms": 3,
+ "subscribed": {"subscription": "window", "generation": 4, "revision": 17}}
+```
+
+The group's name follows the `.subscribe` id rules (1-128 characters from `[A-Za-z0-9_.:-]`) and shares the connection's subscription namespace with `.subscribe`; `generation` works the same way. Member queries follow the [standing query](#standing-queries) rules (no `limit`/`offset`; a member over `max_result_rows` fails the whole `subscribe`, and nothing is registered).
+
+### Group delta
+
+```json
+{"type": "subscription_group_delta", "subscription": "window", "generation": 4,
+ "knowledge_graph": "default", "seq": 1, "revision": 18,
+ "members": [
+   {"name": "orders", "unchanged": true, "columns": ["Session", "Order"], "inserted": [], "retracted": []},
+   {"name": "eta", "unchanged": false, "columns": ["Order", "Day"], "inserted": [[1042, "2026-10-06"]], "retracted": [[1042, "2026-10-05"]]}
+ ]}
+```
+
+- One push per refresh that changed **any** member, listing **every** member in the group's order; `unchanged` marks a member whose result did not change (its `inserted` and `retracted` are empty). After applying it, every member is its query's exact answer at `revision`. A commit that touches several members is one push.
+- A refresh that changes no member pushes nothing, as for a single subscription. Bursts of commits coalesce the same way: a row that appears and disappears between two refreshes is never seen.
+- `seq` starts at 1 per group and has no gaps; `revision` increases with every push.
+- Each refresh evaluates the members on one snapshot and re-runs only those whose inputs changed since their result's revision (a relation the member reads, or the persistent rules), so a commit that touches one member costs one evaluation. Identical groups (same queries, same order) on one knowledge graph share one evaluation across connections and users, with access checked per subscriber as for any subscription.
+- A large push is streamed as `subscription_group_delta_start` (each member's name, `unchanged`, columns, `inserted_count` and `retracted_count`), `subscription_group_delta_chunk`s and `subscription_group_delta_end` (`chunk_count`). Each chunk holds rows of one member, named by its index in `member`; `chunk_index` counts from 0 across all members; members stream in order. Apply the push only at its end, after checking the chunk order and every member's counts; a broken stream leaves the group's rows unknown: unsubscribe and subscribe again.
+
+### Errors, reset and unsubscribe
+
+- A refresh fails as a whole: one `subscription_error` for the group (a member's error names its query, for example `?eta(Order, Day): Subscription result exceeds ...`), and every member keeps its last delivered result; the next push is relative to it. A revoked reader gets a `subscription_error` too, as for a single subscription.
+- A push the server cannot deliver whole (a row over the 16 MiB message limit) ends the group with a `subscription_reset`.
+- `.unsubscribe <name>` ends a group; closing the connection or switching knowledge graph ends it too.
+- A group counts once per member query against `http.rate_limit.ws_max_subscriptions`.
 
 ## Keep-Alive
 

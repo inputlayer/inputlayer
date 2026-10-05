@@ -4,7 +4,13 @@
 //! After every committed persistent change that can affect it, the server
 //! pushes the rows that entered (`inserted`) and left (`retracted`) the result.
 //!
-//! Subscriptions to the same query on the same knowledge graph share one
+//! A subscription *group* (the `subscribe` frame) is several queries kept
+//! current together: one snapshot of all of them at one revision, then one
+//! push per refresh that changed any of them, after which every member is
+//! exact at the push's revision and the unchanged ones are marked. A plain
+//! subscription is a group of one, pushed in its own frame shape.
+//!
+//! Subscriptions to the same queries on the same knowledge graph share one
 //! *view*, whichever connection or user they belong to: one evaluation per
 //! change, one result in memory. A view's rows depend only on the knowledge
 //! graph and the query; who may see them is checked per subscriber, when it
@@ -27,6 +33,8 @@
 //! - [`reevaluate`] - today's strategy: re-run the query against a snapshot and
 //!   diff with the previous result. A differential-dataflow strategy can
 //!   replace it behind the same trait and protocol.
+//! - [`group`] - a subscription group's queries re-run together on one
+//!   snapshot, skipping those whose inputs the snapshot shows unchanged.
 //! - [`parameterized`] - views whose queries differ only in bound constants
 //!   share one evaluation of the query with the constants lifted to
 //!   parameters, each taking exactly its own rows.
@@ -40,6 +48,7 @@
 pub mod change;
 pub mod connection;
 pub mod dependencies;
+pub mod group;
 pub mod hub;
 pub mod parameterized;
 pub mod publication;
@@ -58,12 +67,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub use change::{change_of, changes_rules, ChangeSet};
 pub use connection::ConnectionSubscriptions;
 pub use dependencies::Dependencies;
+pub use group::GroupQuery;
 pub use hub::SubscriptionHub;
 pub use publication::Doorbell;
 pub use reevaluate::ReevaluatingQuery;
 pub use result_set::ResultSet;
-pub use standing_query::{Refresh, Row, StandingQuery};
-pub use subscriber::{Snapshot, Subscriber};
+pub use standing_query::{QueryRefresh, Refresh, Row, StandingQuery};
+pub use subscriber::{Snapshot, SnapshotResult, Subscriber};
 pub use views::{Attach, Completed, Dispatch, ViewKey, ViewRegistry};
 
 /// Server-wide subscription counters.

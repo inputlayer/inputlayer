@@ -6,8 +6,8 @@ any context: plain scripts, Jupyter notebooks, FastAPI, LangGraph, etc.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Iterator
-from typing import Any, TypeVar
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+from typing import Any, Generic, TypeVar
 
 from inputlayer._sync import run_sync
 from inputlayer.auth import AclEntry, ApiKeyInfo, UserInfo
@@ -33,13 +33,18 @@ from inputlayer.relation import Relation
 from inputlayer.result import ResultSet
 from inputlayer.subscription import (
     Change,
+    GroupChange,
+    GroupSubscription,
     Live,
+    ReadResult,
     Subscription,
     SubscriptionHandle,
     SubscriptionStats,
+    _Standing,
 )
 
 T = TypeVar("T")
+E = TypeVar("E")
 
 R = TypeVar("R", bound=Relation)
 
@@ -206,6 +211,16 @@ class KnowledgeGraphSync:
         ``close()`` ends it."""
         return SubscriptionSync(self._kg.subscribe(*select, **kwargs))
 
+    def subscribe_group(
+        self, members: Mapping[str, Any], **kwargs: Any
+    ) -> GroupSubscriptionSync:
+        """``KnowledgeGraph.subscribe_group`` as a blocking iterator of
+        ``GroupChange`` events, run like ``subscribe``."""
+        return GroupSubscriptionSync(self._kg.subscribe_group(members, **kwargs))
+
+    def read(self, queries: Mapping[str, Any], *, timeout: float | None = None) -> ReadResult:
+        return run_sync(self._kg.read(queries, timeout=timeout))
+
     def watch(self, *select: Any, **kwargs: Any) -> Iterator[Live[Any]]:
         """``KnowledgeGraph.watch`` as a blocking iterator of ``Live`` results."""
         levels = self._kg.watch(*select, **kwargs)
@@ -233,25 +248,21 @@ async def _next(iterator: AsyncIterator[T]) -> T:
     return await iterator.__anext__()
 
 
-class SubscriptionSync:
-    """A subscription read by blocking: ``for change in kg.subscribe(...)``."""
+class _StandingSync(Generic[E]):
+    """A subscription (or group) read by blocking."""
 
-    def __init__(self, sub: Subscription[Any]) -> None:
-        self._sub = sub
+    def __init__(self, sub: _Standing[E]) -> None:
+        self._standing = sub
 
     @property
     def id(self) -> str:
-        return self._sub.id
-
-    @property
-    def query(self) -> str:
-        return self._sub.query
+        return self._standing.id
 
     @property
     def stats(self) -> SubscriptionStats:
-        return self._sub.stats
+        return self._standing.stats
 
-    def __iter__(self) -> Iterator[Change[Any]]:
+    def __iter__(self) -> Iterator[E]:
         # A generator, so that leaving the loop closes the subscription.
         try:
             while True:
@@ -263,21 +274,48 @@ class SubscriptionSync:
         finally:
             self.close()
 
-    def next(self) -> Change[Any]:
+    def next(self) -> E:
         """The next event, blocking until it arrives."""
         try:
-            return run_sync(_next(self._sub))
+            return run_sync(_next(self._standing))
         except StopAsyncIteration:
             raise StopIteration from None
 
     def close(self) -> None:
-        run_sync(self._sub.close())
+        run_sync(self._standing.close())
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+
+class SubscriptionSync(_StandingSync[Change[Any]]):
+    """A subscription read by blocking: ``for change in kg.subscribe(...)``."""
+
+    def __init__(self, sub: Subscription[Any]) -> None:
+        super().__init__(sub)
+        self._sub = sub
+
+    @property
+    def query(self) -> str:
+        return self._sub.query
 
     def __enter__(self) -> SubscriptionSync:
         return self
 
-    def __exit__(self, *exc: Any) -> None:
-        self.close()
+
+class GroupSubscriptionSync(_StandingSync[GroupChange]):
+    """A subscription group read by blocking: ``for change in kg.subscribe_group(...)``."""
+
+    def __init__(self, sub: GroupSubscription) -> None:
+        super().__init__(sub)
+        self._sub = sub
+
+    @property
+    def queries(self) -> dict[str, str]:
+        return self._sub.queries
+
+    def __enter__(self) -> GroupSubscriptionSync:
+        return self
 
 
 class SubscriptionHandleSync:

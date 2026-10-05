@@ -113,7 +113,7 @@ impl SubscriptionAdapter {
             .map_err(|e| AdapterError::Unsupported(format!("not subscribable: {e}")))?;
         let key = ViewKey {
             knowledge_graph: KG.to_string(),
-            query: query.trim().to_string(),
+            queries: vec![query.trim().to_string()],
         };
         let first = self.doorbell();
         let Attach::Waiting(Some(dispatch)) =
@@ -132,6 +132,7 @@ impl SubscriptionAdapter {
         let initial = attachment
             .initial_rows
             .as_ref()
+            .and_then(|rows| rows.first())
             .map(|rows| Observation::from_rows(rows.iter().map(cells)));
         let eager = Subscriber::new("eager", 1, KG, first, &attachment);
 
@@ -143,8 +144,13 @@ impl SubscriptionAdapter {
                 "the second subscriber did not share the view".to_string(),
             ));
         };
-        let joined =
-            Observation::from_rows(shared.publication.result.sorted_rows().iter().map(cells));
+        let joined = Observation::from_rows(
+            shared.publication.results[0]
+                .rows
+                .sorted_rows()
+                .iter()
+                .map(cells),
+        );
         let lazy = Subscriber::new("lazy", 1, KG, second, &shared);
         let initial = initial.ok_or_else(|| AdapterError::Failed("no initial rows".to_string()))?;
         if initial != joined {
@@ -223,8 +229,14 @@ fn apply(assembled: &mut Assembled, push: SubscriptionPush, fault: Fault) {
         }
         SubscriptionPush::SubscriptionDeltaStart { .. }
         | SubscriptionPush::SubscriptionDeltaChunk { .. }
-        | SubscriptionPush::SubscriptionDeltaEnd { .. } => {
+        | SubscriptionPush::SubscriptionDeltaEnd { .. }
+        | SubscriptionPush::SubscriptionGroupDeltaStart { .. }
+        | SubscriptionPush::SubscriptionGroupDeltaChunk { .. }
+        | SubscriptionPush::SubscriptionGroupDeltaEnd { .. } => {
             unreachable!("streaming is the WebSocket's framing; subscribers push whole deltas")
+        }
+        SubscriptionPush::SubscriptionGroupDelta { .. } => {
+            unreachable!("plain subscribers push plain deltas")
         }
     }
 }

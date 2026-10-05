@@ -87,6 +87,8 @@ pub(super) async fn authenticate(
             ),
             Ok(
                 frame @ (ClientFrame::Execute { .. }
+                | ClientFrame::Read { .. }
+                | ClientFrame::Subscribe { .. }
                 | ClientFrame::Cancel { .. }
                 | ClientFrame::Ping { .. }),
             ) => {

@@ -1,7 +1,8 @@
 //! Shared views: one evaluation per distinct standing query, however many subscribers it has.
 //!
-//! A view is keyed by its knowledge graph and query text ([`ViewKey`]). Keys are compared in
-//! full: a hash collision never hands one query's rows to another.
+//! A view is keyed by its knowledge graph and query texts ([`ViewKey`]): one query for a plain
+//! subscription, several for a subscription group, whose results are evaluated and published
+//! together. Keys are compared in full: a hash collision never hands one query's rows to another.
 //!
 //! Each view is either *idle* (its [`StandingQuery`] is parked here) or *in flight* (handed
 //! out in a [`Dispatch`], back in a [`Completion`]): at most one evaluation per view. Changes
@@ -49,8 +50,8 @@ use publish::{advance, publish, start};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ViewKey {
     pub knowledge_graph: String,
-    /// The trimmed query text; spellings differ in column names, so in views.
-    pub query: String,
+    /// The trimmed query texts, in order; spellings differ in column names, so in views.
+    pub queries: Vec<String>,
 }
 
 /// Unique per registry; never reused.
@@ -61,8 +62,8 @@ pub type ViewId = u64;
 pub struct Attachment {
     pub cell: Arc<ViewCell>,
     pub publication: Arc<Publication>,
-    /// The snapshot's rows, sorted, when the view was created for it.
-    pub initial_rows: Option<Arc<Vec<Row>>>,
+    /// The snapshot's rows, sorted, one list per query, when the view was created for it.
+    pub initial_rows: Option<Arc<Vec<Vec<Row>>>>,
 }
 
 /// Result of [`ViewRegistry::attach`].
@@ -88,7 +89,7 @@ struct Live {
 }
 
 impl Live {
-    fn attachment(&self, initial_rows: Option<Arc<Vec<Row>>>) -> Attachment {
+    fn attachment(&self, initial_rows: Option<Arc<Vec<Vec<Row>>>>) -> Attachment {
         Attachment {
             cell: Arc::clone(&self.cell),
             publication: Arc::clone(&self.latest),
@@ -132,7 +133,7 @@ impl View {
     fn release_waiting(
         &mut self,
         failure: Option<String>,
-        initial_rows: Option<Arc<Vec<Row>>>,
+        initial_rows: Option<Arc<Vec<Vec<Row>>>>,
     ) -> Vec<(SubscriberId, Result<Attachment, String>)> {
         let answer = match (failure, &self.live) {
             (None, Some(live)) => Ok(live.attachment(initial_rows)),

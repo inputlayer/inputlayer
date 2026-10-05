@@ -251,7 +251,11 @@ mod rounds {
     }
 
     fn inserted(refresh: &Refresh) -> Vec<serde_json::Value> {
-        refresh.inserted.iter().map(|row| json!(row)).collect()
+        refresh.queries[0]
+            .inserted
+            .iter()
+            .map(|row| json!(row))
+            .collect()
     }
 
     /// Wait for `family`'s probe, if any, to be judged.

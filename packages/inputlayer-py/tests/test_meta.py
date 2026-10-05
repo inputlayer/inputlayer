@@ -78,7 +78,7 @@ class TestSessionCommands:
 
     async def test_list_rules_sends_session_and_parses_the_clauses(self, conn: AsyncMock) -> None:
         rules = await Session(conn).list_rules()
-        conn.execute.assert_awaited_once_with(".session")
+        conn.execute.assert_awaited_once_with(".session", timeout=None)
         assert rules == [
             "hop(X, Y) <- edge(X, Y)",
             "hop(X, Y) <- edge(Y, X)",

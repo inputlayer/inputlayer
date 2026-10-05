@@ -9,15 +9,18 @@
 //!
 //! A client may tag any request with an [`RequestId`]. Every frame that
 //! answers it — `authenticated`, `auth_error`, `result`, `result_start`,
-//! `result_chunk`, `result_end`, `error`, `pong` — echoes that `id`. A request
+//! `result_chunk`, `result_end`, `snapshot`, `snapshot_start`,
+//! `snapshot_chunk`, `snapshot_end`, `error`, `cancel_ack`, `pong` — echoes
+//! that `id`. A request
 //! without an `id` gets replies without one. Frames the client did not ask
 //! for never carry an `id` and have their own types, so they cannot be read as
 //! a reply (see [`FrameClass`]):
 //!
 //! - **pushes**: data changes (`persistent_update`, `rule_change`,
 //!   `kg_change`, `schema_change`) and standing-query results
-//!   (`subscription_delta`, `subscription_error`), which name their
-//!   subscription and its [generation](Subscribed::generation);
+//!   (`subscription_delta`, `subscription_group_delta`, `subscription_error`,
+//!   `subscription_reset`), which name their subscription and its
+//!   [generation](Subscribed::generation);
 //! - **notices**: connection events such as an idle timeout ([`NoticeCode`]).
 //!
 //! A request whose frame or `id` is malformed is answered by one `error` with
@@ -33,10 +36,20 @@
 //! graph revision they reach, above the snapshot's
 //! [`Subscribed::revision`]; subscriptions never outlive their connection.
 //!
+//! # Coherent reads
+//!
+//! A [`ClientFrame::Read`] answers several named queries from one snapshot,
+//! and a [`ClientFrame::Subscribe`] keeps several queries current as one
+//! subscription group: both reply with a [`ServerFrame::Snapshot`] whose
+//! results are all exact at its revision, and each later
+//! [`SubscriptionPush::SubscriptionGroupDelta`] leaves every member exact at
+//! its revision, marking the unchanged ones.
+//!
 //! # Deadlines and cancellation
 //!
-//! An `execute` runs under one deadline covering its queueing, admission and
-//! computation (`timeout_ms`, capped by the engine's query timeout). A
+//! An `execute` or `read` runs under one deadline covering its queueing,
+//! admission and computation (`timeout_ms`, capped by the engine's query
+//! timeout). A
 //! [`ClientFrame::Cancel`] names an unanswered request by its `id` and is
 //! answered by [`ServerFrame::CancelAck`]. A request stopped by either before
 //! it began committing applied nothing and fails with
@@ -58,9 +71,12 @@
 //!
 //! No frame exceeds the engine's message size limit. A result or a
 //! `.subscribe` snapshot too large for one frame is streamed as
-//! `result_start`, `result_chunk`s and `result_end`; a subscription delta as
-//! `subscription_delta_start`, `subscription_delta_chunk`s and
-//! `subscription_delta_end` (see [`SubscriptionPush`]). Each stream is one
+//! `result_start`, `result_chunk`s and `result_end`; a `snapshot` as
+//! `snapshot_start`, `snapshot_chunk`s and `snapshot_end`; a subscription
+//! delta as `subscription_delta_start`, `subscription_delta_chunk`s and
+//! `subscription_delta_end`, and a group delta likewise (see
+//! [`SubscriptionPush`]). A payload of several results streams each result's
+//! rows in chunks of their own, in order, each chunk naming its result. Each stream is one
 //! logical result or delta, complete only at its end frame, whose counts the
 //! chunks must add up to. What the server cannot deliver whole it reports
 //! instead: an `error` for a reply, a `subscription_reset` for a delta.
@@ -74,18 +90,19 @@ mod request_id;
 mod server;
 mod timing;
 
-pub use client::ClientFrame;
+pub use client::{ClientFrame, NamedQuery};
 pub use error::{ErrorCode, StatementError, ValidationError};
 pub use notice::NoticeCode;
 pub use params::{is_param_name, InvalidParamName, ParamValue, Params, MAX_PARAM_NAME_LEN};
-pub use push::{Notification, Row, SubscriptionPush};
+pub use push::{GroupMemberDelta, GroupMemberDeltaHeader, Notification, Row, SubscriptionPush};
 pub use request_id::{probe_request_id, InvalidRequestId, RequestId, MAX_REQUEST_ID_LEN};
 pub use server::{
-    CancelOutcome, FrameClass, ResultFrame, ResultStartFrame, ServerFrame, SessionMetadata,
-    StatementCounts, StatementKind, Subscribed,
+    CancelOutcome, FrameClass, NamedResult, NamedResultHeader, ResultFrame, ResultStartFrame,
+    ServerFrame, SessionMetadata, SnapshotFrame, SnapshotStartFrame, StatementCounts,
+    StatementKind, Subscribed,
 };
 pub use timing::{IrBuilderTiming, OptimizerTiming, RuleTiming, TimingBreakdown};
 
 /// Version of this protocol, sent in `authenticated`. Bumped on any change a
 /// client must know about.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;

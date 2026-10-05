@@ -9,7 +9,7 @@
 use std::time::Instant;
 
 use inputlayer_ws_protocol::{
-    probe_request_id, ClientFrame, ErrorCode, Params, RequestId, ServerFrame,
+    probe_request_id, ClientFrame, ErrorCode, NamedQuery, Params, RequestId, ServerFrame,
 };
 
 use super::pipeline::Access;
@@ -39,8 +39,19 @@ pub(super) enum Job {
     },
     /// Cancel the unanswered request `target`; handled on arrival.
     Cancel { target: RequestId },
+    /// Several queries at one revision of the connection's KG, within
+    /// `timeout_ms` of arrival when the client set one.
+    Read {
+        queries: Vec<NamedQuery>,
+        timeout_ms: Option<u64>,
+    },
     /// `.subscribe <name> ?<query>` on the connection's KG.
     Subscribe { name: String, query: String },
+    /// The `subscribe` frame: a group of queries on the connection's KG.
+    SubscribeGroup {
+        name: String,
+        queries: Vec<NamedQuery>,
+    },
     /// `.unsubscribe <name>`.
     Unsubscribe { name: String },
 }
@@ -91,9 +102,10 @@ pub(super) enum Reply {
     /// Encoded frames.
     Frames(Vec<String>),
     /// An evaluated snapshot of subscription `name`, registered by the loop
-    /// on release.
+    /// on release. `members` names a group's queries; `None` for `.subscribe`.
     Subscribed {
         name: String,
+        members: Option<Vec<String>>,
         opened: Opened,
         started: Instant,
     },
@@ -163,6 +175,34 @@ impl Request {
                 };
                 (access, Self { id, job })
             }
+            ClientFrame::Read {
+                id,
+                queries,
+                timeout_ms,
+            } => (
+                Access::Shared,
+                Self {
+                    id,
+                    job: Job::Read {
+                        queries,
+                        timeout_ms,
+                    },
+                },
+            ),
+            ClientFrame::Subscribe {
+                id,
+                subscription,
+                queries,
+            } => (
+                Access::Exclusive,
+                Self {
+                    id,
+                    job: Job::SubscribeGroup {
+                        name: subscription,
+                        queries,
+                    },
+                },
+            ),
             ClientFrame::Cancel { id, target } => (
                 Access::Shared,
                 Self {
@@ -335,6 +375,25 @@ mod tests {
         ] {
             assert!(rejection(text).is_some(), "{text}");
         }
+    }
+
+    #[test]
+    fn reads_are_shared_and_group_subscribes_exclusive() {
+        let text = r#"{"type": "read", "id": "r", "queries": [{"name": "a", "query": "?a(X)"}], "timeout_ms": 9}"#;
+        let (access, request) = Request::from_text(text);
+        assert_eq!(access, Access::Shared);
+        assert_eq!(request.id.unwrap().as_str(), "r");
+        assert!(matches!(
+            request.job,
+            Job::Read { queries, timeout_ms: Some(9) } if queries.len() == 1
+        ));
+        let text = r#"{"type": "subscribe", "id": "s", "subscription": "w", "queries": [{"name": "a", "query": "?a(X)"}, {"name": "b", "query": "?b(X)"}]}"#;
+        let (access, request) = Request::from_text(text);
+        assert_eq!(access, Access::Exclusive);
+        assert!(matches!(
+            request.job,
+            Job::SubscribeGroup { name, queries } if name == "w" && queries.len() == 2
+        ));
     }
 
     #[test]

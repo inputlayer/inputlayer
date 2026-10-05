@@ -1,0 +1,90 @@
+{
+  "name": "snapshot_error_mid_stream",
+  "about": "An error answering the read after its snapshot_start fails it typed, discarding the rows received; the connection stays usable.",
+  "calls": [
+    {
+      "read": [
+        {
+          "name": "orders",
+          "query": "?order(S, O)"
+        },
+        {
+          "name": "etas",
+          "query": "?eta(O, T)"
+        }
+      ]
+    }
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_start",
+        "id": "$r0",
+        "knowledge_graph": "default",
+        "revision": 5,
+        "results": [
+          {
+            "name": "orders",
+            "columns": [
+              "S",
+              "O"
+            ],
+            "row_count": 2,
+            "total_count": 2,
+            "truncated": false
+          },
+          {
+            "name": "etas",
+            "columns": [
+              "O",
+              "T"
+            ],
+            "row_count": 0,
+            "total_count": 0,
+            "truncated": false
+          }
+        ],
+        "execution_time_ms": 0
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_chunk",
+        "id": "$r0",
+        "result": 0,
+        "chunk_index": 0,
+        "rows": [
+          [
+            1,
+            10
+          ]
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$r0",
+        "code": "internal",
+        "message": "Internal server error"
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "QueryError",
+        "code": "internal"
+      }
+    ],
+    "connected": true,
+    "stats": {
+      "staleReplies": 0
+    }
+  }
+}

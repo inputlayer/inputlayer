@@ -2,7 +2,7 @@
  * KnowledgeGraph - the primary workspace for data, queries, and rules.
  */
 
-import type { Connection, ExecuteOptions } from './connection.js';
+import type { Connection, ExecuteOptions, ReadOptions } from './connection.js';
 import type { ResultResponse } from './protocol.js';
 import { rowKey } from './protocol.js';
 import type { Expr, BoolExpr, OrderedColumn } from './ast.js';
@@ -45,11 +45,14 @@ import { ResultSet } from './result.js';
 import { Session } from './session.js';
 import { meta, ruleClauses, ruleList } from './meta.js';
 import {
+  GroupSubscription,
   Subscription,
   runCallback,
+  snapshotRead,
   watchChanges,
   type Change,
   type Live,
+  type ReadResult,
   type Row,
   type SubscribeOptions,
   type SubscriptionHandle,
@@ -543,6 +546,52 @@ export class KnowledgeGraph {
    */
   subscribe<T = Row>(target: SubscriptionTarget, opts?: SubscribeOptions): Subscription<T> {
     return new Subscription<T>(this.conn, target, opts, () => this._session.listRules());
+  }
+
+  /**
+   * Subscribe to several targets kept current together, as one
+   * subscription: an async iterator of `GroupChange` events with every
+   * member's change by name (`unchanged` when it has none). After every
+   * verified event, all members are exact at the event's one `revision`;
+   * `unverified` and `resync` cover the whole group. Members go to the
+   * engine in the record's order. A group counts once per member against the
+   * server's subscription limit.
+   *
+   * Refused with `SubscriptionRejectedError` as `subscribe` refuses a target
+   * (the message names the member), and for an empty record or name.
+   *
+   * @example
+   * for await (const change of kg.subscribeGroup({ orders: Order, etas: Eta })) {
+   *   apply(change.members.orders);
+   *   apply(change.members.etas);
+   *   // Both are at change.revision: never one ahead of the other.
+   * }
+   */
+  subscribeGroup(members: Record<string, SubscriptionTarget>, opts?: SubscribeOptions): GroupSubscription {
+    return new GroupSubscription(this.conn, members, opts, () => this._session.listRules());
+  }
+
+  /**
+   * Run several targets on one snapshot: every result is the exact answer
+   * at the returned `revision`, whatever commits meanwhile. Reads see
+   * persistent data only (no session facts or session rules), as
+   * subscriptions do, so a read and a subscription of the same targets agree
+   * at the same revision. A target may carry `limit`, `offset` (with a
+   * limit) and `orderBy`; rows are shaped as `kg.query` shapes them.
+   *
+   * Refused with `SubscriptionRejectedError` for a target that is not one
+   * query (an OR condition, an aggregate, a NOT(any()) of constants only),
+   * before anything is sent, and for a target reading a session rule (the
+   * session's rules are listed beside the read, when a target names
+   * relations). The engine fails the read as a whole, naming
+   * the failing query (`Query 'etas': ...`). `timeoutMs` and `signal` bound
+   * and cancel the whole read, as for `execute`.
+   *
+   * @example
+   * const { revision, results } = await kg.read({ orders: Order, etas: Eta });
+   */
+  read(queries: Record<string, SubscriptionTarget>, opts?: ReadOptions): Promise<ReadResult> {
+    return snapshotRead(this.conn, queries, opts, () => this._session.listRules());
   }
 
   /**

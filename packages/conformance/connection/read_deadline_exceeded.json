@@ -1,0 +1,47 @@
+{
+  "name": "read_deadline_exceeded",
+  "description": "The server's deadline_exceeded for a read is typed as for execute: nothing ran.",
+  "calls": [
+    {
+      "read": [
+        {
+          "name": "orders",
+          "query": "?order(S, O)"
+        },
+        {
+          "name": "eta",
+          "query": "?eta(O, T)"
+        }
+      ],
+      "expect": {
+        "error": "deadline_exceeded"
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "read",
+        "queries": [
+          {
+            "name": "orders",
+            "query": "?order(S, O)"
+          },
+          {
+            "name": "eta",
+            "query": "?eta(O, T)"
+          }
+        ]
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$q",
+        "code": "deadline_exceeded",
+        "message": "Request deadline exceeded"
+      }
+    }
+  ]
+}

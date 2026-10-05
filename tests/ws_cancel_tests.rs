@@ -318,3 +318,55 @@ async fn cancel_of_unknown_or_uncancellable_requests_is_not_found() {
     client.cancel("c2", "p").await;
     assert_ack(&client.reply_to("c2").await, "p", "not_found");
 }
+
+/// A `read` runs every query under one deadline: one slow query stops the
+/// whole read, which answers nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_read_stops_at_its_deadline_as_a_whole() {
+    let server = start_server().await;
+    let mut client = Client::connect(&server).await;
+    let sent = Instant::now();
+    client
+        .send(
+            json!({"type": "read", "id": "r", "timeout_ms": 150, "queries": [
+                {"name": "quick", "query": "?edge(0, Y)"},
+                {"name": "slow", "query": TRIANGLES},
+            ]}),
+        )
+        .await;
+    let reply = client.reply_to("r").await;
+    let took = sent.elapsed();
+    assert_eq!(reply["type"], "error", "{reply}");
+    assert_eq!(reply["code"], "deadline_exceeded", "{reply}");
+    assert!(
+        took < Duration::from_millis(150) + STOP_BUDGET,
+        "took {took:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancel_stops_a_running_read() {
+    let server = start_server().await;
+    let mut client = Client::connect(&server).await;
+    client
+        .send(json!({"type": "read", "id": "r", "queries": [
+            {"name": "slow", "query": TRIANGLES},
+            {"name": "quick", "query": "?edge(0, Y)"},
+        ]}))
+        .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let cancelled_at = Instant::now();
+    client.cancel("c", "r").await;
+    let reply = client.reply_to("r").await;
+    assert_eq!(reply["code"], "cancelled", "{reply}");
+    assert!(cancelled_at.elapsed() < STOP_BUDGET);
+    assert_ack(&client.reply_to("c").await, "r", "cancelled");
+
+    // The connection stays usable.
+    client
+        .send(json!({"type": "read", "id": "again", "queries": [
+            {"name": "quick", "query": "?edge(0, Y)"},
+        ]}))
+        .await;
+    assert_eq!(client.reply_to("again").await["type"], "snapshot");
+}
