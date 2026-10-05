@@ -368,11 +368,9 @@ Frequent flushes, aggressive compaction.
 .status
 ```
 
-Shows:
-- Data directory location
-- Number of shards
-- WAL size
-- Buffer status
+Shows server health, version and uptime (see [`.status`](/docs/reference/commands#status)).
+WAL size, flush lag and dirty-shard counts are exported as metrics; see
+[Monitoring](/docs/guides/deployment#monitoring).
 
 ### Check Shard Info
 
