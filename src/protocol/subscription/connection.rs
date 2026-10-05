@@ -151,11 +151,12 @@ impl ConnectionSubscriptions {
         let snapshot = Snapshot::of(&attachment);
         let doorbell = attached.keep();
         let subscriber = doorbell.id();
+        let registered =
+            Subscriber::new(&id, generation, &key.knowledge_graph, doorbell, &attachment);
+        // Registered now: a wake-up rung before this was dropped as stale.
+        registered.resume();
         self.names.insert(id.clone(), subscriber);
-        self.subscribers.insert(
-            subscriber,
-            Subscriber::new(&id, generation, &key.knowledge_graph, doorbell, &attachment),
-        );
+        self.subscribers.insert(subscriber, registered);
         self.handler.subscription_metrics().add_active(1);
         debug!(
             subscription = id,
@@ -258,7 +259,8 @@ impl ConnectionSubscriptions {
         subscriber: SubscriberId,
         readable: impl FnOnce(&str) -> bool,
     ) -> Option<SubscriptionPush> {
-        // A wake-up for a subscriber already removed is stale.
+        // A wake-up for a subscriber already removed is stale. So is one for
+        // a subscriber not registered yet: registering resumes its doorbell.
         self.subscribers.get_mut(&subscriber)?.deliver(readable)
     }
 
