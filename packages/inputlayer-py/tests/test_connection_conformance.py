@@ -48,7 +48,7 @@ def _substitute(value: Any, ids: dict[str, str]) -> Any:
     return value
 
 
-def _play(steps: list[dict[str, Any]], done: asyncio.Event) -> Any:
+def _play(steps: list[dict[str, Any]], done: asyncio.Event, stalled: list[Peer]) -> Any:
     async def handler(peer: Peer) -> None:
         await peer.authenticate()
         ids: dict[str, str] = {}
@@ -63,6 +63,10 @@ def _play(steps: list[dict[str, Any]], done: asyncio.Event) -> Any:
                 await peer.send(_substitute(step["send"], ids))
             elif "close" in step:
                 await peer.close(step["close"])
+            elif "stall" in step:
+                # Stop reading: no request is answered and no transport ping either.
+                peer.ws.transport.pause_reading()
+                stalled.append(peer)
         done.set()
         await peer.serve_results()
 
@@ -71,12 +75,13 @@ def _play(steps: list[dict[str, Any]], done: asyncio.Event) -> Any:
 
 def _issue(conn: Connection, call: dict[str, Any]) -> Any:
     """Start the request a fixture call describes."""
+    timeout = call.get("timeout_ms", 10_000) / 1000
     if "execute" in call:
-        return conn.execute(call["execute"], timeout=10)
+        return conn.execute(call["execute"], timeout=timeout)
     if "read" in call:
-        return conn.read([NamedQuery(**q) for q in call["read"]], timeout=10)
+        return conn.read([NamedQuery(**q) for q in call["read"]], timeout=timeout)
     queries = [NamedQuery(**q) for q in call["queries"]]
-    return conn.subscribe(call["subscribe"], queries, timeout=10)
+    return conn.subscribe(call["subscribe"], queries, timeout=timeout)
 
 
 def _check_call(expect: dict[str, Any], outcome: Any) -> None:
@@ -112,8 +117,15 @@ def _check_call(expect: dict[str, Any], outcome: Any) -> None:
 async def test_connection_fixture(fixture: Path) -> None:
     spec = json.loads(fixture.read_text())
     done = asyncio.Event()
-    async with MockServer(_play(spec["server"], done)) as server:
-        conn = Connection(server.url, username="u", password="p", auto_reconnect=False)
+    stalled: list[Peer] = []
+    options = spec.get("options", {})
+    grace = (
+        {"deadline_grace": options["deadline_grace_ms"] / 1000}
+        if "deadline_grace_ms" in options
+        else {}
+    )
+    async with MockServer(_play(spec["server"], done, stalled)) as server:
+        conn = Connection(server.url, username="u", password="p", auto_reconnect=False, **grace)
         notifications: list[int] = []
         events: list[str] = []
         pushes: list[dict[str, Any]] = []
@@ -142,4 +154,6 @@ async def test_connection_fixture(fixture: Path) -> None:
             assert conn.stale_pushes == expect["stale_pushes"]
         if "events" in expect:
             assert [e for e in events if e != "closed"] == expect["events"]
+        for peer in stalled:
+            peer.ws.transport.resume_reading()
         await conn.close()

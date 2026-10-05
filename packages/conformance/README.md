@@ -14,7 +14,8 @@ One JSON file per scenario:
 |---|---|
 | `name`, `description` | What the scenario proves. |
 | `routes` | Subscription ids the client routes before its calls (the route takes its generation from the `.subscribe` or `subscribe` reply). |
-| `calls` | Requests the client issues in order without waiting for replies: `{"execute": program, "expect": ...}`, `{"read": queries, "expect": ...}`, or `{"subscribe": name, "queries": queries, "expect": ...}` (`queries` is a list of `{"name", "query"}`). |
+| `options` | Optional client settings: `deadline_grace_ms`, how long past a call's deadline the client waits for its reply. |
+| `calls` | Requests the client issues in order without waiting for replies: `{"execute": program, "expect": ...}`, `{"read": queries, "expect": ...}`, or `{"subscribe": name, "queries": queries, "expect": ...}` (`queries` is a list of `{"name", "query"}`). A call may give its deadline as `timeout_ms` (10 s when absent). |
 | `server` | What the mock server does once the client has authenticated, in order. |
 | `expect` | What the client observed besides its calls' outcomes. |
 
@@ -23,6 +24,7 @@ Server steps:
 - `{"recv": {...}, "as": "q"}`: read the next request (keepalive pings are answered and skipped); every field given must match. Its `id` is remembered as `q`.
 - `{"send": frame}`: send a frame; a string value `"$q"` is replaced by the id remembered as `q`.
 - `{"close": code}`: close the socket with that WebSocket close code.
+- `{"stall": true}`: stop reading: no more replies and no transport pongs, as a dead server.
 
 A call's `expect` is `{"rows": [...], "columns": [...]}` for a result (`columns` optional), `{"revision": n, "results": [{"name", "columns", "rows"}, ...]}` for a snapshot (the reply to `read` and `subscribe`, streamed or not), or `{"error": kind, "code": ..., "may_have_committed": ...}` (`code` and `may_have_committed` checked only when given). Error kinds:
 

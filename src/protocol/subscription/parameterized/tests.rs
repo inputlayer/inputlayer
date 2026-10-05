@@ -182,7 +182,7 @@ mod rounds {
     use serde_json::json;
     use tempfile::TempDir;
 
-    use super::super::{Families, Family, MemberQuery};
+    use super::super::{Families, Family, MemberQuery, RoundState};
     use super::lifted;
     use crate::protocol::subscription::{
         ReevaluatingQuery, Refresh, StandingQuery, SubscriptionMetrics,
@@ -314,8 +314,8 @@ mod rounds {
         );
         let round = one.family.latest.load_full().unwrap();
         assert!(
-            round.snapshot.load().is_none(),
-            "the evaluated round dropped its snapshot"
+            matches!(*round.state.lock(), RoundState::Started { revision } if revision == first.revision),
+            "the round evaluated one snapshot and holds none"
         );
 
         // A view leaving the family leaves no more bindings than permits.
@@ -558,26 +558,29 @@ mod rounds {
         views[0].refresh().await.unwrap();
         probed(&family).await;
         assert!(family.shares());
-        let before = views[0].own.current_snapshot().unwrap();
+
+        // A round starts on the rules before the change, then is held.
+        let gate = family.round_gate.write().await;
+        write(&handler, "+item(\"s2\", 4)").await;
+        let old_rules = revision(&handler);
+        let held = refreshing(views.remove(1));
+        latest_round(
+            &family,
+            |state| matches!(state, RoundState::Started { revision } if revision == old_rules),
+        )
+        .await;
 
         write(&handler, "+tagged(S) <- item(S, 1)").await;
         views[0].refresh().await.unwrap();
         assert!(!family.shares());
-        // A probe of a snapshot from before the change is judged without a
-        // cost measured under its rules.
-        Family::probe(&family, Arc::clone(&before));
-        probed(&family).await;
-        assert!(!family.shares(), "no own cost to compare the round with");
-        assert_eq!(family.stops.load(Ordering::Relaxed), 0, "not a failure");
-        assert_eq!(family.shared_cost_us.load(Ordering::Relaxed), 0);
-
-        // Nor against a cost measured under the new rules, which the old
-        // snapshot does not set back.
+        // A cost measured under the new rules, which the held round's old
+        // rules must not be judged against.
         family.own_cost_us.store(1_000_000_000, Ordering::Relaxed);
-        Family::probe(&family, before);
-        probed(&family).await;
+        drop(gate);
+        let (_, refresh) = held.await.unwrap();
+        assert_eq!(inserted(&refresh), [json!(["s2", 4])]);
         assert!(!family.shares(), "the round's rules are no longer judged");
-        assert_eq!(family.stops.load(Ordering::Relaxed), 0);
+        assert_eq!(family.stops.load(Ordering::Relaxed), 0, "not a failure");
         assert_eq!(family.shared_cost_us.load(Ordering::Relaxed), 0);
         let now = views[0].own.current_snapshot().unwrap();
         let judged = family.judged.load_full().unwrap();
@@ -727,6 +730,156 @@ mod rounds {
         assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 3])]);
         assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 4])]);
         assert_eq!(metrics.shared_evaluations(), 2, "views read one round");
+    }
+
+    /// The newest revision of the test knowledge graph.
+    fn revision(handler: &Handler) -> u64 {
+        handler.get_storage().get_snapshot_for(KG).unwrap().revision
+    }
+
+    /// Wait until `family`'s latest round is in a state `ready` accepts.
+    async fn latest_round(family: &Family, ready: impl Fn(RoundState) -> bool) {
+        loop {
+            let state = family.latest.load_full().map(|round| *round.state.lock());
+            if state.is_some_and(&ready) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    }
+
+    /// Views of `?item("sK", X)` for `active`, refreshed once, plus idle
+    /// views so that the family outnumbers [`handler`]'s compute permits,
+    /// sharing.
+    async fn sharing_views(
+        families: &Families,
+        handler: &Arc<Handler>,
+        metrics: &Arc<SubscriptionMetrics>,
+        active: &[&str],
+    ) -> (Vec<MemberQuery>, Vec<MemberQuery>) {
+        let mut views: Vec<MemberQuery> = active
+            .iter()
+            .map(|s| member(families, handler, metrics, &format!("?item(\"{s}\", X)")))
+            .collect();
+        let idle = idle(
+            families,
+            handler,
+            metrics,
+            &[
+                r#"?item("i1", X)"#,
+                r#"?item("i2", X)"#,
+                r#"?item("i3", X)"#,
+            ],
+        );
+        for view in &mut views {
+            view.refresh().await.unwrap();
+        }
+        let family = &views[0].family;
+        family.sharing.store(true, Ordering::Relaxed);
+        assert!(family.shares());
+        (views, idle)
+    }
+
+    /// Refresh `view` on its own task.
+    fn refreshing(mut view: MemberQuery) -> tokio::task::JoinHandle<(MemberQuery, Refresh)> {
+        tokio::spawn(async move {
+            let refresh = view.refresh().await.unwrap();
+            (view, refresh)
+        })
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn views_that_ask_before_a_round_starts_share_it_at_the_newest_revision() {
+        let (handler, _tmp) = handler();
+        write(&handler, "+item[(\"s1\", 1), (\"s2\", 2)]").await;
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let (mut views, _idle) = sharing_views(&families, &handler, &metrics, &["s1", "s2"]).await;
+        let family = Arc::clone(&views[0].family);
+        let before = metrics.shared_evaluations();
+
+        // Another round evaluating holds the family's turn: the next waits.
+        let turn = family.evaluating.lock().await;
+        write(&handler, "+item(\"s1\", 3)").await;
+        let first = refreshing(views.remove(0));
+        latest_round(&family, |state| matches!(state, RoundState::Pending { .. })).await;
+        // A commit after the round was created: a view holding it joins the
+        // same round, which will start no older than its snapshot.
+        write(&handler, "+item(\"s2\", 4)").await;
+        let newest = revision(&handler);
+        let second = refreshing(views.remove(0));
+        latest_round(
+            &family,
+            |state| matches!(state, RoundState::Pending { needs } if needs == newest),
+        )
+        .await;
+        drop(turn);
+
+        let (_, first) = first.await.unwrap();
+        let (_, second) = second.await.unwrap();
+        assert_eq!(inserted(&first), [json!(["s1", 3])]);
+        assert_eq!(inserted(&second), [json!(["s2", 4])]);
+        assert_eq!(first.revision, newest);
+        assert_eq!(second.revision, newest);
+        assert_eq!(
+            metrics.shared_evaluations(),
+            before + 1,
+            "one round for both revisions"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_view_needing_a_newer_revision_than_the_round_evaluating_waits_for_the_next() {
+        let (handler, _tmp) = handler();
+        write(&handler, "+item[(\"s1\", 1), (\"s2\", 2), (\"s3\", 3)]").await;
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let (mut views, _idle) =
+            sharing_views(&families, &handler, &metrics, &["s1", "s2", "s3"]).await;
+        let family = Arc::clone(&views[0].family);
+        let before = metrics.shared_evaluations();
+
+        // The first round starts, then is held before it evaluates.
+        let gate = family.round_gate.write().await;
+        write(&handler, "+item(\"s1\", 10)").await;
+        let started = revision(&handler);
+        let first = refreshing(views.remove(0));
+        latest_round(
+            &family,
+            |state| matches!(state, RoundState::Started { revision } if revision == started),
+        )
+        .await;
+
+        // Commits after it started: the views that saw them neither read it
+        // nor start a round beside it; both join one pending round.
+        write(&handler, "+item(\"s2\", 20)").await;
+        let second = refreshing(views.remove(0));
+        latest_round(&family, |state| matches!(state, RoundState::Pending { .. })).await;
+        write(&handler, "+item(\"s3\", 30)").await;
+        let newest = revision(&handler);
+        let third = refreshing(views.remove(0));
+        latest_round(
+            &family,
+            |state| matches!(state, RoundState::Pending { needs } if needs == newest),
+        )
+        .await;
+        assert_eq!(
+            metrics.shared_evaluations(),
+            before,
+            "the first round is held"
+        );
+        drop(gate);
+
+        let (_, first) = first.await.unwrap();
+        let (_, second) = second.await.unwrap();
+        let (_, third) = third.await.unwrap();
+        assert_eq!(first.revision, started);
+        assert_eq!(inserted(&first), [json!(["s1", 10])]);
+        assert_eq!(second.revision, newest);
+        assert_eq!(inserted(&second), [json!(["s2", 20])]);
+        assert_eq!(third.revision, newest);
+        assert_eq!(inserted(&third), [json!(["s3", 30])]);
+        assert_eq!(metrics.shared_evaluations(), before + 2, "two rounds");
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -7,7 +7,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { WebSocketServer, type WebSocket as ServerSocket } from 'ws';
+import WebSocket, { WebSocketServer, type WebSocket as ServerSocket } from 'ws';
 import * as sdk from '../src/index';
 import {
   AuthenticationError,
@@ -486,6 +486,44 @@ describe('deadline probe', () => {
       knowledge_graph: 'default', relation: 'a', operation: 'insert', count: 1 }));
     expect(await call).toBeInstanceOf(sdk.DeadlineExceededError);
     expect(c.connected).toBe(true);
+  });
+
+  it('a write on a dead server fails outcome-unknown before the probe drops the connection', async () => {
+    // The probe and the call's grace both wait `timeoutGraceMs`. A clock that
+    // moves while the probe is sent must not let the probe's drop fail the
+    // call as connection-lost first.
+    const ping = WebSocket.prototype.ping;
+    WebSocket.prototype.ping = function (this: WebSocket, ...args: Parameters<typeof ping>) {
+      const until = Date.now() + 20;
+      while (Date.now() < until) {
+        // busy: the clock moves on between the two timers
+      }
+      return ping.apply(this, args);
+    };
+    try {
+      const c = await open({ timeoutGraceMs: 100 });
+      const call = c.execute('+a(1)', { timeoutMs: 50 }).catch((e: unknown) => e);
+      await server!.until(() => executes(server!.last).length === 1);
+      stall(server!.last);
+      const error = await call;
+      expect(error).toBeInstanceOf(sdk.OutcomeUnknownError);
+      expect((error as sdk.OutcomeUnknownError).code).toBe('outcome_unknown');
+    } finally {
+      WebSocket.prototype.ping = ping;
+    }
+  });
+
+  it('every write past its deadline on a dead server fails outcome-unknown when the probe drops it', async () => {
+    // Only the first deadline starts the probe; its drop comes before the
+    // second write's grace ends.
+    const c = await open({ timeoutGraceMs: 100 });
+    const calls = [50, 60].map((timeoutMs) => c.execute(`+a(${timeoutMs})`, { timeoutMs }).catch((e: unknown) => e));
+    await server!.until(() => executes(server!.last).length === 2);
+    stall(server!.last);
+    for (const error of await Promise.all(calls)) {
+      expect(error).toBeInstanceOf(sdk.OutcomeUnknownError);
+      expect((error as sdk.OutcomeUnknownError).code).toBe('outcome_unknown');
+    }
   });
 
   it('calls failed locally on a server that never replies do not block new calls', async () => {

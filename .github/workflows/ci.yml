@@ -30,6 +30,7 @@ jobs:
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
       python: ${{ steps.filter.outputs.python }}
+      js: ${{ steps.filter.outputs.js }}
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +59,10 @@ jobs:
               - '.github/workflows/ci.yml'
             python:
               - 'packages/inputlayer-py/**'
+              - 'packages/conformance/**'
+              - '.github/workflows/ci.yml'
+            js:
+              - 'packages/inputlayer-js/**'
               - 'packages/conformance/**'
               - '.github/workflows/ci.yml'
 
@@ -253,3 +258,24 @@ jobs:
 
       - name: Run unit tests
         run: make python-test
+
+  # The TypeScript SDK's unit tests (the connection core against a scripted
+  # server replaying its frame fixtures) and its type check. The live tests
+  # run in the full suite (make js-test-live), which builds the engine.
+  js-sdk:
+    name: JS SDK
+    needs: changes
+    if: needs.changes.outputs.js == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/inputlayer-js/package-lock.json
+
+      - name: Run unit tests and type check
+        run: make pre-pr-js
