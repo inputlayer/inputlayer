@@ -106,10 +106,10 @@ static ALLOCATOR: execution::memory::MeteredAllocator = execution::memory::Meter
 // AST and IR modules (consolidated from crates/)
 pub mod ast;
 pub mod hnsw_index; // HNSW vector index implementation
-pub mod view_maintainer;
 pub mod index_manager; // Index manager for vector similarity search
 pub mod ir;
-pub mod session; // Session manager for ephemeral triggers persistent
+pub mod session;
+pub mod view_maintainer; // Session manager for ephemeral triggers persistent
 
 // Re-export types from internal modules
 pub use crate::ast::builders::{fact, simple_rule, AtomBuilder, RuleBuilder};

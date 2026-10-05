@@ -29,7 +29,8 @@
 //! unbounded and the commit path never waits for the worker. A worker slower
 //! than the writers shows as a frontier that lags the published revision,
 //! reported by [`ViewStats`]. The worker applies every queued commit before it
-//! steps, so a backlog costs one round of work, not one per commit.
+//! steps, as one change at the last of their revisions, so a backlog costs
+//! one round of work, not one per commit.
 //!
 //! ## Failure
 //!
@@ -306,7 +307,9 @@ impl ViewMaintainer {
             (0, Duration::ZERO)
         } else {
             let pending = self.shared.pending.lock();
-            let lag = pending.front().map_or(Duration::ZERO, |(_, fed)| fed.elapsed());
+            let lag = pending
+                .front()
+                .map_or(Duration::ZERO, |(_, fed)| fed.elapsed());
             (pending.len(), lag)
         };
         ViewStats {
@@ -389,7 +392,12 @@ impl FrontierWaiter {
             if shared.failed.load(Ordering::Acquire) || shared.stop.load(Ordering::Acquire) {
                 return false;
             }
-            if shared.progress.1.wait_until(&mut guard, deadline).timed_out() {
+            if shared
+                .progress
+                .1
+                .wait_until(&mut guard, deadline)
+                .timed_out()
+            {
                 return shared.frontier.load(Ordering::Acquire) >= revision;
             }
         }
@@ -742,17 +750,20 @@ fn worker_loop(
 
             match command {
                 Command::Commit { revision, change } => {
-                    // Every commit already queued joins this round.
+                    // Every commit already queued joins this round, at the
+                    // round's last revision: only the frontier can be read,
+                    // so the revisions between are never seen, and changes
+                    // that cancel within the round never reach the traces.
                     let started = Instant::now();
                     let mut last = revision;
                     let mut buffered = change.updates();
-                    dataflows.apply(revision, change);
+                    let mut round = vec![change];
                     while buffered < SETTLE_UPDATES {
                         match queue.try_recv() {
                             Ok(Command::Commit { revision, change }) => {
                                 last = revision;
                                 buffered += change.updates();
-                                dataflows.apply(revision, change);
+                                round.push(change);
                             }
                             Ok(other) => {
                                 carried = Some(other);
@@ -760,6 +771,9 @@ fn worker_loop(
                             }
                             Err(_) => break,
                         }
+                    }
+                    for change in round {
+                        dataflows.apply(last, change);
                     }
                     dataflows.settle(last);
                     publish(&mut dataflows, last, started);

@@ -50,6 +50,8 @@ mod residency;
 mod revisions;
 mod snapshot;
 mod vector_index;
+#[cfg(test)]
+mod view_maintainer_tests;
 mod write_program;
 pub use catalog_change::{CatalogChange, CatalogOutcome};
 pub use checkpoint::{CheckpointExport, ExportStatus};

@@ -786,7 +786,11 @@ mod tests {
         let revision = {
             let storage = handler.get_storage();
             let revision = storage.get_snapshot_for("default").unwrap().revision;
-            assert!(storage.wait_for_views("default", revision, std::time::Duration::from_secs(30)));
+            assert!(storage.wait_for_views(
+                "default",
+                revision,
+                std::time::Duration::from_secs(30)
+            ));
             revision
         };
         let (_, _, body) = prometheus_metrics(Extension(handler)).await.unwrap();
