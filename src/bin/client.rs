@@ -286,6 +286,7 @@ impl WsClient {
                         timing_breakdown: start.timing_breakdown,
                         errors: start.errors,
                         statements: start.statements,
+                        revision: start.revision,
                         subscribed: None,
                     });
                 }

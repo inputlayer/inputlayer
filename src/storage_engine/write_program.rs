@@ -346,6 +346,10 @@ pub struct ProgramCommit {
     /// The snapshot the program committed against: the KG as published just
     /// before its changes, on which its reads were validated to still hold.
     pub base: Arc<KnowledgeGraphSnapshot>,
+    /// Revision of the snapshot the commit published, the one standing
+    /// queries refresh at; when the program changed nothing, the revision of
+    /// the KG's current snapshot, which already holds its effect.
+    pub revision: u64,
 }
 
 /// Why a write program was not committed. In every case but

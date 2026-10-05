@@ -142,6 +142,18 @@ fn the_proof_revision_is_the_snapshot_before_the_program_changes() {
 }
 
 #[test]
+fn the_reply_names_the_revision_the_writes_committed_at() {
+    let (handler, _tmp) = handler_with_fixture();
+    let result = run(&handler, "+need(\"s2\", \"say_eta\")\n.why ?need(S, T)");
+
+    let proved_at = trees(&result)[0].revision.expect("revision");
+    let committed_at = result
+        .revision
+        .expect("a committed program names its revision");
+    assert!(committed_at > proved_at, "{committed_at} > {proved_at}");
+}
+
+#[test]
 fn writes_after_the_commit_do_not_change_the_proof() {
     let (handler, _tmp) = handler_with_fixture();
     let writer = handler.make_query_job();
