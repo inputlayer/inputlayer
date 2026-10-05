@@ -192,6 +192,10 @@ REST endpoints (except health/live/ready) require a Bearer token:
 curl -H "Authorization: Bearer your-api-key" http://localhost:8080/metrics
 ```
 
+`/metrics` and `/metrics/prometheus` report on every knowledge graph, so they
+need an admin API key: an unscoped key of a user with the `admin` role. Other
+keys, including an admin's key scoped to one knowledge graph, get `403`.
+
 ## API Keys
 
 API keys provide machine-to-machine authentication without passwords.

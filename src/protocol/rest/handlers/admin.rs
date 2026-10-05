@@ -6,9 +6,11 @@ use std::sync::Arc;
 
 use axum::{http::StatusCode, Extension, Json};
 
+use crate::protocol::metrics::{resident_memory_bytes, Prometheus};
 use crate::protocol::rest::dto::{ApiResponse, HealthDto, SessionStatsDto, StatsDto};
 use crate::protocol::rest::error::RestError;
 use crate::protocol::Handler;
+use crate::storage_engine::KgSummary;
 
 /// Health check endpoint.
 ///
@@ -85,7 +87,8 @@ pub async fn readiness(Extension(handler): Extension<Arc<Handler>>) -> StatusCod
     }
 }
 
-/// Server statistics endpoint
+/// Server statistics endpoint. Admin API keys only: the statistics cover
+/// every knowledge graph.
 ///
 /// Uses `spawn_blocking` because acquiring the storage read lock can block
 /// when a write lock is pending (parking_lot write-preferring policy).
@@ -106,14 +109,13 @@ pub async fn stats(
                 views: total_views,
                 ..
             } = totals;
-            let estimated_memory = totals.estimated_memory();
 
             let session_stats = handler.session_stats();
             StatsDto {
                 knowledge_graphs,
                 relations: total_relations,
                 views: total_views,
-                memory_usage_bytes: estimated_memory,
+                memory_usage_bytes: resident_memory_bytes().unwrap_or(0),
                 query_count: handler.total_queries(),
                 uptime_secs: handler.uptime_seconds(),
                 sessions: SessionStatsDto {
@@ -138,8 +140,8 @@ pub async fn stats(
 
 /// Prometheus metrics endpoint (#12).
 ///
-/// Exports server metrics in Prometheus text exposition format.
-/// Scrape at `/metrics/prometheus` with a Prometheus server.
+/// Exports server metrics in Prometheus text exposition format. Admin API
+/// keys only: the metrics cover every knowledge graph.
 pub async fn prometheus_metrics(
     Extension(handler): Extension<Arc<Handler>>,
 ) -> Result<
@@ -153,122 +155,7 @@ pub async fn prometheus_metrics(
     let timeout_secs = handler.config().http.stats_timeout_secs.max(1);
     let body = tokio::time::timeout(
         std::time::Duration::from_secs(timeout_secs),
-        tokio::task::spawn_blocking(move || {
-            let storage = handler.get_storage();
-            let totals = KgTotals::of(&storage.knowledge_graph_summaries());
-            let (kg_loads, kg_unloads) = storage.knowledge_graph_residency_counts();
-            drop(storage);
-            let KgTotals {
-                knowledge_graphs,
-                loaded_knowledge_graphs,
-                relations: total_relations,
-                views: total_views,
-                tuples: total_tuples,
-            } = totals;
-            let estimated_memory = totals.estimated_memory();
-
-            let session_stats = handler.session_stats();
-            let query_count = handler.total_queries();
-            let uptime = handler.uptime_seconds();
-
-            let mut out = String::with_capacity(1024);
-            out.push_str("# HELP inputlayer_uptime_seconds Server uptime in seconds.\n");
-            out.push_str("# TYPE inputlayer_uptime_seconds gauge\n");
-            out.push_str(&format!("inputlayer_uptime_seconds {uptime}\n"));
-
-            out.push_str("# HELP inputlayer_queries_total Total queries executed.\n");
-            out.push_str("# TYPE inputlayer_queries_total counter\n");
-            out.push_str(&format!("inputlayer_queries_total {query_count}\n"));
-
-            out.push_str("# HELP inputlayer_knowledge_graphs Number of knowledge graphs.\n");
-            out.push_str("# TYPE inputlayer_knowledge_graphs gauge\n");
-            out.push_str(&format!("inputlayer_knowledge_graphs {knowledge_graphs}\n"));
-
-            out.push_str(
-                "# HELP inputlayer_knowledge_graphs_loaded Knowledge graphs held in memory.\n",
-            );
-            out.push_str("# TYPE inputlayer_knowledge_graphs_loaded gauge\n");
-            out.push_str(&format!(
-                "inputlayer_knowledge_graphs_loaded {loaded_knowledge_graphs}\n"
-            ));
-
-            out.push_str(
-                "# HELP inputlayer_knowledge_graph_loads_total Knowledge graphs loaded from disk on use.\n",
-            );
-            out.push_str("# TYPE inputlayer_knowledge_graph_loads_total counter\n");
-            out.push_str(&format!(
-                "inputlayer_knowledge_graph_loads_total {kg_loads}\n"
-            ));
-
-            out.push_str(
-                "# HELP inputlayer_knowledge_graph_unloads_total Knowledge graphs unloaded from memory.\n",
-            );
-            out.push_str("# TYPE inputlayer_knowledge_graph_unloads_total counter\n");
-            out.push_str(&format!(
-                "inputlayer_knowledge_graph_unloads_total {kg_unloads}\n"
-            ));
-
-            out.push_str("# HELP inputlayer_relations_total Total base relations.\n");
-            out.push_str("# TYPE inputlayer_relations_total gauge\n");
-            out.push_str(&format!("inputlayer_relations_total {total_relations}\n"));
-
-            out.push_str("# HELP inputlayer_views_total Total derived views (rules).\n");
-            out.push_str("# TYPE inputlayer_views_total gauge\n");
-            out.push_str(&format!("inputlayer_views_total {total_views}\n"));
-
-            out.push_str("# HELP inputlayer_tuples_total Total stored tuples.\n");
-            out.push_str("# TYPE inputlayer_tuples_total gauge\n");
-            out.push_str(&format!("inputlayer_tuples_total {total_tuples}\n"));
-
-            out.push_str("# HELP inputlayer_memory_usage_bytes Estimated memory usage in bytes.\n");
-            out.push_str("# TYPE inputlayer_memory_usage_bytes gauge\n");
-            out.push_str(&format!(
-                "inputlayer_memory_usage_bytes {estimated_memory}\n"
-            ));
-
-            out.push_str("# HELP inputlayer_sessions_total Active sessions.\n");
-            out.push_str("# TYPE inputlayer_sessions_total gauge\n");
-            out.push_str(&format!(
-                "inputlayer_sessions_total {}\n",
-                session_stats.total_sessions
-            ));
-
-            out.push_str("# HELP inputlayer_sessions_clean Clean sessions.\n");
-            out.push_str("# TYPE inputlayer_sessions_clean gauge\n");
-            out.push_str(&format!(
-                "inputlayer_sessions_clean {}\n",
-                session_stats.clean_sessions
-            ));
-
-            out.push_str("# HELP inputlayer_sessions_dirty Dirty sessions.\n");
-            out.push_str("# TYPE inputlayer_sessions_dirty gauge\n");
-            out.push_str(&format!(
-                "inputlayer_sessions_dirty {}\n",
-                session_stats.dirty_sessions
-            ));
-
-            out.push_str(
-                "# HELP inputlayer_ephemeral_facts Total ephemeral facts across sessions.\n",
-            );
-            out.push_str("# TYPE inputlayer_ephemeral_facts gauge\n");
-            out.push_str(&format!(
-                "inputlayer_ephemeral_facts {}\n",
-                session_stats.total_ephemeral_facts
-            ));
-
-            out.push_str(
-                "# HELP inputlayer_ephemeral_rules Total ephemeral rules across sessions.\n",
-            );
-            out.push_str("# TYPE inputlayer_ephemeral_rules gauge\n");
-            out.push_str(&format!(
-                "inputlayer_ephemeral_rules {}\n",
-                session_stats.total_ephemeral_rules
-            ));
-
-            out.push_str(&handler.timing_histograms().format_prometheus());
-
-            out
-        }),
+        tokio::task::spawn_blocking(move || prometheus_text(&handler)),
     )
     .await
     .map_err(|_| {
@@ -291,6 +178,288 @@ pub async fn prometheus_metrics(
     ))
 }
 
+/// The `/metrics/prometheus` body.
+fn prometheus_text(handler: &Handler) -> String {
+    let storage = handler.get_storage();
+    let summaries = storage.knowledge_graph_summaries();
+    let (kg_loads, kg_unloads) = storage.knowledge_graph_residency_counts();
+    let persist = storage.persist_stats();
+    drop(storage);
+    let totals = KgTotals::of(&summaries);
+    let session_stats = handler.session_stats();
+    let sessions_by_kg = handler.session_manager().sessions_by_knowledge_graph();
+    let subscriptions = handler.subscription_metrics();
+    let rate_limit = &handler.config().http.rate_limit;
+    let (query_memory_held, query_memory_budget) = handler.query_memory_usage();
+
+    let mut out = Prometheus::new();
+    out.single(
+        "inputlayer_uptime_seconds",
+        "gauge",
+        "Server uptime in seconds.",
+        handler.uptime_seconds(),
+    );
+    out.single(
+        "inputlayer_queries_total",
+        "counter",
+        "Total queries executed.",
+        handler.total_queries(),
+    );
+
+    // Knowledge graphs, totals and per KG
+    out.single(
+        "inputlayer_knowledge_graphs",
+        "gauge",
+        "Number of knowledge graphs.",
+        totals.knowledge_graphs,
+    );
+    out.single(
+        "inputlayer_knowledge_graphs_loaded",
+        "gauge",
+        "Knowledge graphs held in memory.",
+        totals.loaded_knowledge_graphs,
+    );
+    out.single(
+        "inputlayer_knowledge_graph_loads_total",
+        "counter",
+        "Knowledge graphs loaded from disk on use.",
+        kg_loads,
+    );
+    out.single(
+        "inputlayer_knowledge_graph_unloads_total",
+        "counter",
+        "Knowledge graphs unloaded from memory.",
+        kg_unloads,
+    );
+    out.single(
+        "inputlayer_relations_total",
+        "gauge",
+        "Total base relations.",
+        totals.relations,
+    );
+    out.single(
+        "inputlayer_views_total",
+        "gauge",
+        "Total derived views (rules).",
+        totals.views,
+    );
+    out.single(
+        "inputlayer_tuples_total",
+        "gauge",
+        "Total stored tuples.",
+        totals.tuples,
+    );
+    let per_kg = |value: fn(&KgSummary) -> usize| {
+        summaries
+            .iter()
+            .map(move |(kg, summary)| (vec![("kg", kg.clone())], value(summary)))
+    };
+    out.family(
+        "inputlayer_kg_relations",
+        "gauge",
+        "Base relations holding facts, per knowledge graph.",
+        per_kg(|s| s.relations),
+    );
+    out.family(
+        "inputlayer_kg_tuples",
+        "gauge",
+        "Stored tuples, per knowledge graph.",
+        per_kg(|s| s.tuples),
+    );
+    out.family(
+        "inputlayer_kg_views",
+        "gauge",
+        "Derived views (rules), per knowledge graph.",
+        per_kg(|s| s.rules),
+    );
+    out.family(
+        "inputlayer_kg_loaded",
+        "gauge",
+        "1 while the knowledge graph is held in memory, else 0.",
+        per_kg(|s| usize::from(s.loaded)),
+    );
+    let mut sessions_by_kg: Vec<_> = sessions_by_kg.into_iter().collect();
+    sessions_by_kg.sort_unstable();
+    out.family(
+        "inputlayer_kg_sessions",
+        "gauge",
+        "Open sessions, per knowledge graph they are bound to.",
+        sessions_by_kg
+            .into_iter()
+            .map(|(kg, count)| (vec![("kg", kg)], count)),
+    );
+
+    // Memory
+    if let Some(rss) = resident_memory_bytes() {
+        out.single(
+            "inputlayer_memory_usage_bytes",
+            "gauge",
+            "Resident set size of the server process in bytes.",
+            rss,
+        );
+    }
+    if let Some(limit) = crate::execution::memory::container_memory_limit() {
+        out.single(
+            "inputlayer_memory_limit_bytes",
+            "gauge",
+            "The memory limit of the server's cgroup (container or systemd unit).",
+            limit,
+        );
+    }
+    out.single(
+        "inputlayer_query_memory_bytes",
+        "gauge",
+        "Bytes held by the computations of the requests in flight.",
+        query_memory_held.max(0),
+    );
+    out.single(
+        "inputlayer_query_memory_budget_bytes",
+        "gauge",
+        "Most bytes the computations in flight may hold together (storage.performance.max_total_query_memory_bytes; 0: no limit).",
+        query_memory_budget,
+    );
+    out.single(
+        "inputlayer_compute_permits",
+        "gauge",
+        "Queries that can compute at once; more wait for a permit.",
+        handler.compute_permits(),
+    );
+    out.single(
+        "inputlayer_compute_permits_in_use",
+        "gauge",
+        "Compute permits held by queries running now.",
+        handler.compute_permits_in_use(),
+    );
+
+    // Sessions
+    out.single(
+        "inputlayer_sessions_total",
+        "gauge",
+        "Active sessions.",
+        session_stats.total_sessions,
+    );
+    out.single(
+        "inputlayer_sessions_clean",
+        "gauge",
+        "Sessions with no ephemeral facts or rules.",
+        session_stats.clean_sessions,
+    );
+    out.single(
+        "inputlayer_sessions_dirty",
+        "gauge",
+        "Sessions holding ephemeral facts or rules.",
+        session_stats.dirty_sessions,
+    );
+    out.single(
+        "inputlayer_ephemeral_facts",
+        "gauge",
+        "Total ephemeral facts across sessions.",
+        session_stats.total_ephemeral_facts,
+    );
+    out.single(
+        "inputlayer_ephemeral_rules",
+        "gauge",
+        "Total ephemeral rules across sessions.",
+        session_stats.total_ephemeral_rules,
+    );
+
+    // Subscriptions
+    out.single(
+        "inputlayer_subscriptions_active",
+        "gauge",
+        "Subscriptions registered across all connections.",
+        subscriptions.active(),
+    );
+    out.single(
+        "inputlayer_subscription_views",
+        "gauge",
+        "Shared standing-query views being evaluated.",
+        subscriptions.views(),
+    );
+    out.single(
+        "inputlayer_subscription_evaluations_total",
+        "counter",
+        "Standing-query evaluations (initial snapshots and re-evaluations), one per shared view.",
+        subscriptions.evaluations(),
+    );
+    out.single(
+        "inputlayer_subscription_shared_evaluations_total",
+        "counter",
+        "Evaluations of lifted queries, each serving every view of its family.",
+        subscriptions.shared_evaluations(),
+    );
+
+    // Write-ahead log and flushes
+    out.single(
+        "inputlayer_wal_size_bytes",
+        "gauge",
+        "Bytes in the write-ahead log.",
+        persist.wal_bytes,
+    );
+    out.single(
+        "inputlayer_wal_size_limit_bytes",
+        "gauge",
+        "WAL size that makes the next commit flush every shard (storage.persist.max_wal_size_bytes; 0: no limit).",
+        persist.wal_limit_bytes,
+    );
+    out.single(
+        "inputlayer_persist_dirty_shards",
+        "gauge",
+        "Shards holding committed updates not yet flushed to a batch file.",
+        persist.dirty_shards,
+    );
+    out.single(
+        "inputlayer_persist_buffered_updates",
+        "gauge",
+        "Committed updates not yet flushed to a batch file (they are in the WAL).",
+        persist.buffered_updates,
+    );
+    out.single(
+        "inputlayer_persist_oldest_unflushed_seconds",
+        "gauge",
+        "How long the longest-waiting dirty shard has held unflushed updates (0: none).",
+        persist
+            .oldest_unflushed
+            .map_or(0.0, |age| age.as_secs_f64()),
+    );
+    out.single(
+        "inputlayer_persist_flushes_total",
+        "counter",
+        "Shard buffers flushed to batch files.",
+        persist.flushes,
+    );
+    out.single(
+        "inputlayer_persist_flush_failures_total",
+        "counter",
+        "Shard flushes that failed (the updates stay in the WAL and are retried).",
+        persist.flush_failures,
+    );
+    out.single(
+        "inputlayer_store_read_only",
+        "gauge",
+        "1 once the store refuses writes until restart after a failed WAL write or fsync, else 0.",
+        u8::from(persist.read_only),
+    );
+
+    // Connections, requests and rejections
+    out.single(
+        "inputlayer_http_requests_in_flight_limit",
+        "gauge",
+        "rate_limit.max_connections (0: no limit).",
+        rate_limit.max_connections,
+    );
+    out.single(
+        "inputlayer_ws_connections_limit",
+        "gauge",
+        "rate_limit.max_ws_connections (0: no limit).",
+        rate_limit.max_ws_connections,
+    );
+    handler.server_metrics().format_prometheus(&mut out);
+
+    out.raw(&handler.timing_histograms().format_prometheus());
+    out.finish()
+}
+
 /// Totals over every knowledge graph, from their summaries: stats must not
 /// load knowledge graphs that are not in memory.
 #[derive(Debug, Clone, Copy, Default)]
@@ -303,7 +472,7 @@ struct KgTotals {
 }
 
 impl KgTotals {
-    fn of(summaries: &[(String, crate::storage_engine::KgSummary)]) -> Self {
+    fn of(summaries: &[(String, KgSummary)]) -> Self {
         summaries
             .iter()
             .fold(Self::default(), |totals, (_, summary)| Self {
@@ -314,11 +483,6 @@ impl KgTotals {
                 views: totals.views + summary.rules,
                 tuples: totals.tuples + summary.tuples as u64,
             })
-    }
-
-    /// Each tuple is approximately 64 bytes (Value enum + heap allocations).
-    fn estimated_memory(&self) -> u64 {
-        self.tuples.saturating_mul(64)
     }
 }
 
@@ -382,18 +546,18 @@ mod tests {
         assert!(data.relations >= 1);
     }
 
+    /// Memory is the process's resident set, not an estimate from tuples.
+    #[cfg(target_os = "linux")]
     #[tokio::test]
-    async fn test_stats_memory_estimation() {
+    async fn test_stats_memory_is_resident_set() {
         let (handler, _tmp) = make_handler();
-        // Insert some data
-        handler
-            .query_program(None, "+mem_test[(1, 2), (3, 4), (5, 6)]".to_string())
-            .await
-            .unwrap();
         let result = stats(Extension(handler)).await.unwrap();
         let data = result.0.data.unwrap();
-        // 3 tuples * 64 bytes each = 192
-        assert!(data.memory_usage_bytes > 0);
+        assert!(
+            data.memory_usage_bytes > 1 << 20,
+            "{}",
+            data.memory_usage_bytes
+        );
     }
 
     // === Regression tests for production readiness fixes ===
@@ -503,6 +667,82 @@ mod tests {
         assert!(body.contains("inputlayer_queries_total 0"));
         assert!(body.contains("inputlayer_knowledge_graphs"));
         assert!(body.contains("inputlayer_sessions_total 0"));
+    }
+
+    /// Every sample belongs to a family declared once with HELP and TYPE.
+    #[tokio::test]
+    async fn test_prometheus_exposition_is_well_formed() {
+        let (handler, _tmp) = make_handler();
+        let (_, _, body) = prometheus_metrics(Extension(handler)).await.unwrap();
+        let mut declared = std::collections::HashSet::new();
+        let mut kinds = std::collections::HashMap::new();
+        for line in body.lines() {
+            if let Some(rest) = line.strip_prefix("# HELP ") {
+                let name = rest.split(' ').next().unwrap();
+                assert!(declared.insert(name.to_string()), "{name} declared twice");
+            } else if let Some(rest) = line.strip_prefix("# TYPE ") {
+                let (name, kind) = rest.split_once(' ').unwrap();
+                kinds.insert(name.to_string(), kind.to_string());
+            } else {
+                let (series, value) = line.rsplit_once(' ').unwrap();
+                assert!(value.parse::<f64>().is_ok(), "{line}");
+                let name = series.split('{').next().unwrap();
+                let family = ["_bucket", "_sum", "_count"]
+                    .iter()
+                    .find_map(|suffix| {
+                        name.strip_suffix(suffix)
+                            .filter(|base| kinds.get(*base).is_some_and(|k| k == "histogram"))
+                    })
+                    .unwrap_or(name);
+                assert!(declared.contains(family), "undeclared: {line}");
+            }
+        }
+    }
+
+    /// The blind spots of #300: subscriptions, WAL and flushes, the store's
+    /// write state, per-KG counts, memory, compute and connections.
+    #[tokio::test]
+    async fn test_prometheus_metrics_cover_operations() {
+        let (handler, _tmp) = make_handler();
+        handler
+            .query_program(None, "+ops_test[(1, 2), (3, 4)]".to_string())
+            .await
+            .unwrap();
+        let (_, _, body) = prometheus_metrics(Extension(handler)).await.unwrap();
+        for line in [
+            "inputlayer_kg_tuples{kg=\"default\"} 2",
+            "inputlayer_kg_relations{kg=\"default\"} 1",
+            "inputlayer_kg_loaded{kg=\"default\"} 1",
+            "inputlayer_subscriptions_active 0",
+            "inputlayer_subscription_views 0",
+            "inputlayer_persist_dirty_shards 1",
+            "inputlayer_persist_buffered_updates 2",
+            "inputlayer_persist_flush_failures_total 0",
+            "inputlayer_store_read_only 0",
+            "inputlayer_compute_permits_in_use 0",
+            "inputlayer_ws_connections 0",
+            "inputlayer_rejections_total{reason=\"ws_connection_limit\"} 0",
+            "inputlayer_auth_failures_total{method=\"password\"} 0",
+        ] {
+            assert!(body.lines().any(|l| l == line), "missing {line}:\n{body}");
+        }
+        for family in [
+            "inputlayer_wal_size_bytes ",
+            "inputlayer_persist_oldest_unflushed_seconds ",
+            "inputlayer_query_memory_bytes ",
+            "inputlayer_compute_permits ",
+            "inputlayer_http_requests_in_flight ",
+            "inputlayer_ws_connections_limit 1024",
+        ] {
+            assert!(
+                body.lines().any(|l| l.starts_with(family)),
+                "missing {family}:\n{body}"
+            );
+        }
+        #[cfg(target_os = "linux")]
+        assert!(body
+            .lines()
+            .any(|l| l.starts_with("inputlayer_memory_usage_bytes ")));
     }
 
     #[tokio::test]

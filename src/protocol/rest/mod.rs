@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use axum::{
     body::Body,
-    extract::ConnectInfo,
+    extract::{ConnectInfo, State},
     http::{HeaderMap, Request, StatusCode},
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
@@ -27,8 +27,9 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use tracing::{info, warn};
 
-use crate::auth::ip_bucket;
+use crate::auth::{ip_bucket, Principal, Role};
 use crate::config::{HttpConfig, IpNet};
+use crate::protocol::metrics::{Rejection, ServerMetrics};
 use crate::protocol::Handler;
 
 use self::handlers::{admin, ws};
@@ -37,6 +38,7 @@ use self::handlers::{admin, ws};
 /// Unlike an atomic counter, Semaphore provides atomic check-and-acquire,
 /// eliminating the TOCTOU race that could allow over-limit connections.
 async fn connection_limit_middleware(
+    State(metrics): State<Arc<ServerMetrics>>,
     Extension(conn_semaphore): Extension<Option<Arc<tokio::sync::Semaphore>>>,
     req: Request<Body>,
     next: Next,
@@ -45,6 +47,7 @@ async fn connection_limit_middleware(
         let permit = match sem.clone().try_acquire_owned() {
             Ok(permit) => permit,
             Err(_) => {
+                metrics.record_rejection(Rejection::HttpConnectionLimit);
                 return (StatusCode::SERVICE_UNAVAILABLE, "Too many connections").into_response();
             }
         };
@@ -56,13 +59,26 @@ async fn connection_limit_middleware(
     }
 }
 
+/// Middleware: count every response by status, and the requests in flight.
+async fn http_metrics_middleware(
+    State(metrics): State<Arc<ServerMetrics>>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    let _in_flight = metrics.http_request();
+    let response = next.run(req).await;
+    metrics.record_http_response(response.status().as_u16());
+    response
+}
+
 /// Middleware: API key authentication via `_internal` KG.
 /// Checks for `Authorization: Bearer <key>` header and validates against stored API keys.
 /// Skips auth for /health, /live, /ready endpoints and the `/ws` upgrade
-/// (WS has its own auth flow).
+/// (WS has its own auth flow). An authenticated request carries its
+/// [`Principal`] as an extension.
 async fn auth_middleware(
     Extension(handler): Extension<Arc<Handler>>,
-    req: Request<Body>,
+    mut req: Request<Body>,
     next: Next,
 ) -> Response {
     // Health/liveness probes and API docs are always public (both root and /v1/ prefixed)
@@ -85,15 +101,41 @@ async fn auth_middleware(
     if let Some(auth_header) = req.headers().get("authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
             if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                if handler.authenticate_api_key(token).is_ok() {
+                if let Ok(principal) = handler.authenticate_api_key(token) {
+                    req.extensions_mut().insert(principal);
                     return next.run(req).await;
                 }
             }
         }
     }
 
+    handler
+        .server_metrics()
+        .record_rejection(Rejection::HttpUnauthorized);
     (StatusCode::UNAUTHORIZED, UNAUTHORIZED_MESSAGE).into_response()
 }
+
+/// Route middleware: only an admin API key may read server-wide state. The
+/// metrics endpoints aggregate over every knowledge graph, so a key scoped to
+/// one KG, or any non-admin key, must not see them.
+async fn require_admin(
+    Extension(handler): Extension<Arc<Handler>>,
+    principal: Option<Extension<Principal>>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    if principal.is_some_and(|Extension(principal)| principal.role() == Ok(Role::Admin)) {
+        return next.run(req).await;
+    }
+    handler
+        .server_metrics()
+        .record_rejection(Rejection::HttpForbidden);
+    (StatusCode::FORBIDDEN, FORBIDDEN_MESSAGE).into_response()
+}
+
+/// The 403 body of an admin-only endpoint.
+const FORBIDDEN_MESSAGE: &str = "This endpoint needs an admin API key: an unscoped key of a user \
+with the admin role. Keys of editors and viewers, and keys scoped to a knowledge graph, are refused.\n";
 
 /// The 401 body: says where a first-run user finds a key, without echoing the
 /// server's paths to an unauthenticated caller.
@@ -224,6 +266,7 @@ impl IpRateLimiter {
 
 /// Middleware: Resolve [`ClientIp`] and apply per-IP rate limiting (#27).
 async fn ip_rate_limit_middleware(
+    State(metrics): State<Arc<ServerMetrics>>,
     Extension(limiter): Extension<IpRateLimiter>,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     mut req: Request<Body>,
@@ -236,6 +279,7 @@ async fn ip_rate_limit_middleware(
     if limiter.check(ip) {
         next.run(req).await
     } else {
+        metrics.record_rejection(Rejection::HttpRateLimit);
         (StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded").into_response()
     }
 }
@@ -348,13 +392,20 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
         None
     };
 
+    let metrics = Arc::clone(handler.server_metrics());
+
+    // Server-wide statistics: admin keys only.
+    let admin_routes = Router::new()
+        .route("/metrics", get(admin::stats))
+        .route("/metrics/prometheus", get(admin::prometheus_metrics))
+        .route_layer(middleware::from_fn(require_admin));
+
     // Versioned API routes (available at both / and /v1/ for backward compatibility)
     let api_routes = Router::new()
+        .merge(admin_routes)
         .route("/health", get(admin::health))
         .route("/live", get(admin::liveness))
         .route("/ready", get(admin::readiness))
-        .route("/metrics", get(admin::stats))
-        .route("/metrics/prometheus", get(admin::prometheus_metrics))
         .route("/ws", get(ws::global_websocket))
         .route(
             crate::protocol::replication::STREAM_PATH,
@@ -392,7 +443,10 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
             None
         };
     api_app = api_app
-        .layer(middleware::from_fn(connection_limit_middleware))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&metrics),
+            connection_limit_middleware,
+        ))
         .layer(Extension(conn_semaphore));
 
     // WebSocket-specific connection limit (separate from HTTP connection limit)
@@ -428,8 +482,17 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
     // Per-IP rate limiting (#27)
     let ip_limiter = IpRateLimiter::new(config.rate_limit.per_ip_max_rps, &config.trusted_proxies);
     app = app
-        .layer(middleware::from_fn(ip_rate_limit_middleware))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&metrics),
+            ip_rate_limit_middleware,
+        ))
         .layer(Extension(ip_limiter));
+
+    // Count every API response, rejections by the layers above included
+    app = app.layer(middleware::from_fn_with_state(
+        metrics,
+        http_metrics_middleware,
+    ));
 
     // Serve GUI static files if enabled (outside auth middleware - GUI is public)
     if config.gui.enabled {
@@ -827,6 +890,127 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    /// `GET path` with `key` as the Bearer token, if any: status and body.
+    async fn get_with_key(app: &Router, path: &str, key: Option<&str>) -> (StatusCode, String) {
+        let mut req = Request::builder().uri(path);
+        if let Some(key) = key {
+            req = req.header("authorization", format!("Bearer {key}"));
+        }
+        let resp = app
+            .clone()
+            .oneshot(req.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = resp.status();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, String::from_utf8(body.to_vec()).unwrap())
+    }
+
+    fn create_key(handler: &Handler, owner: &str, scope: Option<crate::auth::KeyScope>) -> String {
+        let label = format!("key-{}", uuid::Uuid::new_v4());
+        let created = handler
+            .handle_apikey_create(&label, owner, None, scope)
+            .unwrap();
+        created.rows[0].values[1].as_str().unwrap().to_string()
+    }
+
+    const METRICS_PATHS: [&str; 4] = [
+        "/metrics",
+        "/metrics/prometheus",
+        "/v1/metrics",
+        "/v1/metrics/prometheus",
+    ];
+
+    /// The metrics aggregate over every knowledge graph: a key that is not an
+    /// unscoped admin key must not read them (cross-tenant leak, #300).
+    #[tokio::test]
+    async fn test_metrics_refuse_non_admin_keys() {
+        let (handler, admin_key, _tmp) = make_handler_with_api_key();
+        handler
+            .query_program(None, "+seed[(1, 2)]".to_string())
+            .await
+            .unwrap();
+        handler
+            .handle_user_create("vera", "vera-password-123", "viewer")
+            .unwrap();
+        handler
+            .handle_user_create("ed", "ed-password-1234", "editor")
+            .unwrap();
+        let viewer = create_key(&handler, "vera", None);
+        let editor = create_key(&handler, "ed", None);
+        let scope =
+            crate::auth::KeyScope::new("default", crate::auth::KgRole::Viewer.into()).unwrap();
+        let scoped_admin = create_key(&handler, "admin", Some(scope));
+        let app = create_router(Arc::clone(&handler), &make_default_config());
+
+        for path in METRICS_PATHS {
+            for (who, key) in [
+                ("viewer", &viewer),
+                ("editor", &editor),
+                ("admin key scoped to one KG", &scoped_admin),
+            ] {
+                let (status, body) = get_with_key(&app, path, Some(key)).await;
+                assert_eq!(status, StatusCode::FORBIDDEN, "{who} on {path}: {body}");
+                assert!(body.contains("admin API key"), "{body}");
+            }
+            let (status, _) = get_with_key(&app, path, Some(&admin_key)).await;
+            assert_eq!(status, StatusCode::OK, "admin on {path}");
+            let (status, _) = get_with_key(&app, path, None).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "no key on {path}");
+        }
+
+        let (_, body) = get_with_key(&app, "/metrics/prometheus", Some(&admin_key)).await;
+        for line in [
+            "inputlayer_rejections_total{reason=\"http_forbidden\"} 12",
+            "inputlayer_rejections_total{reason=\"http_unauthorized\"} 4",
+            "inputlayer_http_responses_total{code=\"403\"} 12",
+            "inputlayer_http_responses_total{code=\"401\"} 4",
+            "inputlayer_http_responses_total{code=\"200\"} 4",
+        ] {
+            assert!(body.lines().any(|l| l == line), "missing {line}:\n{body}");
+        }
+    }
+
+    /// A key whose user lost the admin role loses the metrics with it.
+    #[tokio::test]
+    async fn test_metrics_follow_a_demoted_admin() {
+        let (handler, _admin_key, _tmp) = make_handler_with_api_key();
+        handler
+            .handle_user_create("ops", "ops-password-123", "admin")
+            .unwrap();
+        let key = create_key(&handler, "ops", None);
+        let app = create_router(Arc::clone(&handler), &make_default_config());
+        let (status, _) = get_with_key(&app, "/metrics", Some(&key)).await;
+        assert_eq!(status, StatusCode::OK);
+        handler.handle_user_role("ops", "viewer").unwrap();
+        let (status, _) = get_with_key(&app, "/metrics", Some(&key)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    /// A request over the per-IP rate is refused and counted.
+    #[tokio::test]
+    async fn test_rate_limited_requests_are_counted() {
+        let (handler, _tmp) = make_handler();
+        let mut config = make_default_config();
+        config.rate_limit.per_ip_max_rps = 1;
+        let app = create_router(Arc::clone(&handler), &config);
+        let (first, _) = get_with_key(&app, "/health", None).await;
+        let (second, _) = get_with_key(&app, "/health", None).await;
+        assert_eq!(
+            (first, second),
+            (StatusCode::OK, StatusCode::TOO_MANY_REQUESTS)
+        );
+        assert_eq!(
+            handler
+                .server_metrics()
+                .rejections(Rejection::HttpRateLimit),
+            1
+        );
+        assert_eq!(handler.server_metrics().http_in_flight(), 0);
     }
 
     // === Connection Limit Middleware Tests ===

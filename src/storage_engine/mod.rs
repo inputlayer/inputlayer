@@ -360,6 +360,11 @@ impl StorageEngine {
         self.persist.check_writable()
     }
 
+    /// Write-ahead log and flush state, for monitoring.
+    pub fn persist_stats(&self) -> crate::storage::persist::PersistStats {
+        self.persist.stats()
+    }
+
     /// The primary's replication log, when this engine is a primary.
     pub fn replication_log(&self) -> Option<&Arc<ReplicationLog>> {
         self.persist.replication_log()

@@ -58,6 +58,7 @@ use request::{Job, Reply, Request};
 
 use crate::auth::{Principal, Role, INTERNAL_KG};
 use crate::protocol::handler::Notification;
+use crate::protocol::metrics::Rejection;
 use crate::protocol::notification_log::{Cursor, Resumed};
 use crate::protocol::rest::error::RestError;
 use crate::protocol::rest::{ClientIp, PreAuthSlots, WsSemaphore};
@@ -196,7 +197,9 @@ pub async fn global_websocket(
         IpAddr::V4(Ipv4Addr::UNSPECIFIED),
         |Extension(ClientIp(ip))| ip,
     );
+    let metrics = handler.server_metrics();
     let Some(preauth_slot) = preauth_slots.try_acquire(peer) else {
+        metrics.record_rejection(Rejection::WsPreauthLimit);
         warn!(%peer, "ws_preauth_limit_exceeded");
         return Err(RestError::too_many_requests(
             "Too many unauthenticated WebSocket connections".to_string(),
@@ -208,6 +211,7 @@ pub async fn global_websocket(
         match sem.clone().try_acquire_owned() {
             Ok(permit) => Some(permit),
             Err(_) => {
+                metrics.record_rejection(Rejection::WsConnectionLimit);
                 return Err(RestError::service_unavailable(
                     "Too many WebSocket connections".to_string(),
                 ));
@@ -295,9 +299,14 @@ async fn handle_global_ws_connection(
     peer: IpAddr,
     preauth_slot: crate::protocol::rest::PreAuthSlot,
 ) {
+    let metrics = Arc::clone(handler.server_metrics());
+    let _open = metrics.ws_connection();
+    let unauthenticated = metrics.ws_unauthenticated();
     let (sink, mut receiver) = socket.split();
     let send_timeout = std::time::Duration::from_millis(handler.config().http.ws_send_timeout_ms);
-    let mut sender = Outbound::new(sink).with_send_timeout(send_timeout);
+    let mut sender = Outbound::new(sink)
+        .with_send_timeout(send_timeout)
+        .with_metrics(Arc::clone(&metrics));
 
     info!(kg = %kg, "ws_connection_start");
 
@@ -311,6 +320,7 @@ async fn handle_global_ws_connection(
         return;
     };
     drop(preauth_slot);
+    drop(unauthenticated);
     let auth_request = authenticated.request;
     let principal = authenticated.principal;
     sender.bind(principal.clone());
@@ -465,6 +475,7 @@ async fn handle_global_ws_connection(
                         let (access, request) = if rate.allow() {
                             Request::from_text(&text)
                         } else {
+                            metrics.record_rejection(Rejection::WsRateLimit);
                             Request::immediate(ServerFrame::error(
                                 probe_request_id(&text),
                                 Some(ErrorCode::RateLimited),

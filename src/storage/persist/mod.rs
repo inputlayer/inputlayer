@@ -154,6 +154,39 @@ pub trait PersistBackend: Send + Sync {
 struct ShardState {
     meta: ShardMeta,
     buffer: Vec<Update>,
+    /// When `buffer` last went from empty to holding updates.
+    dirty_since: Option<std::time::Instant>,
+}
+
+impl ShardState {
+    fn new(meta: ShardMeta) -> Self {
+        Self {
+            meta,
+            buffer: Vec::new(),
+            dirty_since: None,
+        }
+    }
+}
+
+/// Write-ahead log and flush state, for monitoring.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PersistStats {
+    /// Bytes in the WAL file.
+    pub wal_bytes: u64,
+    /// The WAL size that makes a commit flush every shard; 0 = no limit.
+    pub wal_limit_bytes: u64,
+    /// Shards with committed updates not yet flushed to a batch file.
+    pub dirty_shards: usize,
+    /// Committed updates not yet flushed to a batch file.
+    pub buffered_updates: usize,
+    /// How long the longest-waiting dirty shard has held unflushed updates.
+    pub oldest_unflushed: Option<std::time::Duration>,
+    /// Shard buffers flushed to batch files since startup.
+    pub flushes: u64,
+    /// Shard flushes that failed since startup.
+    pub flush_failures: u64,
+    /// The store refuses writes until restart.
+    pub read_only: bool,
 }
 
 /// A flush failure injected by tests, consumed by the first flush that reaches it.
@@ -180,6 +213,10 @@ pub struct FilePersist {
     /// Where committed transactions are shipped to followers, on a primary.
     replication: std::sync::OnceLock<Arc<ReplicationLog>>,
     next_batch_id: AtomicU64,
+    /// The WAL's read-only state, readable without the WAL lock.
+    wal_read_only: Arc<std::sync::atomic::AtomicBool>,
+    flushes: AtomicU64,
+    flush_failures: AtomicU64,
     #[cfg(test)]
     flush_faults: Mutex<Vec<FlushFault>>,
 }
@@ -198,6 +235,7 @@ impl FilePersist {
         let (wal, recovered) = PersistWal::open(config.path.join("wal"))?;
         migrate::migrate_v1(&config.path)?;
 
+        let wal_read_only = wal.read_only_flag();
         let mut persist = FilePersist {
             config,
             shards: RwLock::new(HashMap::new()),
@@ -206,6 +244,9 @@ impl FilePersist {
             recovered_catalog: Mutex::new(Vec::new()),
             replication: std::sync::OnceLock::new(),
             next_batch_id: AtomicU64::new(1),
+            wal_read_only,
+            flushes: AtomicU64::new(0),
+            flush_failures: AtomicU64::new(0),
             #[cfg(test)]
             flush_faults: Mutex::new(Vec::new()),
         };
@@ -273,13 +314,7 @@ impl FilePersist {
                 }
             }
 
-            shards.insert(
-                meta.name.clone(),
-                ShardState {
-                    meta,
-                    buffer: Vec::new(),
-                },
-            );
+            shards.insert(meta.name.clone(), ShardState::new(meta));
         }
 
         Ok(())
@@ -587,10 +622,13 @@ impl FilePersist {
         match self.save_batch(&state.meta, &batch) {
             Ok(meta) => {
                 state.meta = meta;
+                state.dirty_since = None;
+                self.flushes.fetch_add(1, Ordering::Relaxed);
                 Ok(())
             }
             Err(e) => {
                 state.buffer = batch.updates;
+                self.flush_failures.fetch_add(1, Ordering::Relaxed);
                 Err(e)
             }
         }
@@ -681,6 +719,33 @@ impl FilePersist {
             }
         }
         Ok(())
+    }
+
+    /// WAL and flush state, without waiting for the WAL lock: a commit or
+    /// flush in progress does not hold up a metrics scrape.
+    pub fn stats(&self) -> PersistStats {
+        let wal_bytes = fs::metadata(self.config.path.join("wal").join(wal::CURRENT_FILE))
+            .map_or(0, |m| m.len());
+        let now = std::time::Instant::now();
+        let shards = self.shards.read();
+        let dirty = shards.values().filter(|state| !state.buffer.is_empty());
+        let (dirty_shards, buffered_updates, oldest) =
+            dirty.fold((0, 0, None), |(count, updates, oldest), state| {
+                let since = state.dirty_since.unwrap_or(now);
+                let oldest = Some(oldest.map_or(since, |o: std::time::Instant| o.min(since)));
+                (count + 1, updates + state.buffer.len(), oldest)
+            });
+        drop(shards);
+        PersistStats {
+            wal_bytes,
+            wal_limit_bytes: self.config.max_wal_size_bytes,
+            dirty_shards,
+            buffered_updates,
+            oldest_unflushed: oldest.map(|since| now.saturating_duration_since(since)),
+            flushes: self.flushes.load(Ordering::Relaxed),
+            flush_failures: self.flush_failures.load(Ordering::Relaxed),
+            read_only: self.wal_read_only.load(Ordering::Acquire),
+        }
     }
 
     /// Whether `shard` exists.
@@ -871,13 +936,7 @@ impl PersistBackend for FilePersist {
         if !shards.contains_key(shard) {
             let meta = ShardMeta::new(shard.to_string());
             self.save_shard_meta(&meta)?;
-            shards.insert(
-                shard.to_string(),
-                ShardState {
-                    meta,
-                    buffer: Vec::new(),
-                },
-            );
+            shards.insert(shard.to_string(), ShardState::new(meta));
         }
         Ok(())
     }
@@ -961,12 +1020,14 @@ fn buffer_updates(
     shard: String,
     updates: Vec<Update>,
 ) -> usize {
-    let state = shards.entry(shard).or_insert_with_key(|name| ShardState {
-        meta: ShardMeta::new(name.clone()),
-        buffer: Vec::new(),
-    });
+    let state = shards
+        .entry(shard)
+        .or_insert_with_key(|name| ShardState::new(ShardMeta::new(name.clone())));
     if let Some(max) = updates.iter().map(|u| u.time).max() {
         state.meta.upper = state.meta.upper.max(max + 1);
+    }
+    if state.buffer.is_empty() && !updates.is_empty() {
+        state.dirty_since = Some(std::time::Instant::now());
     }
     state.buffer.extend(updates);
     state.buffer.len()
@@ -2342,6 +2403,81 @@ mod tests {
         assert!(meta_path.exists());
         let content = fs::read_to_string(&meta_path).unwrap();
         let _: ShardMeta = serde_json::from_str(&content).unwrap();
+    }
+
+    /// Stats report the WAL, the unflushed updates and the flushes, without
+    /// the WAL lock.
+    #[test]
+    fn stats_follow_commits_and_flushes() {
+        let temp = TempDir::new().unwrap();
+        let config = PersistConfig {
+            path: temp.path().to_path_buf(),
+            buffer_size: 1000,
+            durability_mode: DurabilityMode::Immediate,
+            max_wal_size_bytes: 0,
+        };
+        let persist = FilePersist::new(config).unwrap();
+        let idle = persist.stats();
+        assert_eq!(
+            (
+                idle.dirty_shards,
+                idle.buffered_updates,
+                idle.oldest_unflushed
+            ),
+            (0, 0, None)
+        );
+        assert!(!idle.read_only);
+
+        persist.ensure_shard("db:stats").unwrap();
+        commit(
+            &persist,
+            "db:stats",
+            &[
+                Update::insert(Tuple::from_pair(1, 2), 1),
+                Update::insert(Tuple::from_pair(3, 4), 1),
+            ],
+        )
+        .unwrap();
+        let dirty = persist.stats();
+        assert_eq!((dirty.dirty_shards, dirty.buffered_updates), (1, 2));
+        assert!(dirty.oldest_unflushed.is_some());
+        assert!(dirty.wal_bytes > 0, "the commit is in the WAL");
+        let wal = persist.wal.lock();
+        assert_eq!(persist.stats().dirty_shards, 1, "never waits for the WAL");
+        drop(wal);
+
+        persist.inject_flush_fault(FlushFault::BatchWrite);
+        persist.flush("db:stats").unwrap_err();
+        let failed = persist.stats();
+        assert_eq!((failed.dirty_shards, failed.flush_failures), (1, 1));
+
+        persist.flush("db:stats").unwrap();
+        let flushed = persist.stats();
+        assert_eq!(
+            (
+                flushed.dirty_shards,
+                flushed.buffered_updates,
+                flushed.oldest_unflushed,
+                flushed.flushes,
+            ),
+            (0, 0, None, 1)
+        );
+
+        // A write whose failure cannot be undone leaves the store read-only
+        for fault in [
+            wal::WalFault::Sync,
+            wal::WalFault::Restore,
+            wal::WalFault::SaveCut,
+        ] {
+            persist.inject_wal_fault(fault);
+        }
+        commit(
+            &persist,
+            "db:stats",
+            &[Update::insert(Tuple::from_pair(5, 6), 2)],
+        )
+        .unwrap_err();
+        assert!(persist.stats().read_only);
     }
 
     /// Regression: When WAL exceeds max_wal_size_bytes, all dirty shards are flushed.

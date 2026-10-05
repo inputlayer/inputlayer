@@ -61,7 +61,10 @@ paths:
   /metrics:
     get:
       summary: Server statistics (JSON)
-      description: Returns server statistics in JSON format.
+      description: |
+        Returns server statistics in JSON format. The statistics cover every
+        knowledge graph, so only an admin API key may read them: an unscoped
+        key of a user with the admin role.
       tags: [Observability]
       security:
         - apiKey: []
@@ -73,14 +76,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/StatsResponse"
         "401":
-          description: Unauthorized
+          description: Missing or invalid API key
+        "403":
+          description: The API key is not an unscoped admin key
 
   /metrics/prometheus:
     get:
       summary: Prometheus metrics
       description: |
         Exports server metrics in Prometheus text exposition format (v0.0.4).
-        Scrape this endpoint with a Prometheus server.
+        Scrape this endpoint with a Prometheus server. The metrics cover every
+        knowledge graph, so only an admin API key may read them: an unscoped
+        key of a user with the admin role.
       tags: [Observability]
       security:
         - apiKey: []
@@ -99,7 +106,9 @@ paths:
                   # TYPE inputlayer_queries_total counter
                   inputlayer_queries_total 100
         "401":
-          description: Unauthorized
+          description: Missing or invalid API key
+        "403":
+          description: The API key is not an unscoped admin key
 
   /ws:
     get:
@@ -198,6 +207,7 @@ components:
             memory_usage_bytes:
               type: integer
               format: uint64
+              description: Resident set size of the server process (0 where the platform does not report it).
             query_count:
               type: integer
               format: uint64

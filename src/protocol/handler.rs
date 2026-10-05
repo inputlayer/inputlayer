@@ -212,6 +212,8 @@ pub struct Handler {
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
     /// Standing-query counters (evaluations, active subscriptions, views).
     subscription_metrics: Arc<super::subscription::SubscriptionMetrics>,
+    /// HTTP, connection, rejection and authentication counters.
+    server_metrics: Arc<super::metrics::ServerMetrics>,
     /// The worker owning the shared standing-query views, started by the
     /// first subscription.
     subscription_hub: std::sync::OnceLock<super::subscription::SubscriptionHub>,
@@ -1046,6 +1048,7 @@ impl Handler {
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
+            server_metrics: Arc::default(),
             subscription_hub: std::sync::OnceLock::new(),
             login_throttle: Arc::default(),
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
@@ -1101,6 +1104,7 @@ impl Handler {
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
+            server_metrics: Arc::default(),
             subscription_hub: std::sync::OnceLock::new(),
             login_throttle: Arc::default(),
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
@@ -1167,6 +1171,18 @@ impl Handler {
         self.compute_permits
     }
 
+    /// Compute permits held by queries running now.
+    pub fn compute_permits_in_use(&self) -> usize {
+        self.compute_permits
+            .saturating_sub(self.query_semaphore.available_permits())
+    }
+
+    /// Bytes the computations in flight hold, and the server's budget for
+    /// them (0: no limit).
+    pub fn query_memory_usage(&self) -> (i64, u64) {
+        (self.query_memory.held(), self.query_memory.budget())
+    }
+
     /// Every compute permit, held until the result drops.
     #[cfg(test)]
     pub(crate) fn hold_compute_permits(&self) -> tokio::sync::OwnedSemaphorePermit {
@@ -1201,6 +1217,11 @@ impl Handler {
     /// Standing-query counters.
     pub fn subscription_metrics(&self) -> &super::subscription::SubscriptionMetrics {
         &self.subscription_metrics
+    }
+
+    /// HTTP, connection, rejection and authentication counters.
+    pub fn server_metrics(&self) -> &Arc<super::metrics::ServerMetrics> {
+        &self.server_metrics
     }
 
     /// The worker owning the shared standing-query views, started on the
@@ -1646,12 +1667,16 @@ impl Handler {
         peer: std::net::IpAddr,
     ) -> Result<crate::auth::Principal, String> {
         let attempt = self.login_throttle.begin(peer, username).map_err(|wait| {
+            self.server_metrics
+                .record_rejection(super::metrics::Rejection::LoginThrottled);
             let retry_secs = wait.as_secs().max(1);
             warn!(username, %peer, retry_secs, "audit_auth_login_throttled");
             format!("Too many failed login attempts; retry in {retry_secs}s")
         })?;
         let Ok(queued) = Arc::clone(&self.login_queue).try_acquire_owned() else {
             self.login_throttle.abort(&attempt);
+            self.server_metrics
+                .record_rejection(super::metrics::Rejection::LoginBusy);
             warn!(username, %peer, "audit_auth_login_busy");
             return Err("Authentication service busy; retry later".to_string());
         };
@@ -1680,6 +1705,9 @@ impl Handler {
                 }
                 Err(_) => {
                     handler.login_throttle.fail(&attempt);
+                    handler
+                        .server_metrics
+                        .record_auth_failure(super::metrics::AuthMethod::Password);
                     warn!(username = %user, %peer, "audit_auth_login_failed");
                 }
             }
@@ -1704,6 +1732,8 @@ impl Handler {
                 Ok(principal)
             }
             Err(rejected) => {
+                self.server_metrics
+                    .record_auth_failure(super::metrics::AuthMethod::ApiKey);
                 tracing::warn!(reason = %rejected, "audit_auth_apikey_rejected");
                 Err(rejected.to_string())
             }
