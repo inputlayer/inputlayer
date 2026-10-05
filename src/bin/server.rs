@@ -59,8 +59,17 @@ struct Cli {
     data_dir: Option<PathBuf>,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Requests are parsed and evaluated on runtime threads, so they get the
+    // stack the parser's limits are sized for.
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(inputlayer::ENGINE_THREAD_STACK_BYTES)
+        .build()?
+        .block_on(serve())
+}
+
+async fn serve() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cli = Cli::parse();
 
     println!("InputLayer Server");

@@ -112,6 +112,12 @@ query_timeout_ms = 30000
 # Maximum query text size in bytes
 max_query_size_bytes = 1048576
 
+# Deepest nesting of a term or type expression: each function call,
+# arithmetic operator, parenthesized group, list[...] and record adds a
+# level. Deeper input is a validation error. Capped at 1024. (Rule and
+# query bodies have a fixed limit too: 512 predicates plus atom arguments.)
+max_nesting_depth = 128
+
 # Maximum tuples per single insert
 max_insert_tuples = 10000
 
