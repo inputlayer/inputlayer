@@ -305,6 +305,29 @@ fn a_knowledge_graph_whose_catalog_save_failed_stays_loaded() {
     }
 }
 
+/// A relation drop whose catalog save failed leaves the dropped schema in the
+/// catalog file: the KG stays loaded, so the schema does not come back, until
+/// the drop's cleanup saves the catalogs.
+#[test]
+fn a_knowledge_graph_whose_relation_drop_save_failed_stays_loaded() {
+    let temp = TempDir::new().unwrap();
+    seed(temp.path());
+    let storage = open(temp.path());
+    insert(&storage, "b", "typed", &[1]);
+    crate::storage::persist::inject_sync_fault(temp.path().join("b"));
+    storage.drop_relation_in("b", "typed").unwrap();
+    assert!(!storage.has_schema_in("b", "typed").unwrap());
+    assert_eq!(storage.unload_idle_knowledge_graphs(Duration::ZERO), 0);
+    assert!(loaded(&storage, "b"));
+
+    // A write to the dropped name settles its cleanup first.
+    insert(&storage, "b", "typed", &[2]);
+    assert_eq!(storage.unload_idle_knowledge_graphs(Duration::ZERO), 1);
+    assert!(!loaded(&storage, "b"));
+    assert!(!storage.has_schema_in("b", "typed").unwrap());
+    assert_eq!(rows(&storage, "b", "typed"), [int(2)].into());
+}
+
 /// Parallel queries naming the same dormant KG load it once, before any of
 /// them runs: never from inside the parallel part, where a worker loading it
 /// could pick up another query waiting for that load.

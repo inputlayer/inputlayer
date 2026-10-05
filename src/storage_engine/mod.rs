@@ -2503,6 +2503,9 @@ impl KnowledgeGraph {
         } else {
             Ok(())
         };
+        if schema.is_err() || rule.is_err() {
+            self.catalog_unsaved = true;
+        }
 
         if let Some(ref dd) = self.incremental {
             let retracted = if tuples.is_empty() {
@@ -2535,6 +2538,7 @@ impl KnowledgeGraph {
         } else {
             self.rule_catalog.save()
         };
+        self.catalog_unsaved = schema.is_err() || rule.is_err();
         self.drop_indexes_for(name);
         self.publish_snapshot();
         schema.and(rule)
