@@ -26,7 +26,8 @@
 //! failed (only a restart replays them from the WAL).
 //!
 //! The names of the loaded KGs are kept in a file, rewritten when a KG loads
-//! that the file lacks, or is unloaded or dropped. After a restart the server
+//! that the file lacks, is unloaded or dropped, or is left dormant by the
+//! warm-up at `storage.max_loaded_knowledge_graphs`. After a restart the server
 //! loads the KGs it names in the background ([`StorageEngine::warm_knowledge_graph`]),
 //! so their first request does not wait for the load, startup still reads
 //! metadata only, and memory holds what it held before the restart. A request
