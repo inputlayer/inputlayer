@@ -505,18 +505,26 @@ impl IRNode {
     /// (`rows_of`). A join on shared keys is estimated as its larger input,
     /// as when it matches each row with a few others; a join without keys,
     /// a cross product, as the product of its inputs, which it always is.
-    /// Filters are assumed to keep every row. The estimate is coarse on
-    /// purpose: it exists to catch plans that multiply large relations
-    /// before they run, not to rank plans.
-    pub fn estimate_rows(&self, rows_of: &dyn Fn(&str) -> u64) -> RowEstimate {
+    /// A filter keeps the rows `filtered_rows` counts for it, every row of
+    /// its input when it counts none. The estimate is coarse on purpose: it
+    /// exists to catch plans that multiply large relations before they run,
+    /// not to rank plans.
+    pub fn estimate_rows(
+        &self,
+        rows_of: &dyn Fn(&str) -> u64,
+        filtered_rows: &dyn Fn(&IRNode) -> Option<u64>,
+    ) -> RowEstimate {
         match self {
             IRNode::Scan { relation, .. } => RowEstimate::rows(rows_of(relation)),
+            IRNode::Filter { input, .. } => match filtered_rows(self) {
+                Some(rows) => RowEstimate::rows(rows),
+                None => input.estimate_rows(rows_of, filtered_rows),
+            },
             IRNode::Map { input, .. }
             | IRNode::FlatMap { input, .. }
-            | IRNode::Filter { input, .. }
             | IRNode::Distinct { input }
             | IRNode::Compute { input, .. }
-            | IRNode::Aggregate { input, .. } => input.estimate_rows(rows_of),
+            | IRNode::Aggregate { input, .. } => input.estimate_rows(rows_of, filtered_rows),
             IRNode::Join {
                 left,
                 right,
@@ -529,8 +537,8 @@ impl IRNode {
                 left_keys,
                 ..
             } => {
-                let left = left.estimate_rows(rows_of);
-                let right = right.estimate_rows(rows_of);
+                let left = left.estimate_rows(rows_of, filtered_rows);
+                let right = right.estimate_rows(rows_of, filtered_rows);
                 let cross_product = left_keys.is_empty();
                 let join = JoinEstimate {
                     rows: if cross_product {
@@ -551,15 +559,15 @@ impl IRNode {
                 }
             }
             IRNode::Antijoin { left, right, .. } => {
-                let left = left.estimate_rows(rows_of);
-                let right = right.estimate_rows(rows_of);
+                let left = left.estimate_rows(rows_of, filtered_rows);
+                let right = right.estimate_rows(rows_of, filtered_rows);
                 RowEstimate {
                     rows: left.rows,
                     largest_join: RowEstimate::larger_join(left, right),
                 }
             }
             IRNode::Union { inputs } => inputs.iter().fold(RowEstimate::default(), |acc, input| {
-                let input = input.estimate_rows(rows_of);
+                let input = input.estimate_rows(rows_of, filtered_rows);
                 RowEstimate {
                     rows: acc.rows.saturating_add(input.rows),
                     largest_join: RowEstimate::larger_join(acc, input),
@@ -2207,29 +2215,53 @@ mod tests {
         }
     }
 
+    /// Counts no filter's rows: every filter keeps its input's.
+    fn uncounted(_: &IRNode) -> Option<u64> {
+        None
+    }
+
     #[test]
     fn test_estimate_scan_filter_and_aggregate_keep_input_rows() {
         let scan = scan_of("a", "x");
-        assert_eq!(scan.estimate_rows(&sizes), RowEstimate::rows(1000));
+        assert_eq!(
+            scan.estimate_rows(&sizes, &uncounted),
+            RowEstimate::rows(1000)
+        );
         let filtered = IRNode::Filter {
             input: Box::new(scan.clone()),
             predicate: Predicate::ColumnEqConst(0, 1),
         };
-        assert_eq!(filtered.estimate_rows(&sizes).rows, 1000);
+        assert_eq!(filtered.estimate_rows(&sizes, &uncounted).rows, 1000);
+        let one_match = |_: &IRNode| Some(1);
+        assert_eq!(
+            filtered.estimate_rows(&sizes, &one_match),
+            RowEstimate::rows(1)
+        );
+        let cross = join_of(filtered, scan_of("b", "y"), &[]);
+        assert_eq!(cross.estimate_rows(&sizes, &uncounted).rows, 300_000);
+        assert_eq!(cross.estimate_rows(&sizes, &one_match).rows, 300);
         let agg = IRNode::Aggregate {
             input: Box::new(scan),
             group_by: vec![0],
             aggregations: vec![(AggregateFunction::Count, 0)],
             output_schema: vec!["x".to_string(), "count".to_string()],
         };
-        assert_eq!(agg.estimate_rows(&sizes), RowEstimate::rows(1000));
-        assert_eq!(scan_of("missing", "x").estimate_rows(&sizes).rows, 0);
+        assert_eq!(
+            agg.estimate_rows(&sizes, &uncounted),
+            RowEstimate::rows(1000)
+        );
+        assert_eq!(
+            scan_of("missing", "x")
+                .estimate_rows(&sizes, &uncounted)
+                .rows,
+            0
+        );
     }
 
     #[test]
     fn test_estimate_keyed_join_is_its_larger_input() {
         let join = join_of(scan_of("a", "x"), scan_of("b", "x"), &[0]);
-        let estimate = join.estimate_rows(&sizes);
+        let estimate = join.estimate_rows(&sizes, &uncounted);
         assert_eq!(estimate.rows, 1000);
         assert_eq!(
             estimate.largest_join,
@@ -2242,14 +2274,14 @@ mod tests {
         );
         // Chains of keyed joins never grow past their largest input.
         let chain = join_of(join, scan_of("c", "x"), &[0]);
-        assert_eq!(chain.estimate_rows(&sizes).rows, 1000);
+        assert_eq!(chain.estimate_rows(&sizes, &uncounted).rows, 1000);
     }
 
     #[test]
     fn test_estimate_cross_product_multiplies_and_is_the_largest_join() {
         let cross = join_of(scan_of("a", "x"), scan_of("b", "y"), &[]);
         let keyed = join_of(cross, scan_of("c", "x"), &[0]);
-        let estimate = keyed.estimate_rows(&sizes);
+        let estimate = keyed.estimate_rows(&sizes, &uncounted);
         assert_eq!(estimate.rows, 300_000);
         let largest = estimate.largest_join.unwrap();
         assert!(largest.cross_product);
@@ -2268,9 +2300,9 @@ mod tests {
             filter_predicate: None,
             output_schema: vec![],
         };
-        assert_eq!(fused.estimate_rows(&sizes).rows, 1_000_000);
+        assert_eq!(fused.estimate_rows(&sizes, &uncounted).rows, 1_000_000);
         let huge = |_: &str| u64::MAX / 2;
-        assert_eq!(fused.estimate_rows(&huge).rows, u64::MAX);
+        assert_eq!(fused.estimate_rows(&huge, &uncounted).rows, u64::MAX);
     }
 
     #[test]
@@ -2278,7 +2310,7 @@ mod tests {
         let union = IRNode::Union {
             inputs: vec![scan_of("a", "x"), scan_of("b", "x")],
         };
-        assert_eq!(union.estimate_rows(&sizes).rows, 1300);
+        assert_eq!(union.estimate_rows(&sizes, &uncounted).rows, 1300);
         let cross = join_of(scan_of("b", "x"), scan_of("c", "y"), &[]);
         let antijoin = IRNode::Antijoin {
             left: Box::new(scan_of("a", "x")),
@@ -2287,7 +2319,7 @@ mod tests {
             right_keys: vec![0],
             output_schema: vec!["x".to_string()],
         };
-        let estimate = antijoin.estimate_rows(&sizes);
+        let estimate = antijoin.estimate_rows(&sizes, &uncounted);
         assert_eq!(estimate.rows, 1000);
         assert_eq!(estimate.largest_join.map(|j| j.rows), Some(6000));
     }
@@ -2301,6 +2333,9 @@ mod tests {
             ef_search: None,
             output_schema: vec!["id".to_string(), "dist".to_string()],
         };
-        assert_eq!(hnsw.estimate_rows(&sizes), RowEstimate::rows(10));
+        assert_eq!(
+            hnsw.estimate_rows(&sizes, &uncounted),
+            RowEstimate::rows(10)
+        );
     }
 }

@@ -136,14 +136,17 @@ slow_query_log_ms = 5000
 # relations it reads: on a shared variable as its larger input, on none (a
 # cross product) as the product of its inputs, so in practice only large
 # cross products go over it. Such a query is refused with `validation`
-# before it runs.
+# before it runs. A plan over it is estimated again with the rows its
+# filters keep of stored relations (`a(X, 7)`), and refused only if it is
+# still over.
 max_query_cost = 100000000
 
-# Most fixpoint iterations a recursive rule may run (0 = unlimited). Each
-# iteration extends paths by one step; recursion that keeps deriving new
-# values, such as a counter without an upper bound, is refused with
-# `validation` when it reaches this.
-max_recursion_iterations = 100000
+# Optional: most fixpoint iterations a recursive rule may run (default 0 =
+# no limit; the deadline and memory limits already stop recursion that never
+# reaches a fixpoint). Each iteration extends paths by one step; when set,
+# recursion that keeps deriving new values, such as a counter without an
+# upper bound, is refused with `validation` when it reaches this.
+max_recursion_iterations = 0
 
 # Most heap bytes one query may hold while it computes, summed over the
 # threads evaluating it (0 = unlimited). A query that grows past it is

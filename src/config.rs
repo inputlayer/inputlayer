@@ -269,17 +269,20 @@ pub struct PerformanceConfig {
     /// Before a query runs, each join is estimated from the sizes of the
     /// relations it reads: a join on shared variables as its larger input, a
     /// join without one (a cross product) as the product of its inputs, so
-    /// in practice only large cross products go over it. A query with a
-    /// join over it is refused with `validation` before it runs. 0 = no
-    /// limit.
+    /// in practice only large cross products go over it. A plan over it is
+    /// estimated again with the rows its filters keep of stored relations,
+    /// and a query with a join still over it is refused with `validation`
+    /// before it runs. 0 = no limit.
     #[serde(default = "default_max_query_cost")]
     pub max_query_cost: u64,
 
-    /// Most fixpoint iterations a recursive evaluation may run. Recursion
-    /// that keeps deriving new facts (a counter without an upper bound) is
-    /// refused with `validation` when it reaches it, whatever the deadline.
-    /// Each iteration extends paths by one step, so this also bounds the
-    /// longest chain a recursive rule can follow. 0 = no limit.
+    /// Optional: most fixpoint iterations a recursive evaluation may run.
+    /// When set, recursion that keeps deriving new facts (a counter without
+    /// an upper bound) is refused with `validation` when it reaches it,
+    /// whatever the deadline. Each iteration extends paths by one step, so
+    /// this also bounds the longest chain a recursive rule can follow.
+    /// 0 = no limit, the default: the deadline and memory limits stop
+    /// recursion that never reaches a fixpoint.
     #[serde(default = "default_max_recursion_iterations")]
     pub max_recursion_iterations: u64,
 
@@ -698,7 +701,7 @@ fn default_max_query_cost() -> u64 {
     100_000_000
 }
 fn default_max_recursion_iterations() -> u64 {
-    100_000
+    0
 }
 fn default_max_string_value_bytes() -> usize {
     65_536 // 64 KB

@@ -394,6 +394,9 @@ impl Optimizer {
                             }
                         }
                     }
+                    IRNode::Distinct { input } => IRNode::Distinct {
+                        input: Box::new(self.pushdown_filters(IRNode::Filter { input, predicate })),
+                    },
                     other => IRNode::Filter {
                         input: Box::new(other),
                         predicate,
@@ -1677,6 +1680,48 @@ mod tests {
                 assert!(matches!(*left, IRNode::Filter { .. }));
             }
             _ => panic!("Expected Join with Filter on left"),
+        }
+    }
+
+    #[test]
+    fn test_pushdown_filter_through_distinct_to_its_side_of_a_cross_product() {
+        let optimizer = Optimizer::new();
+
+        // Filter(Distinct(Join(A, B)), pred_on_A) -> Distinct(Join(Filter(A), B))
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Distinct {
+                input: Box::new(IRNode::Join {
+                    left: Box::new(IRNode::Scan {
+                        relation: "a".to_string(),
+                        schema: vec!["x".to_string()],
+                    }),
+                    right: Box::new(IRNode::Scan {
+                        relation: "b".to_string(),
+                        schema: vec!["y".to_string()],
+                    }),
+                    left_keys: vec![],
+                    right_keys: vec![],
+                    output_schema: vec!["x".to_string(), "y".to_string()],
+                }),
+            }),
+            predicate: Predicate::ColumnEqConst(0, 7),
+        };
+
+        match optimizer.pushdown_filters(ir) {
+            IRNode::Distinct { input } => match *input {
+                IRNode::Join { left, right, .. } => {
+                    assert!(matches!(
+                        *left,
+                        IRNode::Filter {
+                            predicate: Predicate::ColumnEqConst(0, 7),
+                            ..
+                        }
+                    ));
+                    assert!(matches!(*right, IRNode::Scan { .. }));
+                }
+                other => panic!("Expected Join under Distinct, got {other:?}"),
+            },
+            other => panic!("Expected Distinct, got {other:?}"),
         }
     }
 

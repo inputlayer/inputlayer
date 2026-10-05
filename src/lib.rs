@@ -1326,7 +1326,9 @@ impl IQLEngine {
     /// Refuse the program if a join of its plan is estimated to produce
     /// more than `max_query_cost` rows; see [`IRNode::estimate_rows`].
     /// Relations the program derives are estimated from their rules in the
-    /// order they run, a recursive one from its rules' first pass.
+    /// order they run, a recursive one from its rules' first pass. Only a
+    /// plan over the limit counts the rows its filters keep of stored
+    /// relations, and is refused if it is still over it.
     fn check_query_cost(
         &self,
         unoptimized_ir_nodes: &[IRNode],
@@ -1335,6 +1337,72 @@ impl IQLEngine {
         execution_groups: &[Vec<usize>],
         source_len: usize,
     ) -> Result<(), String> {
+        let over_limit = |j: &ir::JoinEstimate| j.rows > self.max_query_cost;
+        let mut largest = self.largest_join(
+            unoptimized_ir_nodes,
+            recursive_info,
+            rule_heads,
+            execution_groups,
+            false,
+        );
+        if largest.as_ref().is_some_and(over_limit) {
+            largest = self.largest_join(
+                unoptimized_ir_nodes,
+                recursive_info,
+                rule_heads,
+                execution_groups,
+                true,
+            );
+        }
+
+        let Some(join) = largest.filter(over_limit) else {
+            tracing::debug!(
+                source_len,
+                largest_join_rows = largest.map_or(0, |j| j.rows),
+                max_cost = self.max_query_cost,
+                "engine_cost_check_pass"
+            );
+            return Ok(());
+        };
+        info!(
+            source_len,
+            join_rows = join.rows,
+            left_rows = join.left,
+            right_rows = join.right,
+            cross_product = join.cross_product,
+            max_cost = self.max_query_cost,
+            "engine_cost_check_refused"
+        );
+        Err(if join.cross_product {
+            format!(
+                "Query too complex: it joins {} rows with {} rows on no shared variable, \
+                 a cross product of about {} rows, over the limit of {} \
+                 (storage.performance.max_query_cost). Join them on a shared variable, \
+                 order the rule body so each atom shares a variable with one before it, \
+                 or filter a side with a constant or comparison so fewer of its rows meet",
+                join.left, join.right, join.rows, self.max_query_cost
+            )
+        } else {
+            format!(
+                "Query too complex: it joins {} rows with {} rows, an estimated {} rows, \
+                 over the limit of {} (storage.performance.max_query_cost). \
+                 Filter an input with a constant or comparison so fewer of its rows meet",
+                join.left, join.right, join.rows, self.max_query_cost
+            )
+        })
+    }
+
+    /// The program's join with the most estimated output rows; with
+    /// `count_filters`, a filter over a stored relation keeps the rows it
+    /// matches rather than all of them.
+    fn largest_join(
+        &self,
+        unoptimized_ir_nodes: &[IRNode],
+        recursive_info: &[Option<String>],
+        rule_heads: &[String],
+        execution_groups: &[Vec<usize>],
+        count_filters: bool,
+    ) -> Option<ir::JoinEstimate> {
         let mut derived: HashMap<&str, u64> = HashMap::new();
         let mut largest: Option<ir::JoinEstimate> = None;
         let mut estimate = |ir: &IRNode, derived: &HashMap<&str, u64>| {
@@ -1342,7 +1410,15 @@ impl IQLEngine {
                 let stored = self.input_tuples.get(name).map_or(0, |r| r.len() as u64);
                 stored.saturating_add(derived.get(name).copied().unwrap_or(0))
             };
-            let estimate = ir.estimate_rows(&rows_of);
+            let is_derived = |name: &str| derived.contains_key(name);
+            let filtered_rows = |node: &IRNode| {
+                count_filters
+                    .then(|| {
+                        CodeGenerator::count_filtered_scan(node, &self.input_tuples, &is_derived)
+                    })
+                    .flatten()
+            };
+            let estimate = ir.estimate_rows(&rows_of, &filtered_rows);
             largest = largest
                 .into_iter()
                 .chain(estimate.largest_join)
@@ -1369,41 +1445,7 @@ impl IQLEngine {
                 }
             }
         }
-
-        let Some(join) = largest.filter(|j| j.rows > self.max_query_cost) else {
-            tracing::debug!(
-                source_len,
-                largest_join_rows = largest.map_or(0, |j| j.rows),
-                max_cost = self.max_query_cost,
-                "engine_cost_check_pass"
-            );
-            return Ok(());
-        };
-        info!(
-            source_len,
-            join_rows = join.rows,
-            left_rows = join.left,
-            right_rows = join.right,
-            cross_product = join.cross_product,
-            max_cost = self.max_query_cost,
-            "engine_cost_check_refused"
-        );
-        Err(if join.cross_product {
-            format!(
-                "Query too complex: it joins {} rows with {} rows on no shared variable, \
-                 a cross product of about {} rows, over the limit of {} \
-                 (storage.performance.max_query_cost). Join them on a shared variable, \
-                 or order the rule body so each atom shares a variable with one before it",
-                join.left, join.right, join.rows, self.max_query_cost
-            )
-        } else {
-            format!(
-                "Query too complex: it joins {} rows with {} rows, an estimated {} rows, \
-                 over the limit of {} (storage.performance.max_query_cost). \
-                 Narrow the inputs before they meet",
-                join.left, join.right, join.rows, self.max_query_cost
-            )
-        })
+        largest
     }
 
     /// Group IR nodes into strongly connected components of the rule

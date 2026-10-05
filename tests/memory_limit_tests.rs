@@ -373,6 +373,35 @@ async fn a_large_cross_product_is_refused_before_it_runs_on_shipped_defaults() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_cross_product_is_estimated_with_the_rows_its_filters_keep() {
+    let server = start_server(|_| {}).await;
+    wide(&server, 30_000).await;
+    let mut client = Client::connect(&server).await;
+
+    // One row of `a` matches the constant, one the comparison: each side
+    // meets `b` with a few rows, not 30,000.
+    for (program, rows) in [("?a(7), b(Y)", 30_000), ("?a(X), X > 29998, b(Y)", 30_000)] {
+        let reply = client.execute("filtered", program).await;
+        assert_eq!(reply["type"], "result", "{program}: {reply}");
+        assert_eq!(reply["row_count"], rows, "{program}: {reply}");
+    }
+
+    // Filters that still leave 20,000 rows of `a` to pair with all of `b`.
+    let started = std::time::Instant::now();
+    let reply = client.execute("wide", "?a(X), X < 20000, b(Y)").await;
+    assert_eq!(reply["type"], "error", "{reply}");
+    assert_eq!(reply["code"], "validation", "{reply}");
+    let message = reply["message"].as_str().unwrap();
+    assert!(
+        message.contains("a cross product of about 600000000 rows")
+            && message.contains("max_query_cost"),
+        "{reply}"
+    );
+    let refused_in = started.elapsed();
+    assert!(refused_in < Duration::from_secs(5), "took {refused_in:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_cross_product_past_the_memory_limit_is_stopped_while_it_forms_pairs() {
     let server = start_server(|config| {
         config.storage.performance.max_query_cost = 0;

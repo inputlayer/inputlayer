@@ -599,11 +599,12 @@ join pairing millions of rows in one step is stopped a few hundred KB past
 its limit. After a query that held a lot of memory, the server returns what
 it freed to the operating system.
 
-Two more limits refuse runaway queries with `validation` before they cost
-memory: `max_query_cost` (default 100,000,000) refuses, before it runs, a
-query whose plan joins relations on no shared variable into a cross product
-estimated past it, and `max_recursion_iterations` (default 100,000) stops
-recursion that keeps deriving new values, whatever the deadline.
+`max_query_cost` (default 100,000,000) refuses with `validation`, before it
+runs, a query whose plan joins relations on no shared variable into a cross
+product estimated past it, counting the rows its filters keep of stored
+relations. The optional `max_recursion_iterations` (default 0, no limit)
+stops recursion that keeps deriving new values after that many iterations,
+whatever the deadline; without it, the deadline and memory limits stop it.
 
 Stored graphs and the queries' working memory are separate, so they add up.
 The sizing rule that keeps the process inside its memory limit is:
