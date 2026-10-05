@@ -91,6 +91,7 @@ impl KnownDefect {
 }
 
 /// Print an expected-failure line and append it to the [`XFAIL_LOG_ENV`] file.
+/// This crate's own unit tests only print, so the list holds real XFAILs.
 fn record(line: &str) {
     println!("{line}");
     if cfg!(test) {
