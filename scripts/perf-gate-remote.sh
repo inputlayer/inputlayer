@@ -12,6 +12,9 @@
 #                   connection) and copy its results back
 #   --wait-lock S   wait up to S seconds for another benchmark's lock to
 #                   clear instead of refusing at once
+#   --bench sessions -- ARGS
+#                   run scripts/bench-sessions.sh ARGS (the session-scale
+#                   benchmark) instead of the gate, under the same rules
 #   Everything else goes to scripts/perf-gate.sh: --aa, --rounds N,
 #   --baseline-rev REV, --fixtures LIST, --profile NAME, --server-cpus LIST,
 #   --gate-cpus LIST, --no-verdict. A working tree is never measured, only
@@ -46,6 +49,7 @@ REV=HEAD
 DIR=bench/inputlayer
 ATTACH=""
 WAIT_LOCK=0
+BENCH=gate
 GATE_ARGS=()
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -54,15 +58,23 @@ while [ $# -gt 0 ]; do
         --dir) DIR=$2; shift 2 ;;
         --attach) ATTACH=$2; shift 2 ;;
         --wait-lock) WAIT_LOCK=$2; shift 2 ;;
+        --bench) BENCH=$2; shift 2 ;;
+        # Everything after -- goes to the benchmark script unchanged.
+        --) shift; GATE_ARGS+=("$@"); break ;;
         --baseline-rev)
             # Resolved here, so the host measures exactly this commit.
             GATE_ARGS+=("$1" "$(git rev-parse --verify "$2^{commit}")"); shift 2 ;;
         --rounds|--profile|--fixtures|--server-cpus|--gate-cpus) GATE_ARGS+=("$1" "$2"); shift 2 ;;
         --aa|--no-verdict) GATE_ARGS+=("$1"); shift ;;
-        -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,37p' "$0"; exit 0 ;;
         *) echo "perf-gate-remote: unknown option $1" >&2; exit 3 ;;
     esac
 done
+case "$BENCH" in
+    gate) SCRIPT=scripts/perf-gate.sh LATEST=target/perf-gate/latest ;;
+    sessions) SCRIPT=scripts/bench-sessions.sh LATEST=target/bench-sessions/latest ;;
+    *) echo "perf-gate-remote: unknown benchmark $BENCH (gate or sessions)" >&2; exit 3 ;;
+esac
 
 SSH=(ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=6 "$HOST")
 # Runs, logs and the lock live next to the clone on the host.
@@ -96,13 +108,13 @@ if [ -z "$ATTACH" ]; then
     fi
 
     # The host-side runner, started detached. Positional arguments: the
-    # clone, the state directory, the stamp, the commit, the lock wait, then
-    # the gate's.
+    # clone, the state directory, the stamp, the commit, the lock wait, the
+    # benchmark script and its latest-run link, then the script's own.
     "${SSH[@]}" "mkdir -p $STATE && cat > $STATE/run.sh" <<'REMOTE'
 #!/usr/bin/env bash
 set -uo pipefail
-DIR=$1 STATE=$2 STAMP=$3 SHA=$4 WAIT_LOCK=$5
-shift 5
+DIR=$1 STATE=$2 STAMP=$3 SHA=$4 WAIT_LOCK=$5 SCRIPT=$6 LATEST=$7
+shift 7
 export PATH=$HOME/.cargo/bin:$PATH
 LOG=$HOME/$STATE/$STAMP.log
 STATUS_FILE=$HOME/$STATE/$STAMP.status
@@ -136,14 +148,17 @@ git checkout -q --detach "$SHA" || finish 3
 CPUS=$(nproc)
 PIN=()
 case " $* " in *" --server-cpus "*|*" --gate-cpus "*) ;; *)
+    # bench-sessions.sh pins only servers; its clients float on 0-7 too.
     if [ "$CPUS" -ge 16 ]; then
-        PIN=(--gate-cpus 0-7 --server-cpus "8-$((CPUS - 1))")
+        PIN=(--server-cpus "8-$((CPUS - 1))")
+        [ "$SCRIPT" = scripts/perf-gate.sh ] && PIN+=(--gate-cpus 0-7)
     elif [ "$CPUS" -ge 8 ]; then
-        PIN=(--gate-cpus 0-1 --server-cpus "2-$((CPUS - 1))")
+        PIN=(--server-cpus "2-$((CPUS - 1))")
+        [ "$SCRIPT" = scripts/perf-gate.sh ] && PIN+=(--gate-cpus 0-1)
     fi
 esac
-COMMAND="scripts/perf-gate.sh $* ${PIN[*]}"
-before=$(readlink target/perf-gate/latest 2> /dev/null || true)
+COMMAND="$SCRIPT $* ${PIN[*]}"
+before=$(readlink "$LATEST" 2> /dev/null || true)
 {
     echo "host: $(hostname)"
     echo "nproc: $CPUS"
@@ -155,9 +170,9 @@ before=$(readlink target/perf-gate/latest 2> /dev/null || true)
 cat "$HOME/$STATE/$STAMP.bench.txt"
 
 STATUS=0
-# Builds use every CPU; perf-gate.sh pins only the measurement.
-scripts/perf-gate.sh "$@" "${PIN[@]}" || STATUS=$?
-after=$(readlink target/perf-gate/latest 2> /dev/null || true)
+# Builds use every CPU; the scripts pin only the measurement.
+"$SCRIPT" "$@" "${PIN[@]}" || STATUS=$?
+after=$(readlink "$LATEST" 2> /dev/null || true)
 {
     echo "finished: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "load average at end: $(cat /proc/loadavg)"
@@ -168,8 +183,8 @@ after=$(readlink target/perf-gate/latest 2> /dev/null || true)
 finish "$STATUS"
 REMOTE
 
-    echo "=== $HOST: run $STAMP (scripts/perf-gate.sh ${GATE_ARGS[*]}) ==="
-    "${SSH[@]}" "setsid nohup bash $STATE/run.sh $DIR $STATE $STAMP $SHA $WAIT_LOCK ${GATE_ARGS[*]} < /dev/null > /dev/null 2>&1 &"
+    echo "=== $HOST: run $STAMP ($SCRIPT ${GATE_ARGS[*]}) ==="
+    "${SSH[@]}" "setsid nohup bash $STATE/run.sh $DIR $STATE $STAMP $SHA $WAIT_LOCK $SCRIPT $LATEST ${GATE_ARGS[*]} < /dev/null > /dev/null 2>&1 &"
 else
     STAMP=$ATTACH
 fi
@@ -188,7 +203,8 @@ scp -q "$HOST:$STATE/$STAMP.bench.txt" "$OUT/bench.txt"
 scp -q "$HOST:$STATE/$STAMP.log" "$OUT/gate.log"
 RUN_DIR=$(sed -n 's/^run dir: //p' "$OUT/bench.txt")
 if [ -n "$RUN_DIR" ]; then
-    for f in run.json report.md verdict.json summary.md; do
+    # The gate's files, or the session benchmark's (result.json, summary.md).
+    for f in run.json report.md verdict.json summary.md result.json; do
         scp -q "$HOST:$RUN_DIR/$f" "$OUT/$f" 2> /dev/null || true
     done
 fi
