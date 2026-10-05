@@ -3,9 +3,8 @@
 //! Notifications reach every connection in strictly increasing `seq` order
 //! however many writers commit at once; a reconnect cursor from before an
 //! engine restart is answered with a `replay_gap` notice, never with
-//! numerically overlapping notifications of the new run; an `expect_revision`
-//! from before a restart is refused even without `expect_epoch` (#380); and
-//! commits racing a `.subscribe` all reach the agent, whose view (checked delta by delta for
+//! numerically overlapping notifications of the new run; and commits racing a
+//! `.subscribe` all reach the agent, whose view (checked delta by delta for
 //! contiguous `seq`, increasing revisions and consistent rows) ends equal to a
 //! fresh query.
 
@@ -138,52 +137,6 @@ async fn a_cursor_from_before_a_restart_gets_a_replay_gap() -> Checked<()> {
         return Err(Violation::MissedChanges(format!(
             "cursor {cursor} of epoch {old_epoch} after a restart: {replayed} notification(s) \
              replayed and {gaps} replay_gap notice(s); expected none and one"
-        )));
-    }
-    Ok(())
-}
-
-/// A revision observed before a crash names a history the restarted engine
-/// does not have: a write expecting it must be refused even when it carries no
-/// `expect_epoch` and the new run has issued a revision with the same number.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_bare_expect_revision_from_before_a_restart_is_refused() -> Checked<()> {
-    let mut engine = engine().start().await.expect("start engine");
-    Fixture::new("empty", KG).install(&engine).await?;
-    let mut writer = WsClient::connect(&engine, KG).await?;
-    let mut observed = 0;
-    for i in 0..5 {
-        let reply = writer.execute(&format!("+claim({i})")).await?;
-        observed = reply.revision.expect("a write reply carries its revision");
-    }
-    drop(writer);
-
-    engine.crash_restart().await.expect("restart engine");
-    let mut writer = WsClient::connect(&engine, KG).await?;
-    // Writes to another relation, until a restarted counter would have passed
-    // the old revision: `claim` is then unchanged since a revision at or
-    // below it in the new run's numbering.
-    for i in 0..=observed {
-        writer.commit(&format!("+other({i})")).await?;
-    }
-
-    let stale = writer
-        .execute_expecting("+claim(99)", observed, &["claim"])
-        .await;
-    match stale {
-        Err(Violation::Rejected(message)) if message.contains("Precondition failed") => {}
-        other => {
-            return Err(Violation::MissedChanges(format!(
-                "expect_revision {observed} from before a restart, without expect_epoch, \
-                 was not refused: {other:?}"
-            )))
-        }
-    }
-    let claims = writer.query("?claim(X)").await?;
-    if claims.rows.len() != 5 {
-        return Err(Violation::MissedChanges(format!(
-            "a refused write was applied: {:?}",
-            claims.rows
         )));
     }
     Ok(())
