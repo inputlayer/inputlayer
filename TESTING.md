@@ -16,6 +16,7 @@ make perf-gate      # Performance gate: this tree vs the approved baseline (same
 make perf-gate-remote     # The same gate for HEAD on the benchmark host (heavy runs go there)
 make bench-engine-remote  # Engine suite on the benchmark host: absolute numbers, not judged
 make bench-sessions-remote  # Session-scale benchmark on the benchmark host
+make bench-views-remote     # Views benchmark (write and read cost vs graph, rules, subscribers) on the benchmark host
 make bench-genbi    # Reactive agent benchmark on genbi-trust (needs GENBI_TRUST_DIR)
 make oracle-test    # Differential correctness oracle only (~15s)
 ```
@@ -167,7 +168,7 @@ workspace test without the scenarios binary.
   (`queries`, `rule_evaluations`, `view_reads`, `subscription_evaluations`,
   `view_maintenance_us`); a counter the engine does not export is `None`, and
   `Counters::require` turns it into `Violation::NotMeasurable`, so an assertion
-  on it is an expected failure until the counter lands (V1 #308), never a skip.
+  on it fails (or is an expected failure under `KnownDefect`), never a skip.
 - `Engine::create_user`, `grant` and `create_api_key` (a key limited to a role
   on one knowledge graph and optionally to relations) with
   `WsClient::connect_with_key` give scenarios scoped agents besides the
@@ -314,6 +315,12 @@ acknowledgement, and no session gets a stray delta or a `subscription_error`
 release engine, so it runs only in `make e2e-reactive` and is ignored in
 debug builds.
 
+`tests/scenarios/views.rs` requires the view work counters on
+`/metrics/prometheus` to tell how reads of deployed rules were answered:
+today each read of a deployed rule, subscribing to one and each evaluation
+that refreshes it is exactly one rule evaluation, a read of base relations is
+none, and nothing is served from a view yet.
+
 Quarantined scenarios are ignored unconditionally, so the PR gate (plain
 `cargo test`) stays deterministic, and run in the nightly tier. Until a
 nightly workflow exists, `make e2e-reactive` stands in for it and passes
@@ -323,7 +330,6 @@ quarantined for a rare engine hang in `.index create` (#377).
 Tracked defects run as **expected failures** through
 `inputlayer_testkit::KnownDefect`, naming the issue that fixes them (the
 milestone 9 ones are listed under Expected-failure scenarios;
-`harness::counters_scrape_the_running_engine`, #308;
 `tenancy::s15_tenants_and_scoped_keys_are_isolated`, #364;
 `restart::s12_restart_mid_scenario_preserves_revisions`, #380). Each asserts the
 correct contract; its own violation passes as `XFAIL`, any other violation
@@ -404,6 +410,7 @@ File-to-category mapping:
 | `make perf-gate` | Paired latency/throughput gate over `/ws` vs the approved baseline | Every implementation PR (see `perf-gate/README.md`) |
 | `make perf-gate-remote` | The same gate for a commit on the benchmark host | Instead of `make perf-gate` on a shared development box |
 | `make bench-engine-remote` | Engine suite (rules, closure, deletes and updates, claims, `.why`, sessions, memory, recovery, WAL share) on the benchmark host | Release checkpoints and engine baselines |
+| `make bench-views-remote` | Write and read cost against deployed rules by graph size, rule count and subscribers, with rule-evaluation counts (`perf-gate views`) on the benchmark host | Changing evaluation, subscriptions or rule maintenance (the view work, #305) |
 | `make perf-gate-check` | Clippy + unit tests of the gate tool | After changing `perf-gate/` |
 | `make pre-pr-selftest` | Behavioural tests of `make pre-pr` routing (`scripts/test_pre_pr.py`) | After changing `Makefile` or `scripts/` |
 | `make e2e-reactive` | Scenario suite in release against real engines, latency samples | Subscription or wire changes |

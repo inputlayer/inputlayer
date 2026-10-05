@@ -459,6 +459,7 @@ fn prometheus_text(handler: &Handler) -> String {
     );
     handler.server_metrics().format_prometheus(&mut out);
 
+    out.raw(&crate::execution::view_counters().format_prometheus());
     out.raw(&handler.timing_histograms().format_prometheus());
     if let Some(replication) = &replication {
         out.raw(&replication.format_prometheus());
@@ -673,6 +674,16 @@ mod tests {
         assert!(body.contains("inputlayer_queries_total 0"));
         assert!(body.contains("inputlayer_knowledge_graphs"));
         assert!(body.contains("inputlayer_sessions_total 0"));
+        for counter in [
+            "inputlayer_view_reads_total",
+            "inputlayer_rule_evaluations_total",
+            "inputlayer_view_maintenance_us_total",
+        ] {
+            assert!(
+                body.contains(&format!("# TYPE {counter} counter\n{counter} ")),
+                "{counter} is exported"
+            );
+        }
     }
 
     /// Every sample belongs to a family declared once with HELP and TYPE.

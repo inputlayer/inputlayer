@@ -4000,7 +4000,10 @@ impl Handler {
                 let baseline: HashSet<Tuple> = if results.is_empty() {
                     HashSet::new()
                 } else {
-                    match crate::without_result_cap(|| snapshot.execute_program_with_rules(query)) {
+                    // Part of this read, already counted: not another evaluation.
+                    match crate::without_result_cap(|| {
+                        snapshot.execute_program_with_rules_uncounted(query)
+                    }) {
                         Ok(tuples) => tuples.into_iter().collect(),
                         Err(e) => {
                             warn!(error = %e, "Provenance baseline query failed - all tuples tagged as ephemeral");

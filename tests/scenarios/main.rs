@@ -17,7 +17,8 @@
 //! Modules: `reactive` (the agent subscription path), `stream` (the
 //! notification stream and snapshot handoff), `delivery` (results and deltas
 //! too large for one frame), `saturation` (sessions' deltas while writers
-//! overload the engine), `wire` (request correlation) and `harness`
+//! overload the engine), `views` (how reads of deployed rules are answered:
+//! the view work counters), `wire` (request correlation) and `harness`
 //! (the testkit pieces the scenarios build on). The strategy's catalogue
 //! scenarios on the shop pack, each naming its captain's table row and the
 //! milestone 9 issues it gates: `lifecycle` (S1), `claims` (S7),
@@ -53,6 +54,7 @@ mod stream;
 mod subscribe_rules;
 mod support;
 mod tenancy;
+mod views;
 mod wire;
 
 // The differential oracle's adapters, for `oracle_check`. They name each

@@ -6,7 +6,9 @@ name: Full suite
 #     every push while it stays). A PR from a release/** branch of this repo
 #     is already covered by the branch push, so its PR run is skipped.
 #   - manual workflow_dispatch on main only, or with perf_gate_only on any
-#     ref, which runs the performance gate alone (to measure a branch)
+#     ref, which runs the performance runs alone, the gate and the views
+#     benchmark (to measure a branch). The views benchmark runs only on
+#     perf_gate_only dispatches, never on a release checkpoint
 #   - v* tag pushes, through the Release workflow (publish.yml), which calls
 #     this workflow and publishes only if it passes
 # docker.yml uses the release triggers without manual dispatch.
@@ -21,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       perf_gate_only:
-        description: Run only the performance gate (allowed on any ref)
+        description: Run only the performance gate and the views benchmark, which runs on no other trigger (allowed on any ref)
         type: boolean
         default: false
       perf_gate_aa:
@@ -412,6 +414,43 @@ jobs:
             target/perf-gate/runs/*/run.json
             target/perf-gate/runs/*/report.md
             target/perf-gate/runs/*/verdict.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # The views benchmark (perf-gate views, #308): write and read cost against
+  # deployed rules by graph size, rule count and subscriber count, with the
+  # engine's view work counters. It runs only on perf_gate_only dispatches,
+  # so it never runs on a release checkpoint and cannot block a release. It
+  # fails only when a delta never arrives or a step fails, never on latency.
+  # Numbers comparable with the incremental-views review come from the
+  # benchmark host: make bench-views-remote (perf-gate/README.md).
+  views-bench:
+    name: Views benchmark
+    needs: gate
+    if: ${{ inputs.perf_gate_only }}
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run the views benchmark
+        run: scripts/bench-views.sh --server-cpus 8-31
+
+      - name: Summary
+        if: always()
+        run: cat target/bench-views/latest/summary.md >> "$GITHUB_STEP_SUMMARY" 2> /dev/null || true
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: views-bench
+          path: |
+            target/bench-views/runs/*/result.json
+            target/bench-views/runs/*/summary.md
           if-no-files-found: ignore
           retention-days: 30
 

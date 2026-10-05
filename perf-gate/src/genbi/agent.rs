@@ -194,6 +194,7 @@ impl Agent {
                 subscription,
                 inserted,
                 retracted,
+                ..
             } => {
                 if let Some(sub) = self.subscriptions.get_mut(&subscription) {
                     sub.apply(at, inserted, retracted, self.fault);

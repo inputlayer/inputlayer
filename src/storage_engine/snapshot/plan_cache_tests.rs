@@ -165,3 +165,41 @@ fn a_failing_program_is_not_cached() {
         .is_err());
     assert_eq!(snapshot.persistent_rules().cached_plans(), 0);
 }
+
+/// A read evaluates deployed rules exactly when its dependency closure holds
+/// one: what `rule_evaluations` counts per read, on both paths.
+#[test]
+fn a_read_evaluates_rules_only_when_it_depends_on_a_persistent_rule() {
+    let snapshot = snapshot_after(&[(1, 2), (2, 3)], TWO_HOP, None);
+    let evaluates = |program: &str, rule_set| {
+        let query = crate::parser::parse_program(program).unwrap();
+        snapshot.combine(query, rule_set).unwrap().evaluates_rules
+    };
+    assert!(evaluates(QUERY, RuleSet::WithPersistent));
+    assert!(!evaluates(
+        "__query__(Y) <- edge(1, Y)",
+        RuleSet::WithPersistent
+    ));
+    assert!(!evaluates(
+        "hop(X, Y) <- edge(X, Y)\n__query__(Y) <- hop(1, Y)",
+        RuleSet::WithPersistent
+    ));
+    assert!(!evaluates(QUERY, RuleSet::QueryOnly));
+
+    snapshot
+        .execute_with_rules_tuples_cached(QUERY, TimingMode::Off)
+        .unwrap();
+    let plan = snapshot
+        .persistent
+        .plan(QUERY, &snapshot.optimization)
+        .unwrap();
+    assert!(plan.evaluates_rules, "the cached plan keeps the answer");
+    snapshot
+        .execute_with_rules_tuples_cached("__query__(Y) <- edge(1, Y)", TimingMode::Off)
+        .unwrap();
+    let plan = snapshot
+        .persistent
+        .plan("__query__(Y) <- edge(1, Y)", &snapshot.optimization)
+        .unwrap();
+    assert!(!plan.evaluates_rules);
+}

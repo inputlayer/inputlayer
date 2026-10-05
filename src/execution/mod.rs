@@ -9,12 +9,14 @@ pub mod hnsw_resolve;
 pub mod memory;
 mod request_control;
 pub mod timing;
+pub mod view_counters;
 
 pub use request_control::{Halt, QueryMemoryPool, RequestControl, Stop};
 pub use timing::{
     IrBuilderTiming, OptimizerTiming, RuleTiming, TimingBreakdown, TimingCollector,
     TimingHistograms, TimingMode,
 };
+pub use view_counters::{view_counters, ViewCounters, ViewCounts};
 
 /// Execution error types
 #[derive(Debug, Clone, thiserror::Error)]
