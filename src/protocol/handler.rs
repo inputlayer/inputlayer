@@ -2470,7 +2470,7 @@ impl Handler {
 
     /// Run `request`. On a primary shipping synchronously, its reply waits
     /// until a follower has applied the events it appended (a durable write
-    /// that appended none waits for the log's head as it finished); under
+    /// waits for the log's head as it finished); under
     /// `on_follower_loss = "block"` a reply no follower confirmed in time
     /// fails with `replica_unconfirmed`, though its commit stands here.
     async fn replicated<T>(
@@ -2485,11 +2485,12 @@ impl Handler {
         let Some(writes) = writes else {
             return result;
         };
-        // A durable write that changed nothing reports state that may rest
-        // on any event appended before it finished.
-        let lsn = match writes.lsn() {
-            0 if writes.staged() && result.is_ok() => sync.head(),
-            lsn => lsn,
+        // A durable write, even one that changed nothing, reports state that
+        // may rest on any event appended before it finished.
+        let lsn = if writes.staged() && result.is_ok() {
+            writes.lsn().max(sync.head())
+        } else {
+            writes.lsn()
         };
         if lsn == 0 {
             return result;
