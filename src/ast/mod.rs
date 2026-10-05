@@ -706,7 +706,7 @@ pub enum Term {
     /// Record pattern for destructuring in atom arguments: `{ id: x, name: y }`
     RecordPattern(Vec<(String, Term)>),
     /// Parameter reference `$name`: a value sent beside the program text and
-    /// bound by [`crate::params::bind_statements`] before the program runs.
+    /// bound by [`crate::params::bind_statement`] before the program runs.
     /// Nothing evaluates an unbound one.
     Param(String),
 }
