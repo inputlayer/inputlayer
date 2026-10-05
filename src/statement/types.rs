@@ -5,6 +5,7 @@
 //! - Type expressions: base types, lists, records, refined types
 
 use crate::parser::lexer::{code_chars, escape, is_string_literal, unescape};
+use crate::parser::nested;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -188,6 +189,11 @@ pub fn parse_type_decl(input: &str) -> Result<TypeDecl, String> {
 
 /// Parse a type expression
 pub fn parse_type_expr(input: &str) -> Result<TypeExpr, String> {
+    parse_type_expr_at(input, 0)
+}
+
+/// Parse a type expression nested `depth` levels deep.
+fn parse_type_expr_at(input: &str, depth: usize) -> Result<TypeExpr, String> {
     let input = input.trim();
 
     if input.is_empty() {
@@ -196,13 +202,13 @@ pub fn parse_type_expr(input: &str) -> Result<TypeExpr, String> {
 
     // Record type: { field: type, ... }
     if input.starts_with('{') && input.ends_with('}') {
-        return parse_record_type(input);
+        return parse_record_type(input, nested(depth)?);
     }
 
     // List type: list[T]
     if input.starts_with("list[") && input.ends_with(']') {
         let inner = &input[5..input.len() - 1];
-        let inner_type = parse_type_expr(inner)?;
+        let inner_type = parse_type_expr_at(inner, nested(depth)?)?;
         return Ok(TypeExpr::List(Box::new(inner_type)));
     }
 
@@ -212,7 +218,7 @@ pub fn parse_type_expr(input: &str) -> Result<TypeExpr, String> {
             let base_str = &input[..paren_pos];
             let refinements_str = &input[paren_pos + 1..input.len() - 1];
 
-            let base = parse_type_expr(base_str)?;
+            let base = parse_type_expr_at(base_str, nested(depth)?)?;
             let refinements = parse_refinements(refinements_str)?;
 
             return Ok(TypeExpr::Refined {
@@ -248,7 +254,7 @@ pub fn parse_type_expr(input: &str) -> Result<TypeExpr, String> {
 }
 
 /// Parse a record type: { field: type, ... }
-fn parse_record_type(input: &str) -> Result<TypeExpr, String> {
+fn parse_record_type(input: &str, depth: usize) -> Result<TypeExpr, String> {
     let content = input
         .strip_prefix('{')
         .and_then(|s| s.strip_suffix('}'))
@@ -279,7 +285,7 @@ fn parse_record_type(input: &str) -> Result<TypeExpr, String> {
             return Err("Field name cannot be empty".to_string());
         }
 
-        let field_type = parse_type_expr(type_str)?;
+        let field_type = parse_type_expr_at(type_str, depth)?;
         fields.push(RecordField {
             name: field_name,
             field_type,
@@ -813,13 +819,13 @@ mod tests {
 
     #[test]
     fn test_record_field_with_empty_name() {
-        let result = parse_record_type("{ : int }");
+        let result = parse_record_type("{ : int }", 0);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_record_field_missing_type() {
-        let result = parse_record_type("{ name }");
+        let result = parse_record_type("{ name }", 0);
         assert!(result.is_err());
     }
 }
