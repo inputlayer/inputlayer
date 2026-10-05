@@ -121,7 +121,12 @@ fn program_commits_one_record_across_relations() {
     assert_eq!(records.len(), before + 1, "one WAL record per program");
     let record = records.last().unwrap();
     assert!(record.contains("default:r") && record.contains("default:s"));
-    assert_ne!(storage.get_snapshot_for(KG).unwrap().revision, revision);
+    let published = storage.get_snapshot_for(KG).unwrap().revision;
+    assert!(published > revision);
+    assert_eq!(
+        commit.revision, published,
+        "reports the revision it published"
+    );
     assert_eq!(rows(&storage, "r"), [t(2), t(3)]);
     assert_eq!(rows(&storage, "s"), [t(9)]);
 
@@ -252,6 +257,7 @@ fn duplicates_and_changes_that_cancel_out_write_nothing() {
     assert!(commit.relations.is_empty());
     assert_eq!(wal_records(&temp), before);
     assert_eq!(storage.get_snapshot_for(KG).unwrap().revision, revision);
+    assert_eq!(commit.revision, revision, "reports the current revision");
     assert_eq!(rows(&storage, "r"), [t(1)]);
 }
 

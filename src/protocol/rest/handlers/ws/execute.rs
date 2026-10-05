@@ -155,6 +155,7 @@ fn result_frame(id: Option<RequestId>, response: QueryResult) -> ServerFrame {
         timing_breakdown: response.timing_breakdown,
         errors: response.errors,
         statements: response.statements,
+        revision: response.revision,
         subscribed: None,
     })
 }
@@ -185,6 +186,7 @@ pub(super) fn subscription_reply(
         timing_breakdown: None,
         errors: Vec::new(),
         statements: Vec::new(),
+        revision: None,
         subscribed,
     }
 }

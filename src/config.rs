@@ -240,6 +240,13 @@ pub struct PerformanceConfig {
     #[serde(default = "default_max_query_size_bytes")]
     pub max_query_size_bytes: usize,
 
+    /// Deepest nesting of a term or type expression: each function call,
+    /// arithmetic operator, parenthesized group, `list[...]` and record adds
+    /// a level. Deeper input is rejected as a validation error. Capped at
+    /// 1024; 0 is invalid and resets to 128. Process-wide.
+    #[serde(default = "default_max_nesting_depth")]
+    pub max_nesting_depth: usize,
+
     /// Maximum number of tuples in a single insert. 0 = no limit.
     #[serde(default = "default_max_insert_tuples")]
     pub max_insert_tuples: usize,
@@ -258,11 +265,26 @@ pub struct PerformanceConfig {
     #[serde(default = "default_slow_query_log_ms")]
     pub slow_query_log_ms: u64,
 
-    /// Maximum query cost score. Queries exceeding this are rejected before
-    /// execution. Cost is estimated from the IR tree (joins, aggregations,
-    /// negation, recursion). 0 = no limit.
-    #[serde(default)]
+    /// Most rows one join of a query's plan may be estimated to produce.
+    /// Before a query runs, each join is estimated from the sizes of the
+    /// relations it reads: a join on shared variables as its larger input, a
+    /// join without one (a cross product) as the product of its inputs, so
+    /// in practice only large cross products go over it. A plan over it is
+    /// estimated again with the rows its filters keep of stored relations,
+    /// and a query with a join still over it is refused with `validation`
+    /// before it runs. 0 = no limit.
+    #[serde(default = "default_max_query_cost")]
     pub max_query_cost: u64,
+
+    /// Optional: most fixpoint iterations a recursive evaluation may run.
+    /// When set, recursion that keeps deriving new facts (a counter without
+    /// an upper bound) is refused with `validation` when it reaches it,
+    /// whatever the deadline. Each iteration extends paths by one step, so
+    /// this also bounds the longest chain a recursive rule can follow.
+    /// 0 = no limit, the default: the deadline and memory limits stop
+    /// recursion that never reaches a fixpoint.
+    #[serde(default = "default_max_recursion_iterations")]
+    pub max_recursion_iterations: u64,
 
     /// Most heap bytes one request's computation may hold, summed over all
     /// the threads evaluating it. A query that grows past it is stopped and
@@ -275,7 +297,8 @@ pub struct PerformanceConfig {
     /// together. A query that grows while they hold more is stopped and
     /// refused with `resource_exhausted`, so concurrent queries never push
     /// the server past its container. Unset: 60% of the container's memory
-    /// limit (cgroup); no limit outside a memory-limited container. Stored
+    /// limit (the tightest cgroup limit on the process, as a container or a
+    /// systemd unit's `MemoryMax=` sets it); no limit outside one. Stored
     /// graphs are separate from it: graph budgets summed, plus this, plus
     /// the server's overhead must stay within 80% of the container's limit.
     /// 0 = no limit.
@@ -499,7 +522,11 @@ pub struct GuiConfig {
 #[serde(deny_unknown_fields)]
 pub struct AuthConfig {
     /// Initial admin password (set via INPUTLAYER_ADMIN_PASSWORD env var or config).
-    /// If unset on first boot, a random password is generated and printed to stderr.
+    /// If unset or blank on first boot, a random password is generated and
+    /// saved to the credentials file. A supplied one needs at least
+    /// [`crate::auth::MIN_PASSWORD_CHARS`] characters or the server refuses
+    /// to start on first boot; once the admin exists a short one is ignored
+    /// with a warning.
     #[serde(default)]
     pub bootstrap_admin_password: Option<String>,
 
@@ -656,6 +683,9 @@ fn default_query_timeout_ms() -> u64 {
 fn default_max_query_size_bytes() -> usize {
     1_048_576 // 1 MB
 }
+fn default_max_nesting_depth() -> usize {
+    crate::parser::DEFAULT_MAX_NESTING_DEPTH
+}
 fn default_max_insert_tuples() -> usize {
     10_000
 }
@@ -664,6 +694,14 @@ fn default_max_result_rows() -> usize {
 }
 fn default_max_query_memory_bytes() -> u64 {
     4 << 30 // 4 GiB
+}
+fn default_max_query_cost() -> u64 {
+    // 10,000 x 10,000. Past it a cross product cannot fit the default
+    // per-query memory limit or finish within the default deadline.
+    100_000_000
+}
+fn default_max_recursion_iterations() -> u64 {
+    0
 }
 fn default_max_string_value_bytes() -> usize {
     65_536 // 64 KB
@@ -927,6 +965,24 @@ impl Config {
             self.storage.persist.buffer_size = 1000;
         }
 
+        // 0 would reject every term; past the ceiling deep input could
+        // overflow the stack again
+        let depth = self.storage.performance.max_nesting_depth;
+        if depth == 0 {
+            tracing::warn!(
+                "max_nesting_depth = 0 is invalid, auto-correcting to {}",
+                crate::parser::DEFAULT_MAX_NESTING_DEPTH
+            );
+            self.storage.performance.max_nesting_depth = default_max_nesting_depth();
+        } else if depth > crate::parser::MAX_NESTING_DEPTH_CEILING {
+            tracing::warn!(
+                value = depth,
+                "max_nesting_depth exceeds {}, capping",
+                crate::parser::MAX_NESTING_DEPTH_CEILING
+            );
+            self.storage.performance.max_nesting_depth = crate::parser::MAX_NESTING_DEPTH_CEILING;
+        }
+
         // Warn about very long query timeouts (> 10 minutes)
         if self.storage.performance.query_timeout_ms > 600_000 {
             tracing::warn!(
@@ -958,6 +1014,13 @@ impl Config {
             eprintln!(
                 "WARNING: max_query_memory_bytes = 0 (unlimited). \
                  One runaway query can take the whole server's memory."
+            );
+        }
+        if self.storage.performance.max_query_cost == 0 {
+            eprintln!(
+                "WARNING: max_query_cost = 0 (unlimited). \
+                 A query joining large relations without a shared variable \
+                 (a cross product) runs until a deadline or memory limit stops it."
             );
         }
         if self.http.cors_allow_all {
@@ -1013,11 +1076,13 @@ impl Config {
                     num_threads: 0,
                     query_timeout_ms: 30_000,
                     max_query_size_bytes: 1_048_576,
+                    max_nesting_depth: default_max_nesting_depth(),
                     max_insert_tuples: 10_000,
                     max_string_value_bytes: 65_536,
                     max_result_rows: default_max_result_rows(),
                     slow_query_log_ms: 5000,
-                    max_query_cost: 0,
+                    max_query_cost: default_max_query_cost(),
+                    max_recursion_iterations: default_max_recursion_iterations(),
                     max_query_memory_bytes: default_max_query_memory_bytes(),
                     max_graph_memory_bytes: 0,
                     max_total_query_memory_bytes: None,
@@ -1044,6 +1109,12 @@ impl Default for Config {
 }
 
 impl PerformanceConfig {
+    /// [`Self::max_recursion_iterations`] as the evaluator's iteration
+    /// counter; a value past its range is no ceiling it could reach anyway.
+    pub fn recursion_iteration_limit(&self) -> u32 {
+        u32::try_from(self.max_recursion_iterations).unwrap_or(0)
+    }
+
     /// The budget of all requests' computations together, in bytes; 0 = no
     /// limit. See [`Self::max_total_query_memory_bytes`].
     pub fn total_query_memory_bytes(&self) -> u64 {
@@ -1067,11 +1138,13 @@ impl Default for PerformanceConfig {
             num_threads: 0, // 0 = use all available CPU cores
             query_timeout_ms: default_query_timeout_ms(),
             max_query_size_bytes: default_max_query_size_bytes(),
+            max_nesting_depth: default_max_nesting_depth(),
             max_insert_tuples: default_max_insert_tuples(),
             max_string_value_bytes: default_max_string_value_bytes(),
             max_result_rows: default_max_result_rows(),
             slow_query_log_ms: default_slow_query_log_ms(),
-            max_query_cost: 0, // 0 = unlimited
+            max_query_cost: default_max_query_cost(),
+            max_recursion_iterations: default_max_recursion_iterations(),
             max_query_memory_bytes: default_max_query_memory_bytes(),
             max_graph_memory_bytes: 0,          // 0 = unlimited
             max_total_query_memory_bytes: None, // 60% of the container's limit
@@ -1161,6 +1234,42 @@ mod tests {
         let none = tempfile::TempDir::new().unwrap();
         assert_eq!(budget(none.path()), 0, "no cgroup");
 
+        // A process in a nested v2 cgroup (a systemd unit with MemoryMax=)
+        // is held to the tightest limit on its way up to the root.
+        use crate::execution::memory::process_memory_limit;
+        let nested = tempfile::TempDir::new().unwrap();
+        let unit = nested.path().join("system.slice/inputlayer.service");
+        std::fs::create_dir_all(&unit).unwrap();
+        std::fs::write(nested.path().join("system.slice/memory.max"), "max\n").unwrap();
+        std::fs::write(unit.join("memory.max"), "6442450944\n").unwrap();
+        let own = "0::/system.slice/inputlayer.service\n";
+        assert_eq!(
+            process_memory_limit(nested.path(), Some(own)),
+            Some(6442450944)
+        );
+        std::fs::write(
+            nested.path().join("system.slice/memory.max"),
+            "4294967296\n",
+        )
+        .unwrap();
+        assert_eq!(
+            process_memory_limit(nested.path(), Some(own)),
+            Some(4294967296)
+        );
+        assert_eq!(process_memory_limit(nested.path(), Some("0::/\n")), None);
+        assert_eq!(process_memory_limit(nested.path(), None), None);
+        assert_eq!(
+            process_memory_limit(v2.path(), Some("0::/elsewhere\n")),
+            None,
+            "v2 root unlimited, no cgroup below it"
+        );
+        std::fs::write(v2.path().join("memory.max"), "8589934592\n").unwrap();
+        assert_eq!(
+            process_memory_limit(v2.path(), Some("0::/\n")),
+            Some(8589934592),
+            "a container's own mount"
+        );
+
         let configured = PerformanceConfig {
             max_total_query_memory_bytes: Some(1 << 20),
             ..PerformanceConfig::default()
@@ -1177,8 +1286,9 @@ mod tests {
         // config fields; they must not break config parsing.
         figment::Jail::expect_with(|jail| {
             jail.create_file("server.toml", "[storage]\ndata_dir = \"/tmp/x\"\n")?;
-            jail.set_env("INPUTLAYER_BOOTSTRAP_API_KEY", "secret");
-            jail.set_env("INPUTLAYER_ADMIN_PASSWORD", "secret");
+            // Blank, so tests bootstrapping meanwhile still generate theirs.
+            jail.set_env("INPUTLAYER_BOOTSTRAP_API_KEY", "");
+            jail.set_env("INPUTLAYER_ADMIN_PASSWORD", "");
             jail.set_env("INPUTLAYER_API_KEY", "client-key");
             let config = Config::from_file("server.toml").expect("parse must succeed");
             assert_eq!(config.storage.data_dir, PathBuf::from("/tmp/x"));

@@ -134,6 +134,9 @@ impl Engine {
             program: program.to_string(),
             params: params.clone(),
             timeout_ms: None,
+            expect_revision: None,
+            expect_relations: None,
+            expect_epoch: None,
         })
         .await?;
 

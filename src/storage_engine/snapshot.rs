@@ -17,6 +17,7 @@
 //! - Writers publish new snapshots atomically via `ArcSwap`
 //! - Readers get consistent snapshots without holding locks
 
+use super::precondition::ChangeLog;
 use crate::ast::dependencies::DependencyClosure;
 use crate::ast::{Program, Rule};
 use crate::execution::{TimingBreakdown, TimingMode};
@@ -32,6 +33,12 @@ use tracing::info;
 
 /// Last revision handed to a snapshot, across all knowledge graphs.
 static LAST_REVISION: AtomicU64 = AtomicU64::new(0);
+
+/// The last revision handed to a snapshot of any knowledge graph in this
+/// engine run; no snapshot has a later one yet.
+pub(super) fn last_revision() -> u64 {
+    LAST_REVISION.load(Ordering::SeqCst)
+}
 
 /// Immutable point-in-time snapshot of knowledge graph data
 ///
@@ -73,8 +80,11 @@ pub struct KnowledgeGraphSnapshot {
     /// Maximum result rows returned per query (0 = unlimited)
     pub max_result_rows: usize,
 
-    /// Maximum query cost score (0 = unlimited)
+    /// Most rows one join of a query may be estimated to produce (0 = unlimited)
     pub max_query_cost: u64,
+
+    /// Most fixpoint iterations a recursive evaluation may run (0 = unlimited)
+    pub max_recursion_iterations: u32,
 
     /// Optimizer passes for engines built from this snapshot
     pub optimization: OptimizationConfig,
@@ -82,6 +92,10 @@ pub struct KnowledgeGraphSnapshot {
     /// HNSW search over the index views captured when this snapshot was
     /// published, so `hnsw_nearest` sees the same data as `input_tuples`.
     pub hnsw_search_fn: Option<HnswSearchFn>,
+
+    /// When each relation and the rules last changed, as of this snapshot;
+    /// shared with copies of it.
+    changes: Arc<ChangeLog>,
 }
 
 /// The persistent rules a snapshot evaluates queries with, and the plans
@@ -239,9 +253,23 @@ impl KnowledgeGraphSnapshot {
             persistent,
             max_result_rows: 0,
             max_query_cost: 0,
+            max_recursion_iterations: 0,
             optimization: OptimizationConfig::default(),
             hnsw_search_fn: None,
+            changes: Arc::new(ChangeLog::starting_at(revision)),
         }
+    }
+
+    /// When each relation and the rules last changed, as of this snapshot.
+    /// A published snapshot continues its predecessor's log; any other
+    /// starts an empty one at its own revision.
+    pub fn changes(&self) -> &ChangeLog {
+        &self.changes
+    }
+
+    /// Set the change log of a snapshot about to be published.
+    pub(super) fn set_changes(&mut self, changes: ChangeLog) {
+        self.changes = Arc::new(changes);
     }
 
     /// Create an empty snapshot
@@ -346,6 +374,7 @@ impl KnowledgeGraphSnapshot {
         engine.set_num_workers(self.num_workers);
         engine.set_max_result_rows(self.max_result_rows);
         engine.set_max_query_cost(self.max_query_cost);
+        engine.set_max_recursion_iterations(self.max_recursion_iterations);
         if let Some(ref search_fn) = self.hnsw_search_fn {
             engine.set_hnsw_search_fn(Arc::clone(search_fn));
         }

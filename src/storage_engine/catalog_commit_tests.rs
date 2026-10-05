@@ -356,6 +356,39 @@ fn saved_catalog_changes_leave_the_wal() {
 }
 
 #[test]
+fn unsynced_catalog_directory_keeps_the_changes_in_the_wal() {
+    for directory in ["rules", ""] {
+        let temp = TempDir::new().unwrap();
+        {
+            let storage = open(&temp);
+            crate::storage::persist::inject_sync_fault(temp.path().join(KG).join(directory));
+            // Catalog changes only: a saved catalog would leave the WAL.
+            storage
+                .commit_program(
+                    KG,
+                    program(vec![
+                        catalog(CatalogChange::DefineSchema(int_schema("item"))),
+                        catalog(rule("v(X) <- item(X)")),
+                    ]),
+                    None,
+                )
+                .unwrap();
+            let records = wal_records(&temp);
+            assert!(records.iter().any(|r| r.contains("item")), "{directory:?}");
+        }
+        // Power loss undoes the renames the failed directory sync did not
+        // make durable.
+        let kg_dir = temp.path().join(KG);
+        let _ = fs::remove_file(kg_dir.join("rules/catalog.json"));
+        let _ = fs::remove_file(kg_dir.join("schema.json"));
+
+        let storage = open(&temp);
+        assert!(storage.has_schema_in(KG, "item").unwrap(), "{directory:?}");
+        assert_eq!(storage.list_rules_in(KG).unwrap(), ["v"], "{directory:?}");
+    }
+}
+
+#[test]
 fn a_new_kg_of_a_dropped_name_does_not_replay_its_rules() {
     let temp = TempDir::new().unwrap();
     {

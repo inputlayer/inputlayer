@@ -991,8 +991,8 @@ impl RuleCatalog {
         let content =
             fs::read_to_string(path).map_err(|e| format!("Failed to read catalog: {e}"))?;
 
-        let catalog_file: CatalogFile =
-            serde_json::from_str(&content).map_err(|e| format!("Failed to parse catalog: {e}"))?;
+        let catalog_file: CatalogFile = crate::storage::nested_json::from_slice(content.as_bytes())
+            .map_err(|e| format!("Failed to parse catalog: {e}"))?;
 
         self.rules = catalog_file.rules;
         self.revision = catalog_file.revision;

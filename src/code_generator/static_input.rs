@@ -61,9 +61,34 @@ impl CodeGenerator {
     where
         G: Scope,
     {
+        Self::source_unless(node, input_data, &|relation| {
+            live.is_some_and(|l| l.contains_key(relation))
+        })
+    }
+
+    /// Rows a `Filter(...Scan)` keeps of its relation in `input_data`, the
+    /// tuples [`Self::prefiltered_scan`] would stream, or `None` when `node`
+    /// is not one or scans a relation `derived` says is computed.
+    pub(crate) fn count_filtered_scan(
+        node: &IRNode,
+        input_data: &RelationMap,
+        derived: &dyn Fn(&str) -> bool,
+    ) -> Option<u64> {
+        if !matches!(node, IRNode::Filter { .. }) {
+            return None;
+        }
+        let source = Self::source_unless(node, input_data, derived)?;
+        Some(source.relation.iter().filter(|t| source.matches(t)).count() as u64)
+    }
+
+    fn source_unless<'a>(
+        node: &IRNode,
+        input_data: &'a RelationMap,
+        excluded: &dyn Fn(&str) -> bool,
+    ) -> Option<StaticSource<'a>> {
         match node {
             IRNode::Scan { relation, .. } => {
-                if live.is_some_and(|l| l.contains_key(relation)) {
+                if excluded(relation) {
                     return None;
                 }
                 Some(StaticSource {
@@ -72,7 +97,7 @@ impl CodeGenerator {
                 })
             }
             IRNode::Filter { input, predicate } => {
-                let mut source = Self::static_source(input, input_data, live)?;
+                let mut source = Self::source_unless(input, input_data, excluded)?;
                 source
                     .predicates
                     .push(Self::predicate_to_tuple_fn(predicate));

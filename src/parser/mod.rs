@@ -10,8 +10,74 @@ use crate::ast::{
     AggregateFunc, ArithExpr, ArithOp, Atom, BodyPredicate, BuiltinFunc, ComparisonOp, Program,
     Rule, Term,
 };
+use crate::size_limits;
 pub use lexer::strip_block_comments;
 use lexer::{find_outside_strings, find_top_level, is_string_literal, split_top_level, Angles};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Default for the deepest nesting a term or type expression may have
+/// (function calls, operators, parenthesized groups, `list[...]` and records
+/// each add a level).
+pub const DEFAULT_MAX_NESTING_DEPTH: usize = 128;
+
+/// Highest nesting limit that may be configured. Every recursive pass over a
+/// term fits in an [`ENGINE_THREAD_STACK_BYTES`](crate::ENGINE_THREAD_STACK_BYTES)
+/// stack at this depth.
+pub const MAX_NESTING_DEPTH_CEILING: usize = 1024;
+
+/// Largest rule or query body: each body predicate counts one, plus one per
+/// argument of a body atom. The query plan nests one level per predicate and
+/// per constant or repeated variable, and every pass over the plan recurses
+/// that deep, so this bound keeps them within an
+/// [`ENGINE_THREAD_STACK_BYTES`](crate::ENGINE_THREAD_STACK_BYTES) stack.
+pub const MAX_RULE_BODY_SIZE: usize = 4096;
+
+static MAX_NESTING_DEPTH: AtomicUsize = AtomicUsize::new(DEFAULT_MAX_NESTING_DEPTH);
+
+/// Set the process-wide term nesting limit, clamped to
+/// `1..=MAX_NESTING_DEPTH_CEILING`.
+pub fn set_max_nesting_depth(limit: usize) {
+    MAX_NESTING_DEPTH.store(limit.clamp(1, MAX_NESTING_DEPTH_CEILING), Ordering::Relaxed);
+}
+
+/// The process-wide term nesting limit.
+pub fn max_nesting_depth() -> usize {
+    MAX_NESTING_DEPTH.load(Ordering::Relaxed)
+}
+
+/// The nesting level one below `depth`, or an error past the limit. Deeper
+/// input would overflow the stack of the recursive parsers and of every pass
+/// that walks their output.
+pub(crate) fn nested(depth: usize) -> Result<usize, String> {
+    let limit = max_nesting_depth();
+    if depth >= limit {
+        return Err(too_deep(limit));
+    }
+    Ok(depth + 1)
+}
+
+fn too_deep(limit: usize) -> String {
+    format!(
+        "Expression nesting exceeds the limit of {limit} levels \
+         (storage.performance.max_nesting_depth)"
+    )
+}
+
+/// Deepest parenthesis nesting in `s`, outside string literals.
+fn paren_depth(s: &str) -> usize {
+    let (mut depth, mut max) = (0usize, 0usize);
+    for (_, ch) in lexer::code_chars(s) {
+        match ch {
+            '(' => {
+                depth += 1;
+                max = max.max(depth);
+            }
+            ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    max
+}
 
 /// Parse an IQL program (supports // and /* */ comments).
 pub fn parse_program(source: &str) -> Result<Program, String> {
@@ -68,6 +134,19 @@ pub fn parse_rule(line: &str) -> Result<Rule, String> {
 
     let head = parse_atom(line[..arrow].trim())?;
     let body = parse_body(body_str)?;
+    let body_size: usize = body
+        .iter()
+        .map(|pred| match pred {
+            BodyPredicate::Positive(atom) | BodyPredicate::Negated(atom) => 1 + atom.args.len(),
+            _ => 1,
+        })
+        .sum();
+    if body_size > MAX_RULE_BODY_SIZE {
+        return Err(format!(
+            "Rule body is too large: {body_size} elements (body predicates plus \
+             body-atom arguments); the limit is {MAX_RULE_BODY_SIZE}"
+        ));
+    }
 
     // Check: if body is empty but head has variables, this is an invalid rule
     // A rule with "<-" must have at least one body predicate
@@ -194,6 +273,7 @@ fn try_parse_hnsw_nearest(s: &str) -> Result<Option<BodyPredicate>, String> {
     if k == 0 {
         return Err("hnsw_nearest: k must be >= 1".into());
     }
+    size_limits::check("hnsw_nearest: k", k, size_limits::MAX_HNSW_K)?;
 
     // Arg 3: id_var (must be a variable)
     let id_var = args[3].trim().to_string();
@@ -214,9 +294,18 @@ fn try_parse_hnsw_nearest(s: &str) -> Result<Option<BodyPredicate>, String> {
     // Arg 5 (optional): ef_search override
     let ef_search = if args.len() == 6 {
         let ef_str = args[5].trim();
-        Some(ef_str.parse::<usize>().map_err(|_| {
-            format!("hnsw_nearest: ef_search must be a positive integer, got '{ef_str}'")
-        })?)
+        let ef = ef_str
+            .parse::<usize>()
+            .ok()
+            .filter(|&ef| ef > 0)
+            .ok_or_else(|| {
+                format!("hnsw_nearest: ef_search must be a positive integer, got '{ef_str}'")
+            })?;
+        Some(size_limits::check(
+            "hnsw_nearest: ef_search",
+            ef,
+            size_limits::MAX_EF_SEARCH,
+        )?)
     } else {
         None
     };
@@ -283,6 +372,18 @@ fn parse_atom(s: &str) -> Result<Atom, String> {
 /// This handles variables, constants, strings, aggregates, function calls,
 /// and arithmetic expressions.
 pub fn parse_term(s: &str) -> Result<Term, String> {
+    // Every call and group is a level, so deep parentheses are refused in
+    // one pass instead of after descending the limit's worth of levels,
+    // each rescanning the term.
+    let limit = max_nesting_depth();
+    if paren_depth(s) > limit {
+        return Err(too_deep(limit));
+    }
+    parse_term_at(s, 0)
+}
+
+/// Parse a term nested `depth` levels deep.
+fn parse_term_at(s: &str, depth: usize) -> Result<Term, String> {
     let s = s.trim();
 
     // Placeholder is "_"
@@ -321,6 +422,9 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
             match func_lower.as_str() {
                 "top_k" => {
                     if let Some(func) = AggregateFunc::parse_top_k(params) {
+                        if let AggregateFunc::TopK { k, .. } = &func {
+                            size_limits::check("top_k: k", *k, size_limits::MAX_TOP_K)?;
+                        }
                         // For ranking aggregates, the "var" field is used to identify the group
                         // We'll use an empty string and rely on the aggregate's internal fields
                         return Ok(Term::Aggregate(func, String::new()));
@@ -329,6 +433,9 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
                 }
                 "top_k_threshold" => {
                     if let Some(func) = AggregateFunc::parse_top_k_threshold(params) {
+                        if let AggregateFunc::TopKThreshold { k, .. } = &func {
+                            size_limits::check("top_k_threshold: k", *k, size_limits::MAX_TOP_K)?;
+                        }
                         return Ok(Term::Aggregate(func, String::new()));
                     }
                     return Err(format!("Invalid top_k_threshold parameters: {params}"));
@@ -354,7 +461,8 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
             // Check if this is a known built-in function
             if let Some(builtin) = BuiltinFunc::parse(func_name) {
                 let args_str = &s[paren_pos + 1..s.len() - 1];
-                let args = parse_function_args(args_str)?;
+                let args = parse_function_args(args_str, nested(depth)?)?;
+                check_size_args(&builtin, &args)?;
                 return Ok(Term::FunctionCall(builtin, args));
             }
             // If not a known function, fall through to check if it could be something else
@@ -376,7 +484,7 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
 
     // Check for arithmetic expression (contains +, -, *, /, %)
     if contains_arithmetic_operator(s) {
-        let expr = parse_arithmetic_expr(s)?;
+        let expr = parse_arithmetic_expr(s, depth)?;
         return Ok(Term::Arithmetic(expr));
     }
 
@@ -418,6 +526,25 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
     Err(format!("Invalid term: '{s}'"))
 }
 
+/// Reject a literal size argument of a built-in over its bound. A size bound
+/// to a variable is bounded where the function runs.
+fn check_size_args(func: &BuiltinFunc, args: &[Term]) -> Result<(), String> {
+    let num_probes = match func {
+        BuiltinFunc::LshProbes => args.get(2),
+        BuiltinFunc::LshMultiProbe => args.get(3),
+        _ => None,
+    };
+    if let Some(Term::Constant(n)) = num_probes {
+        let n = usize::try_from(*n).unwrap_or(0);
+        size_limits::check(
+            &format!("{}: num_probes", func.as_str()),
+            n,
+            size_limits::MAX_LSH_PROBES,
+        )?;
+    }
+    Ok(())
+}
+
 /// Parse a vector literal like [1.0, 2.0, 3.0]
 fn parse_vector_literal(s: &str) -> Result<Term, String> {
     let inner = s[1..s.len() - 1].trim();
@@ -438,7 +565,7 @@ fn parse_vector_literal(s: &str) -> Result<Term, String> {
 }
 
 /// Parse function arguments (comma-separated terms)
-fn parse_function_args(s: &str) -> Result<Vec<Term>, String> {
+fn parse_function_args(s: &str, depth: usize) -> Result<Vec<Term>, String> {
     let s = s.trim();
     if s.is_empty() {
         return Ok(vec![]);
@@ -446,7 +573,7 @@ fn parse_function_args(s: &str) -> Result<Vec<Term>, String> {
 
     split_top_level(s, ',', Angles::All)
         .into_iter()
-        .map(|arg| parse_term(arg.trim()))
+        .map(|arg| parse_term_at(arg.trim(), depth))
         .collect()
 }
 
@@ -516,13 +643,13 @@ fn is_exponent_sign(before: &[char]) -> bool {
 /// 1. + and - (left associative)
 /// 2. * and / and % (left associative)
 /// 3. Parentheses
-fn parse_arithmetic_expr(s: &str) -> Result<ArithExpr, String> {
+fn parse_arithmetic_expr(s: &str, depth: usize) -> Result<ArithExpr, String> {
     let s = s.trim();
-    parse_add_sub(s)
+    parse_add_sub(s, depth)
 }
 
 /// Parse addition and subtraction (lowest precedence)
-fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
+fn parse_add_sub(s: &str, depth: usize) -> Result<ArithExpr, String> {
     let s = s.trim();
 
     // Find the rightmost + or - at the top level (outside parentheses)
@@ -548,8 +675,8 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Add,
-                        left: Box::new(parse_add_sub(left)?),
-                        right: Box::new(parse_mul_div(right)?),
+                        left: Box::new(parse_add_sub(left, nested(depth)?)?),
+                        right: Box::new(parse_mul_div(right, nested(depth)?)?),
                     });
                 }
             }
@@ -571,8 +698,8 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
                     if !left.is_empty() && !right.is_empty() {
                         return Ok(ArithExpr::Binary {
                             op: ArithOp::Sub,
-                            left: Box::new(parse_add_sub(left)?),
-                            right: Box::new(parse_mul_div(right)?),
+                            left: Box::new(parse_add_sub(left, nested(depth)?)?),
+                            right: Box::new(parse_mul_div(right, nested(depth)?)?),
                         });
                     }
                 }
@@ -582,11 +709,11 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
     }
 
     // No + or - at top level, try multiplication/division
-    parse_mul_div(s)
+    parse_mul_div(s, depth)
 }
 
 /// Parse multiplication, division, modulo (higher precedence)
-fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
+fn parse_mul_div(s: &str, depth: usize) -> Result<ArithExpr, String> {
     let s = s.trim();
 
     let mut paren_depth: i32 = 0;
@@ -605,8 +732,8 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Mul,
-                        left: Box::new(parse_mul_div(left)?),
-                        right: Box::new(parse_primary(right)?),
+                        left: Box::new(parse_mul_div(left, nested(depth)?)?),
+                        right: Box::new(parse_primary(right, nested(depth)?)?),
                     });
                 }
             }
@@ -616,8 +743,8 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Div,
-                        left: Box::new(parse_mul_div(left)?),
-                        right: Box::new(parse_primary(right)?),
+                        left: Box::new(parse_mul_div(left, nested(depth)?)?),
+                        right: Box::new(parse_primary(right, nested(depth)?)?),
                     });
                 }
             }
@@ -627,8 +754,8 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Mod,
-                        left: Box::new(parse_mul_div(left)?),
-                        right: Box::new(parse_primary(right)?),
+                        left: Box::new(parse_mul_div(left, nested(depth)?)?),
+                        right: Box::new(parse_primary(right, nested(depth)?)?),
                     });
                 }
             }
@@ -637,26 +764,26 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
     }
 
     // No * or / or % at top level, parse primary
-    parse_primary(s)
+    parse_primary(s, depth)
 }
 
 /// Parse primary expressions (variables, constants, parenthesized expressions)
-fn parse_primary(s: &str) -> Result<ArithExpr, String> {
+fn parse_primary(s: &str, depth: usize) -> Result<ArithExpr, String> {
     let s = s.trim();
 
     // Handle parenthesized expression
     if s.starts_with('(') && s.ends_with(')') {
         // Check if the parens are matching (not something like "(a+b)*(c+d)")
-        let mut depth = 0;
+        let mut open = 0;
         let chars: Vec<char> = s.chars().collect();
         let mut matched_at_end = true;
 
         for (i, &ch) in chars.iter().enumerate() {
             match ch {
-                '(' => depth += 1,
+                '(' => open += 1,
                 ')' => {
-                    depth -= 1;
-                    if depth == 0 && i < chars.len() - 1 {
+                    open -= 1;
+                    if open == 0 && i < chars.len() - 1 {
                         matched_at_end = false;
                         break;
                     }
@@ -665,8 +792,8 @@ fn parse_primary(s: &str) -> Result<ArithExpr, String> {
             }
         }
 
-        if matched_at_end && depth == 0 {
-            return parse_arithmetic_expr(&s[1..s.len() - 1]);
+        if matched_at_end && open == 0 {
+            return parse_arithmetic_expr(&s[1..s.len() - 1], nested(depth)?);
         }
     }
 
@@ -1429,6 +1556,63 @@ mod tests {
         assert!(rule.head.has_aggregates());
     }
 
+    // Nesting Limit Tests
+    fn too_deep(result: Result<Term, String>) -> bool {
+        result.is_err_and(|e| e.contains("nesting exceeds the limit"))
+    }
+
+    #[test]
+    fn test_nesting_at_the_limit_parses() {
+        let depth = DEFAULT_MAX_NESTING_DEPTH;
+        let calls = format!("{}X{}", "abs(".repeat(depth), ")".repeat(depth));
+        assert!(parse_term(&calls).is_ok());
+        // The `+` inside the groups is a level of its own.
+        let parens = format!("{}X+1{}", "(".repeat(depth - 1), ")".repeat(depth - 1));
+        assert!(parse_term(&parens).is_ok());
+        let sum = format!("X{}", "+1".repeat(depth));
+        assert!(parse_term(&sum).is_ok());
+        let product = format!("X{}", "*2".repeat(depth));
+        assert!(parse_term(&product).is_ok());
+    }
+
+    #[test]
+    fn test_nesting_past_the_limit_is_rejected() {
+        let depth = DEFAULT_MAX_NESTING_DEPTH + 1;
+        let calls = format!("{}X{}", "abs(".repeat(depth), ")".repeat(depth));
+        assert!(too_deep(parse_term(&calls)));
+        let parens = format!("{}X+1{}", "(".repeat(depth), ")".repeat(depth));
+        assert!(too_deep(parse_term(&parens)));
+        let sum = format!("X{}", "+1".repeat(depth));
+        assert!(too_deep(parse_term(&sum)));
+        let product = format!("X{}", "*2".repeat(depth));
+        assert!(too_deep(parse_term(&product)));
+        // Levels add up across calls, groups and operators.
+        let half = depth / 2 + 1;
+        let mixed = format!(
+            "{}(X+1{}){}",
+            "abs(".repeat(half),
+            "*2".repeat(half),
+            ")".repeat(half)
+        );
+        assert!(too_deep(parse_term(&mixed)));
+    }
+
+    /// The audit's repro: 4,000 nested calls overflowed the stack and
+    /// aborted the process. Far deeper input is now refused in time.
+    #[test]
+    fn test_very_deep_nesting_does_not_overflow() {
+        for depth in [4_000, 100_000] {
+            let calls = format!("{}1{}", "abs(".repeat(depth), ")".repeat(depth));
+            assert!(too_deep(parse_term(&calls)));
+            let rule = format!("p(X) <- r(Y), X = {calls}");
+            assert!(parse_rule(&rule).is_err_and(|e| e.contains("nesting")));
+            let parens = format!("{}X-1{}", "(".repeat(depth), ")".repeat(depth));
+            assert!(too_deep(parse_term(&parens)));
+            let sum = format!("X{}", "-1".repeat(depth));
+            assert!(too_deep(parse_term(&sum)));
+        }
+    }
+
     // Comment Parsing Tests
     #[test]
     fn test_strip_block_comments_simple() {
@@ -1582,6 +1766,45 @@ mod tests {
     }
 
     // === HNSW nearest neighbor parsing tests ===
+
+    #[test]
+    fn test_parse_rejects_sizes_over_their_bounds() {
+        use crate::size_limits::{MAX_EF_SEARCH, MAX_HNSW_K, MAX_LSH_PROBES, MAX_TOP_K};
+        let huge = 300_000_000_000_000_000_i64;
+        let hnsw = |k: String, ef: &str| {
+            parse_rule(&format!(
+                r#"r(Id, D) <- hnsw_nearest("i", [1.0], {k}, Id, D{ef})"#
+            ))
+        };
+        assert!(hnsw(MAX_HNSW_K.to_string(), "").is_ok());
+        let err = hnsw((MAX_HNSW_K + 1).to_string(), "").unwrap_err();
+        assert!(err.contains("hnsw_nearest: k must be at most"), "{err}");
+        assert!(hnsw(huge.to_string(), "").is_err());
+        assert!(hnsw("5".into(), &format!(", {MAX_EF_SEARCH}")).is_ok());
+        let err = hnsw("5".into(), &format!(", {}", MAX_EF_SEARCH + 1)).unwrap_err();
+        assert!(
+            err.contains("hnsw_nearest: ef_search must be at most"),
+            "{err}"
+        );
+        assert!(hnsw("5".into(), ", 0").is_err());
+
+        assert!(parse_term(&format!("top_k<{MAX_TOP_K}, S>")).is_ok());
+        let err = parse_term(&format!("top_k<{}, S>", MAX_TOP_K + 1)).unwrap_err();
+        assert!(err.contains("top_k: k must be at most"), "{err}");
+        let err = parse_term(&format!("top_k_threshold<{huge}, 0.5, S>")).unwrap_err();
+        assert!(err.contains("top_k_threshold: k must be at most"), "{err}");
+
+        assert!(parse_term(&format!("lsh_probes(0, 62, {MAX_LSH_PROBES})")).is_ok());
+        let err = parse_term(&format!("lsh_probes(0, 4, {huge})")).unwrap_err();
+        assert!(
+            err.contains("lsh_probes: num_probes must be at most"),
+            "{err}"
+        );
+        let err = parse_term(&format!("lsh_multi_probe(V, 0, 8, {huge})")).unwrap_err();
+        assert!(err.contains("lsh_multi_probe: num_probes"), "{err}");
+        // A size from a variable is bounded where the function runs.
+        assert!(parse_term("lsh_probes(0, 4, N)").is_ok());
+    }
 
     #[test]
     fn test_parse_hnsw_nearest_vector_literal() {

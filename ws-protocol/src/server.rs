@@ -189,6 +189,14 @@ pub struct ResultFrame {
     /// Fact statements the program committed, with their effective counts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub statements: Vec<StatementCounts>,
+    /// Revision the program's committed writes are visible at, the revision
+    /// pushes carry: a push at this revision or later reflects them. Set only
+    /// when the program changed persistent state of a knowledge graph:
+    /// committed fact, schema and rule writes, `.rel drop`, `.clear prefix`,
+    /// `.index create|drop|rebuild`, `.kg create` and
+    /// `.ontology install|remove|upgrade`; with several, the last one's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
     /// Set on the reply to `.subscribe`: `rows` is the subscription's snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscribed: Option<Subscribed>,
@@ -215,6 +223,8 @@ pub struct ResultStartFrame {
     pub errors: Vec<StatementError>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub statements: Vec<StatementCounts>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
     /// Set on the reply to `.subscribe`: the chunks hold the snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscribed: Option<Subscribed>,

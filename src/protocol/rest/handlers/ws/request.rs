@@ -17,6 +17,7 @@ use crate::params::{references_params, META_PARAMS};
 use crate::protocol::handler::is_query_program;
 use crate::protocol::subscription::connection::Opened;
 use crate::statement::{MetaCommand, Statement};
+use crate::storage_engine::Precondition;
 
 /// One client request: the `id` its replies echo and what it asks for.
 pub(super) struct Request {
@@ -29,11 +30,12 @@ pub(super) enum Job {
     /// Answered without running anything (pong, malformed frame).
     Immediate(ServerFrame),
     /// An IQL program through the handler, within `timeout_ms` of arrival
-    /// when the client set one.
+    /// when the client set one, committing only if `precondition` holds.
     Execute {
         program: String,
         params: Params,
         timeout_ms: Option<u64>,
+        precondition: Option<Expectation>,
     },
     /// Cancel the unanswered request `target`; handled on arrival.
     Cancel { target: RequestId },
@@ -41,6 +43,47 @@ pub(super) enum Job {
     Subscribe { name: String, query: String },
     /// `.unsubscribe <name>`.
     Unsubscribe { name: String },
+}
+
+/// An `execute`'s `expect_revision` and the stream epoch it belongs to.
+pub(super) struct Expectation {
+    pub precondition: Precondition,
+    /// `expect_epoch`, checked against this engine run's on admission.
+    pub epoch: Option<String>,
+}
+
+impl Expectation {
+    /// The precondition of an `execute` frame's `expect_*` fields: `None`
+    /// when it sets none, `Err` with the reason when they are inconsistent.
+    fn of(
+        revision: Option<u64>,
+        relations: Option<Vec<String>>,
+        epoch: Option<String>,
+    ) -> Result<Option<Self>, String> {
+        let Some(revision) = revision else {
+            return match (relations, epoch) {
+                (None, None) => Ok(None),
+                _ => Err("expect_relations and expect_epoch require expect_revision".to_string()),
+            };
+        };
+        if let Some(relations) = &relations {
+            if relations.is_empty() {
+                return Err("expect_relations names no relation; omit it to expect the \
+                            whole knowledge graph unchanged"
+                    .to_string());
+            }
+            if relations.iter().any(String::is_empty) {
+                return Err("expect_relations names an empty relation".to_string());
+            }
+        }
+        Ok(Some(Self {
+            precondition: Precondition {
+                revision,
+                relations,
+            },
+            epoch,
+        }))
+    }
 }
 
 /// A finished request, ready to be written.
@@ -77,7 +120,15 @@ impl Request {
                 program,
                 params,
                 timeout_ms,
+                expect_revision,
+                expect_relations,
+                expect_epoch,
             } => {
+                let precondition =
+                    match Expectation::of(expect_revision, expect_relations, expect_epoch) {
+                        Ok(precondition) => precondition,
+                        Err(message) => return Self::invalid(id, message),
+                    };
                 let command = subscription_command(&program);
                 // Standing queries take no parameters: their IQL is
                 // re-evaluated long after the request.
@@ -89,6 +140,11 @@ impl Request {
                     ));
                 }
                 let (access, job) = match command {
+                    Some(_) if precondition.is_some() => {
+                        let message = "expect_revision applies to a program that writes, \
+                                       not to .subscribe or .unsubscribe";
+                        return Self::invalid(id, message.to_string());
+                    }
                     Some(MetaCommand::Subscribe { id: name, query }) => {
                         (Access::Exclusive, Job::Subscribe { name, query })
                     }
@@ -101,6 +157,7 @@ impl Request {
                             program,
                             params,
                             timeout_ms,
+                            precondition,
                         },
                     ),
                 };
@@ -115,13 +172,18 @@ impl Request {
             ),
             ClientFrame::Ping { id } => Self::immediate(ServerFrame::Pong { id }),
             ClientFrame::Login { id, .. } | ClientFrame::Authenticate { id, .. } => {
-                Self::immediate(ServerFrame::error(
-                    id,
-                    Some(ErrorCode::InvalidRequest),
-                    "Already authenticated".to_string(),
-                ))
+                Self::invalid(id, "Already authenticated".to_string())
             }
         }
+    }
+
+    /// A request rejected with `invalid_request` before anything ran.
+    fn invalid(id: Option<RequestId>, message: String) -> (Access, Self) {
+        Self::immediate(ServerFrame::error(
+            id,
+            Some(ErrorCode::InvalidRequest),
+            message,
+        ))
     }
 
     /// A reply that touches no state, released in order with the others.
@@ -218,6 +280,60 @@ mod tests {
             assert_eq!(access, Access::Shared, "{text}");
             assert!(matches!(request.job, Job::Immediate(_)), "{text}");
             assert_eq!(request.id.as_ref().map(RequestId::as_str), id, "{text}");
+        }
+    }
+
+    fn rejection(text: &str) -> Option<String> {
+        match Request::from_text(text).1.job {
+            Job::Immediate(ServerFrame::Error {
+                code: Some(ErrorCode::InvalidRequest),
+                message,
+                ..
+            }) => Some(message),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn expect_revision_rides_with_its_program() {
+        let text = r#"{"type": "execute", "program": "+a(1)", "expect_revision": 9,
+            "expect_relations": ["a"], "expect_epoch": "e"}"#;
+        let Job::Execute {
+            precondition: Some(expectation),
+            ..
+        } = Request::from_text(text).1.job
+        else {
+            panic!("expected an execute job with a precondition");
+        };
+        assert_eq!(
+            expectation.precondition,
+            Precondition {
+                revision: 9,
+                relations: Some(vec!["a".to_string()]),
+            }
+        );
+        assert_eq!(expectation.epoch.as_deref(), Some("e"));
+        let text = r#"{"type": "execute", "program": "+a(1)"}"#;
+        assert!(matches!(
+            Request::from_text(text).1.job,
+            Job::Execute {
+                precondition: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn inconsistent_expectations_are_invalid_requests() {
+        for text in [
+            r#"{"type": "execute", "program": "+a(1)", "expect_relations": ["a"]}"#,
+            r#"{"type": "execute", "program": "+a(1)", "expect_epoch": "e"}"#,
+            r#"{"type": "execute", "program": "+a(1)", "expect_revision": 1, "expect_relations": []}"#,
+            r#"{"type": "execute", "program": "+a(1)", "expect_revision": 1, "expect_relations": [""]}"#,
+            r#"{"type": "execute", "program": ".subscribe s ?a(X)", "expect_revision": 1}"#,
+            r#"{"type": "execute", "program": ".unsubscribe s", "expect_revision": 1}"#,
+        ] {
+            assert!(rejection(text).is_some(), "{text}");
         }
     }
 

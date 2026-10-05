@@ -178,9 +178,30 @@ Every `execute` runs under **one deadline**, counted from when the server reads 
 
 A `cancel` is read like any other frame: while `http.rate_limit.ws_max_in_flight_requests` requests are unanswered the server reads nothing, so keep a slot free if you may need to cancel.
 
-A request whose deadline passes is stopped the same way and fails with code `deadline_exceeded`; a write that already began committing completes and returns its result. Code `outcome_unknown` means the commit itself failed in a way that may have left the changes applied: read the state back before retrying.
+A request whose deadline passes is stopped the same way and fails with code `deadline_exceeded`; a write that already began committing completes and returns its result. A stopped query stops computing within milliseconds, even in the middle of a join forming millions of rows, and its compute slot is free again once it has. Code `outcome_unknown` means the commit itself failed in a way that may have left the changes applied: read the state back before retrying.
 
 Writes of facts are idempotent: inserting a fact that is present, or deleting one that is absent, changes nothing. After `cancelled`, `deadline_exceeded`, `outcome_unknown` or a lost connection, a client can resend the same write without duplicating it.
+
+### Revision Preconditions
+
+An `execute` that writes can say which state it was decided on. `expect_revision` is a revision the client observed, for example a subscription's `revision` or a push's. The program's writes then commit only if no relation in scope and no persistent rule changed after that revision. The engine checks this under the knowledge graph's write lock, together with the commit, so a write that lands between the check and the commit cannot slip through.
+
+```json
+{"type": "execute", "id": "d1", "program": "+claim(\"s1\", \"call_carrier\")",
+ "expect_revision": 1731, "expect_relations": ["eta"], "expect_epoch": "4f1c9a0b2d6e8f13"}
+```
+
+| Field | Meaning |
+|---|---|
+| `expect_revision` | The revision the program was decided on. |
+| `expect_relations` | The scope: these relations and every relation they are derived from through persistent rules. Without it, the scope is the whole knowledge graph. A name that is not a relation, rule or schema of the knowledge graph fails with `validation`, so a misspelling cannot pass silently. |
+| `expect_epoch` | The stream epoch (`authenticated.stream_epoch`) the revision belongs to. Revisions restart with the engine, so a revision from another run fails the precondition. |
+
+If anything in scope changed, the program applies nothing and fails with code `precondition_failed`. The message names the relation (or the rules) that changed and the revision it changed at. Sending the same request again cannot succeed: read the state again and decide again. Of several writers that expect the same revision of the same scope, at most one commits, but only when each writer's program writes a relation in that scope. Writes outside the scope do not refuse each other: in the example above, two deciders writing `claim` with `expect_relations: ["eta"]` can both commit. Racing deciders that write a claim relation should include it in `expect_relations`, or rely on the claim guard.
+
+The check is relation-level: any write to a relation in scope refuses the program, even one that does not change the rows the program depends on. Writes to relations outside the scope never refuse it. A revision that is newer than any the engine has issued, or older than the knowledge graph's first state in this engine run (it was created again, or the engine restarted), also fails with `precondition_failed`.
+
+Only a program that writes persistent state (facts, schemas or rules) can carry `expect_revision`. On a query, a session rule, a meta command or `.subscribe`, the request is rejected with `invalid_request` and nothing runs. `expect_relations` and `expect_epoch` require `expect_revision`.
 
 ### Result Response
 
@@ -197,6 +218,12 @@ Writes of facts are idempotent: inserting a fact that is present, or deleting on
 }
 ```
 
+The reply to a program that changed persistent state of a knowledge graph also carries `revision`: the knowledge graph revision the program's changes are visible at, the same revision [standing-query pushes](#standing-queries) carry. A delta at that revision or later reflects them. The statements that carry it are committed fact, schema and rule writes, `.rel drop`, `.clear prefix`, `.index create`, `.index drop`, `.index rebuild`, `.kg create` (the new graph's first revision) and `.ontology install`, `remove` and `upgrade`; a program with several names the last one's. A write that changed nothing (inserting a fact that is present, for example) names the current revision, which already holds its effect. Queries without writes, programs whose writes were rolled back, `.kg use`, `.kg drop`, and session-scoped schemas, facts and rules carry no `revision`. Like push revisions, it is comparable only within one knowledge graph and one `stream_epoch`.
+
+```json
+{"type": "result", "columns": ["message"], "rows": [["Inserted 1 fact(s) into 'eta'."]], "revision": 1731, "errors": []}
+```
+
 ### Error Response
 
 ```json
@@ -207,7 +234,7 @@ Writes of facts are idempotent: inserting a fact that is present, or deleting on
 }
 ```
 
-A program of one statement that fails gets an `error`. `code` says why: `validation`, `not_found`, `conflict`, `unsupported` or `internal`; `invalid_request` and `rate_limited` reject a request before it runs; `deadline_exceeded`, `cancelled` and `outcome_unknown` are described in [Deadlines and Cancellation](#deadlines-and-cancellation); `store_read_only` refuses a write while the store is read-only after an unknown outcome; `resource_exhausted` refuses a query that went over `storage.performance.max_query_memory_bytes`, or that grew while the server's queries held all of `storage.performance.max_total_query_memory_bytes`, or a write that would grow its knowledge graph past `storage.performance.max_graph_memory_bytes`, and nothing was applied. It is absent for auth and other engine failures. For write outcomes and restart recovery, see [Persistence](persistence#wal-record-format).
+A program of one statement that fails gets an `error`. `code` says why: `validation`, `not_found`, `conflict`, `unsupported` or `internal`; `invalid_request` and `rate_limited` reject a request before it runs; `deadline_exceeded`, `cancelled` and `outcome_unknown` are described in [Deadlines and Cancellation](#deadlines-and-cancellation); `store_read_only` refuses a write while the store is read-only after an unknown outcome; `validation` also refuses a query whose plan would form a cross product past `storage.performance.max_query_cost` (before it runs), or whose recursion did not reach a fixpoint within `storage.performance.max_recursion_iterations` when it is set; `resource_exhausted` refuses a query that went over `storage.performance.max_query_memory_bytes`, or that grew while the server's queries held all of `storage.performance.max_total_query_memory_bytes`, or a write that would grow its knowledge graph past `storage.performance.max_graph_memory_bytes`, and nothing was applied. `precondition_failed` refuses a program whose `expect_revision` did not hold (see [Revision Preconditions](#revision-preconditions)). It is absent for auth and other engine failures. For write outcomes and restart recovery, see [Persistence](persistence#wal-record-format).
 
 ### Statement Failures
 

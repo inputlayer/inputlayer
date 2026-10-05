@@ -596,7 +596,7 @@ mod ws {
         config.http.rate_limit.ws_max_messages_per_sec = 0;
         config.http.gui.enabled = false;
         let handler = Arc::new(Handler::from_config(config).unwrap());
-        handler.bootstrap_auth();
+        handler.bootstrap_auth().unwrap();
         let app = create_router(Arc::clone(&handler), &handler.config().http);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
