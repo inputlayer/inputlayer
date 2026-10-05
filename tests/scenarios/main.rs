@@ -4,9 +4,10 @@
 //! agents and writers over `/ws` the way a deployment does, and checks the
 //! related changes together: rows, deltas, revisions, structured errors and
 //! the engine's work counters. Plain `cargo test` runs the suite in debug
-//! (all but `saturation`, whose timing bounds need a release engine);
-//! `make e2e-reactive` runs it in release and writes writer→agent latency
-//! samples when `INPUTLAYER_REACTIVE_SAMPLES_DIR` is set.
+//! (all but `saturation`, whose timing bounds need a release engine, and the
+//! quarantined scenarios listed in TESTING.md); `make e2e-reactive` runs all
+//! of it in release and writes writer→agent latency samples when
+//! `INPUTLAYER_REACTIVE_SAMPLES_DIR` is set.
 //!
 //! `INPUTLAYER_SCENARIO_VIEWS` (`recompute`, the default, or `maintained`)
 //! selects how the engine answers reads of persistent rules, so CI can run the
