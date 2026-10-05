@@ -650,6 +650,22 @@ def test_loop_thread_custom_timeout() -> None:
     lt.shutdown()
 
 
+def test_loop_thread_preserves_coroutine_timeout_error() -> None:
+    """A TimeoutError raised by the coroutine itself is not re-wrapped."""
+
+    class OpTimeout(TimeoutError):
+        pass
+
+    lt = _LoopThread(timeout=5)
+
+    async def coro() -> None:
+        raise OpTimeout("KG operation timed out")
+
+    with pytest.raises(OpTimeout, match="KG operation timed out"):
+        lt.run(coro())
+    lt.shutdown()
+
+
 def test_input_layer_sync_user_management() -> None:
     from inputlayer.client_sync import InputLayerSync
 

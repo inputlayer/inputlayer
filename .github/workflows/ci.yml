@@ -229,19 +229,27 @@ jobs:
   # The Python SDK's unit tests, including the connection core against a
   # mock server replaying packages/conformance. The live tests run in the
   # full suite (make python-test-live), which builds the engine.
+  # Runs on the oldest supported Python (requires-python in
+  # packages/inputlayer-py/pyproject.toml) as well as the current one.
   python-sdk:
-    name: Python SDK
+    name: Python SDK (${{ matrix.python }})
     needs: changes
     if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    env:
+      UV_PYTHON: ${{ matrix.python }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
