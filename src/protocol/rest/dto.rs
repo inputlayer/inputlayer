@@ -52,6 +52,9 @@ pub struct StatsDto {
     pub uptime_secs: u64,
     /// Session statistics
     pub sessions: SessionStatsDto,
+    /// Replication state and lag; absent on a standalone server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replication: Option<crate::protocol::replication::StatusReport>,
 }
 
 /// Session statistics within server stats
@@ -115,8 +118,10 @@ mod tests {
                 total_ephemeral_facts: 100,
                 total_ephemeral_rules: 10,
             },
+            replication: None,
         };
         let json = serde_json::to_string(&stats).unwrap();
+        assert!(!json.contains("replication"), "absent when standalone");
         assert!(json.contains("\"knowledge_graphs\":2"));
         assert!(json.contains("\"query_count\":42"));
         assert!(json.contains("\"total\":5"));

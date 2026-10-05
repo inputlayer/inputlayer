@@ -1,7 +1,7 @@
 //! Committing a staged [`WriteProgram`]: one KG write lock, one effective
 //! delta of facts and catalogs, one WAL transaction, one snapshot publish.
 
-use super::catalog_change::{CatalogDelta, CatalogOutcome, StagedCatalog};
+use super::catalog_change::{CatalogChange, CatalogDelta, CatalogOutcome, StagedCatalog};
 use super::relation_store::stored_bytes;
 use super::write_program::{
     CommitError, FactChange, FactCount, ProgramCommit, RelationChange, StagedChanges,
@@ -77,6 +77,10 @@ impl StorageEngine {
             }
         }
 
+        let durable = program.fact_changes().next().is_some()
+            || program
+                .catalog_changes()
+                .any(|c| !matches!(c, CatalogChange::DefineSessionSchema(_)));
         let Resolved {
             facts,
             catalog,
@@ -87,6 +91,11 @@ impl StorageEngine {
             db.check_memory_budget(kg, budget, &facts, &statements)?;
         }
         if facts.is_empty() && !catalog.is_durable() {
+            if durable {
+                // Its reply reports state that may rest on events not yet
+                // on a follower.
+                crate::replication::writes::staged();
+            }
             if !catalog.is_empty() {
                 // Session schemas only: nothing to persist or publish.
                 db.install_catalog(catalog, 0);

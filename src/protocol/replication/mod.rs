@@ -11,7 +11,11 @@
 //!   each, big-endian), then the lines; LSN 0 marks the lines of a
 //!   checkpoint;
 //! - `heartbeat` text frames carry the primary's head LSN while idle;
-//! - the follower answers each applied frame with `ack`.
+//! - the follower answers each applied frame with `ack`, sent once the
+//!   frame is durable in its WAL.
+//!
+//! In `sync` mode the primary replies to a request that changed state only
+//! once a follower acked its events (see [`sync`]).
 //!
 //! A follower that hears nothing for `replication.timeout_ms` drops the
 //! connection and reconnects, which is how it notices a dead primary or a
@@ -20,8 +24,10 @@
 pub mod follower;
 pub mod primary;
 mod status;
+pub mod sync;
 
 pub use status::{FollowerState, ReplicationStatus, StatusReport};
+pub use sync::{Confirmation, SyncReport, SyncShipping, SyncState};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

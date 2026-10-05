@@ -62,7 +62,7 @@ pub use write_program::{
     StagedStatement, StatementEffect, StatementOutcome, WriteProgram,
 };
 
-use crate::config::{Config, ReplicationRole};
+use crate::config::{Config, ReplicationMode, ReplicationRole};
 use crate::index_manager::IndexManager;
 use crate::naming;
 use crate::replication::{EngineEvent, ReplicationLog};
@@ -312,7 +312,10 @@ impl StorageEngine {
         // client writes from the start.
         match engine.config.replication.role {
             ReplicationRole::Primary => {
-                let log = ReplicationLog::new(engine.config.replication.retain_bytes);
+                let mut log = ReplicationLog::new(engine.config.replication.retain_bytes);
+                if engine.config.replication.mode == ReplicationMode::Sync {
+                    log = log.tracking_writes();
+                }
                 engine.persist.attach_replication_log(Arc::new(log));
             }
             ReplicationRole::Follower => engine.replica.store(true, Ordering::SeqCst),
@@ -342,7 +345,9 @@ impl StorageEngine {
 
     /// Fail unless this engine takes client writes: a replication follower
     /// refuses them (only its applier writes), and so does a store that is
-    /// read-only until restart recovery.
+    /// read-only until restart recovery. When it does, notes that the request
+    /// running here stages a durable write (see
+    /// [`writes`](crate::replication::writes)).
     ///
     /// # Errors
     /// [`StorageError::ReadOnlyReplica`] or [`StorageError::StoreReadOnly`].
@@ -350,7 +355,9 @@ impl StorageEngine {
         if self.replica.load(Ordering::SeqCst) {
             return Err(StorageError::ReadOnlyReplica);
         }
-        self.persist.check_writable()
+        self.persist.check_writable()?;
+        crate::replication::writes::staged();
+        Ok(())
     }
 
     /// Write-ahead log and flush state, for monitoring.

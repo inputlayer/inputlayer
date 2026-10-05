@@ -143,6 +143,7 @@ export type WsErrorCode =
   | "outcome_unknown"
   | "store_read_only"
   | "resource_exhausted"
+  | "replica_unconfirmed"
 
 /** A failed statement of a multi-statement program (0-based `index`). */
 export interface WsStatementError {

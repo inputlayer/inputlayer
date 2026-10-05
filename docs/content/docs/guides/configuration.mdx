@@ -328,6 +328,19 @@ heartbeat_ms = 500
 # Follower: silence from the primary after which the follower reconnects, in
 # ms (detects a dead primary or a network partition). Must exceed heartbeat_ms.
 timeout_ms = 3000
+
+# Primary: "async" (default) acknowledges a commit once it is durable here;
+# "sync" acknowledges it only once a follower has applied it durably, so no
+# acknowledged write is lost with the primary.
+mode = "async"
+
+# Primary, sync mode: how long a commit's reply waits for a follower, in ms.
+sync_timeout_ms = 5000
+
+# Primary, sync mode: when no follower confirms in time, "block" (default)
+# fails the reply as not confirmed on a replica (the commit stands here);
+# "degrade" falls back to async until a follower catches up.
+on_follower_loss = "block"
 ```
 
 See [Replication](replication) for how a warm standby works.

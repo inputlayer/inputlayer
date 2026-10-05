@@ -63,7 +63,8 @@ pub(crate) fn computation_failure_code(code: ErrorCode) -> ErrorCode {
 /// Run `job` on the blocking pool under `control`, holding one of
 /// `permits` while it computes. `job` sees `control` as the thread's request
 /// control, so the evaluator's cooperative checks and the commit boundary
-/// observe its deadline and cancellation.
+/// observe its deadline and cancellation, and the replication events it
+/// appends count as the request's.
 pub(super) async fn run_blocking<T, F>(
     permits: &Arc<Semaphore>,
     control: &Arc<RequestControl>,
@@ -75,12 +76,15 @@ where
 {
     let permit = admit(permits, control).await?;
     let job_control = Arc::clone(control);
+    // The request's replication events are appended on the pool's thread.
+    let writes = crate::replication::writes::current();
     let task = tokio::task::spawn_blocking(move || {
         // Stopped while queued on the blocking pool: never start.
         if let Some(stop) = job_control.stopped() {
             drop(permit);
             return Err(stop_error(stop));
         }
+        let _writes = writes.map(crate::replication::writes::Writes::enter);
         let scope = ControlScope::enter(Arc::clone(&job_control));
         let result = job();
         drop(scope);

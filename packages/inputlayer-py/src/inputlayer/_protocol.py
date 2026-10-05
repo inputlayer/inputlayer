@@ -180,6 +180,7 @@ ErrorCode = Literal[
     "cancelled",
     "outcome_unknown",
     "resource_exhausted",
+    "replica_unconfirmed",
 ]
 """Why the engine rejected a statement or request (``code`` on ``error`` and ``errors[]``).
 
@@ -189,7 +190,9 @@ nothing was applied; ``outcome_unknown`` means its commit failed in a way that
 leaves the changes possibly applied: read the state back before retrying.
 ``resource_exhausted`` refuses a query over the engine's per-query memory limit
 or its server-wide query memory budget, or a write past its knowledge graph's
-memory budget; nothing was applied."""
+memory budget; nothing was applied. ``replica_unconfirmed``: the write committed
+on a primary shipping synchronously, but no replica confirmed it in time; it is
+applied there, so do not retry it as a failed write."""
 
 
 @dataclass(frozen=True)
