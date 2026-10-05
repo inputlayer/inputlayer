@@ -134,7 +134,8 @@ On a follower it reports:
 - `follower.state`: `connecting`, `resyncing` or `streaming`
 - `applied_lsn` and `primary_head_lsn`
 - `lag_events`
-- `last_contact_ms`: time since the primary was last heard
+- `last_contact_ms`: time since the primary was last heard; absent until
+  the follower first hears from it after starting
 - `resyncs` (begun), `resync_failures` (ended before the follower caught
   up with the primary's head) and `reconnects`, counted since the follower
   started
