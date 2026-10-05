@@ -21,7 +21,8 @@
  * sent when it passes fails with `DeadlineExceededError`. If a sent call has
  * no reply at its deadline, the connection sends `cancel` and probes the
  * transport with a WebSocket ping (no answer within `timeoutGraceMs` drops
- * the connection). The engine's reply normally follows
+ * the connection; calls already past their deadline then fail as below, the
+ * others with `ConnectionLostError`). The engine's reply normally follows
  * (typed, e.g. `DeadlineExceededError`, or the committed result of a write
  * that was already committing); without one (or, while a reply streams, its
  * next part) within `timeoutGraceMs`, the call fails locally: `DeadlineExceededError` for a query, and
@@ -688,9 +689,9 @@ export class Connection {
     if (call.id && this.inFlight.get(call.id) === call) {
       // The engine's own deadline answers now; cancel in case it does not.
       this.sendCancel(call, 'deadline');
-      this.probeServer();
       call.graced = true;
       this.armOverdue(call);
+      this.probeServer();
       return;
     }
     // Queued, or waiting to be resent after `rate_limited`: nothing ran.
@@ -712,12 +713,16 @@ export class Connection {
     // The reply and the cancel's ack, if they come, are dropped and counted.
     if (call.cancelId) this.control.delete(call.cancelId);
     this.abandoned.set(call.id!, true);
-    const waited = `No reply ${this.timeoutGraceMs} ms past the deadline`;
     this.finish(call, () => {
-      throw call.mayWrite
-        ? new OutcomeUnknownError(`${waited}: the program may have committed; read the state back before retrying it`)
-        : new DeadlineExceededError(waited);
+      throw this.overdueError(call);
     });
+  }
+
+  private overdueError(call: Call): Error {
+    const waited = `No reply ${this.timeoutGraceMs} ms past the deadline`;
+    return call.mayWrite
+      ? new OutcomeUnknownError(`${waited}: the program may have committed; read the state back before retrying it`)
+      : new DeadlineExceededError(waited);
   }
 
   /** The caller aborted the call. */
@@ -751,8 +756,11 @@ export class Connection {
    * unless its request window is full (it then reads nothing more). Any frame
    * from it answers the probe too. No answer within `timeoutGraceMs` while
    * the window has room means the connection is dead: drop it, so it
-   * reconnects. While the window is full no verdict is taken: each call's
-   * deadline bounds it, and freed slots let the next probe judge.
+   * reconnects. Calls already past their deadline fail first as at the end
+   * of their grace, whichever call's deadline started the probe; the others
+   * fail with `ConnectionLostError`. While the window is full no verdict is
+   * taken: each call's deadline bounds it, and freed slots let the next
+   * probe judge.
    */
   private probeServer(): void {
     const ws = this.ws;
@@ -760,7 +768,14 @@ export class Connection {
     const timer = setTimeout(() => {
       this.probe = undefined;
       const outstanding = this.inFlight.size + this.control.size;
-      if (this.ws === ws && outstanding < this.maxInFlight) ws.terminate();
+      if (this.ws !== ws || outstanding >= this.maxInFlight) return;
+      for (const call of [...this.inFlight.values()]) {
+        if (!call.graced) continue;
+        this.inFlight.delete(call.id!);
+        this.settle(call);
+        call.reject(this.overdueError(call));
+      }
+      ws.terminate();
     }, Math.max(1, this.timeoutGraceMs));
     this.probe = { timer, ws };
     ws.once('pong', () => {

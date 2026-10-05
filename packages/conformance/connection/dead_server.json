@@ -1,0 +1,28 @@
+{
+  "name": "dead_server",
+  "description": "Past the deadline the server answers neither the write nor the transport ping: the call fails locally as outcome unknown instead of hanging, and not as connection lost when the client's liveness probe drops the connection at the same time.",
+  "options": {
+    "deadline_grace_ms": 100
+  },
+  "calls": [
+    {
+      "execute": "+a(1)",
+      "timeout_ms": 50,
+      "expect": {
+        "error": "outcome_unknown"
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "execute",
+        "program": "+a(1)"
+      },
+      "as": "q"
+    },
+    {
+      "stall": true
+    }
+  ]
+}
