@@ -134,7 +134,15 @@ impl Counter {
         raised
     }
 
-    /// [`RevisionReservation::open`] on this counter.
+    /// Stop raising `reservation`'s bound, after any raise in progress: its
+    /// engine is closing, and a closed data directory is not written.
+    fn close(&self, reservation: &Arc<RevisionReservation>) {
+        self.reservations
+            .lock()
+            .retain(|open| !std::ptr::eq(open.as_ptr(), Arc::as_ptr(reservation)));
+    }
+
+    /// [`OpenReservation::open`] on this counter.
     fn open(&self, data_dir: &Path, has_state: bool) -> StorageResult<Arc<RevisionReservation>> {
         let path = data_dir.join(RESERVATION_FILE);
         let floor = match std::fs::read(&path) {
@@ -168,24 +176,35 @@ struct Record {
 
 /// One engine's durable bound on the revisions it has issued, in its data
 /// directory; see the module docs.
-pub(super) struct RevisionReservation {
+struct RevisionReservation {
     path: PathBuf,
     /// The bound on disk.
     reserved: AtomicU64,
 }
 
 impl RevisionReservation {
-    /// Continue above the bound `data_dir` holds and reserve the first
-    /// block, before the engine builds any snapshot. `has_state`: the
-    /// directory held engine state before this run.
-    pub(super) fn open(data_dir: &Path, has_state: bool) -> StorageResult<Arc<Self>> {
-        REVISIONS.open(data_dir, has_state)
-    }
-
     fn reserve(&self, reserved: u64) -> StorageResult<()> {
         save_json_atomic(&Record { reserved }, &self.path)?;
         self.reserved.store(reserved, Ordering::SeqCst);
         Ok(())
+    }
+}
+
+/// An open engine's [`RevisionReservation`], closed when dropped.
+pub(super) struct OpenReservation(Arc<RevisionReservation>);
+
+impl OpenReservation {
+    /// Continue above the bound `data_dir` holds and reserve the first
+    /// block, before the engine builds any snapshot. `has_state`: the
+    /// directory held engine state before this run.
+    pub(super) fn open(data_dir: &Path, has_state: bool) -> StorageResult<Self> {
+        REVISIONS.open(data_dir, has_state).map(Self)
+    }
+}
+
+impl Drop for OpenReservation {
+    fn drop(&mut self) {
+        REVISIONS.close(&self.0);
     }
 }
 

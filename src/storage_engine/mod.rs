@@ -215,7 +215,8 @@ pub struct StorageEngine {
     /// replication applier changes state (see `replica`).
     replica: AtomicBool,
     /// The durable bound on this engine's revisions, raised while it is open.
-    _revisions: Arc<revisions::RevisionReservation>,
+    /// Declared before the lock: no raise writes the directory once it is free.
+    _revisions: revisions::OpenReservation,
     /// Single-writer ownership of `data_dir` for this engine's lifetime.
     /// Declared last so it is released only after every other field drops.
     _data_dir_lock: DataDirLock,
@@ -279,7 +280,7 @@ impl StorageEngine {
         fs::create_dir_all(config.storage.data_dir.join("metadata"))?;
         // Before any snapshot: this run's revisions continue above every
         // revision an earlier run on this directory issued.
-        let revisions = revisions::RevisionReservation::open(&config.storage.data_dir, has_state)?;
+        let revisions = revisions::OpenReservation::open(&config.storage.data_dir, has_state)?;
 
         // Initialize DD-native persist backend
         let persist_config = PersistConfig {

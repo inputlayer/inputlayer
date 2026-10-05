@@ -155,3 +155,30 @@ fn an_engine_closing_while_bounds_are_raised_fails_no_write() {
         assert!(revision <= recorded(&open), "{revision} is not reserved");
     }
 }
+
+#[test]
+fn a_closed_engine_directory_is_not_written_by_a_raise_in_progress() {
+    for _ in 0..50 {
+        let counter = Counter::new();
+        let (closing, open) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+        let reservation = counter.open(closing.path(), false).unwrap();
+        let _open = counter.open(open.path(), false).unwrap();
+        counter.last.fetch_add(BLOCK, Ordering::SeqCst);
+
+        let raised = std::sync::atomic::AtomicBool::new(false);
+        let at_close = std::thread::scope(|scope| {
+            let closed = scope.spawn(|| {
+                // Until the raise holds this engine's reservation.
+                while Arc::strong_count(&reservation) == 1 && !raised.load(Ordering::SeqCst) {
+                    std::hint::spin_loop();
+                }
+                counter.close(&reservation);
+                recorded(&closing)
+            });
+            counter.reserve_ahead().unwrap();
+            raised.store(true, Ordering::SeqCst);
+            closed.join().unwrap()
+        });
+        assert_eq!(recorded(&closing), at_close, "written after its close");
+    }
+}
