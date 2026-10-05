@@ -1118,9 +1118,9 @@ components:
         a bare integral number of magnitude 2^63 or more, a bare negative zero (`-0` and
         `-0.0` read alike: send `0` for an int or `{"float": -0.0}` for a float),
         `{"float": n}` for an integer within int64 or uint64 range that no float equals,
-        `{"int": ...}` with a fraction, unknown type tags, a name given
-        twice, or a name that is not an identifier. `{"float": n}` for a larger integer
-        binds the float nearest `n`, as the same float literal in IQL would. Parameter values count toward
+        `{"int": ...}` with a fraction, unknown type tags, a name given twice, or a name
+        that is not an identifier. `{"float": n}` for a larger integer binds the float
+        nearest `n`, as the same float literal in IQL would. Parameter values count toward
         `storage.performance.max_query_size_bytes`. The request log records the program
         text and the number of parameters, not their values.
       propertyNames:
