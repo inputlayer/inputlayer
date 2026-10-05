@@ -161,8 +161,15 @@ fn settle(arrival: &Arrival, pending: &mut BTreeMap<usize, Pending>) -> Checked<
         &[serde_json::from_str(&speech_row(session, &probe.eta)).unwrap()],
         &[serde_json::from_str(&speech_row(session, &probe.previous)).unwrap()],
     )?;
+    let after_ack = arrival.delta.at.saturating_duration_since(probe.acked_at);
+    if after_ack > DELTA_BOUND {
+        return Err(Violation::Timeout(format!(
+            "probe delta of session s-{session} arrived {after_ack:?} after its ack, \
+             beyond {DELTA_BOUND:?}"
+        )));
+    }
     Ok(Latency {
-        after_ack: arrival.delta.at.saturating_duration_since(probe.acked_at),
+        after_ack,
         after_send: arrival.delta.at.saturating_duration_since(probe.sent_at),
     })
 }
