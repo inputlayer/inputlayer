@@ -254,6 +254,14 @@ Memory: an idle server holds 36 MB of resident memory, each further
 resident (402 at the peak of reading 90K facts back), and a session with
 its own standing query takes about 87 KB.
 
+Sessions at scale (main `8b574ef2`, the voice-agent pack, one graph, each
+session committing 1 write/s): 100 sessions answer a write with their delta
+in 40 ms p50 / 78 ms p99 on 1.8 cores; the graph saturates between 250 and
+500 sessions at about 250 writes/s. At 0.1 write/s per session, 1,000
+sessions run at 266 ms p50 / 509 ms p99 on 10 cores. No delta was lost or
+spurious at any size; see
+[`perf-gate/baselines/session-scale-2026-10-05.md`](perf-gate/baselines/session-scale-2026-10-05.md).
+
 ---
 
 ## Running the Benchmarks

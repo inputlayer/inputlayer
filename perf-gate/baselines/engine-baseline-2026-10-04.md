@@ -96,9 +96,11 @@ Fixture workloads are described in [`../README.md`](../README.md).
 - **100 sessions in one graph cost the target session about 1 ms of delta
   latency** over a single agent (8.3 against 7.2 ms p50) at one write every
   200 ms, with about 87 KB of resident memory per session. Writes were
-  spaced, so this does not show saturation. Main does not yet share
-  evaluations between sessions whose queries differ only in constants;
-  #254 adds that and its own sessions benchmark.
+  spaced, so this does not show saturation. At `25058f16`, main did not yet
+  share evaluations between sessions whose queries differ only in constants.
+  #254, merged since, adds that and its own sessions benchmark, which loads
+  sessions until they saturate:
+  [`session-scale-2026-10-05.md`](session-scale-2026-10-05.md).
 - **A losing claim is cheap, a winning one costs a durable write.** A
   guarded insert whose guard fails returns in 0.43 ms. One that wins pays
   the commit (1.9 ms). With 8 connections racing for each key, every key had
@@ -114,7 +116,7 @@ The cases asked for, and where each is measured:
 | query latency, recursive rules | `bound_query` (bound, Magic Sets), `unbound_query` (whole closure) |
 | update latency | `insert_single`, `insert_batch`, `writes` (deletes, conditional deletes, conditional updates) |
 | write to delta for subscriptions | `delta_single`, `delta_fanout`, `delta_first`, `interference` |
-| many concurrent sessions and subscriptions | `delta_fanout` (64 agents, one query), `sessions` (100 sessions, their own bound queries) |
+| many concurrent sessions and subscriptions | `delta_fanout` (64 agents, one query), `sessions` (100 sessions, their own bound queries), `make bench-sessions` (up to 1,000 sessions under load; [`session-scale-2026-10-05.md`](session-scale-2026-10-05.md)) |
 | throughput | the `*_per_sec` rates of the query and insert fixtures |
 | guarded commits and claims | `claims` (wins, losses, 8 racers per key) |
 | `.why` proof cost | `why` (non-recursive and recursive) |
@@ -124,9 +126,10 @@ The cases asked for, and where each is measured:
 
 Not covered yet: aggregates and negation-heavy rules end to end (the
 Criterion benches in `benches/` cover aggregates in process), graphs larger
-than 10K edges, sessions at saturation (`sessions` spaces writes 200 ms
-apart, and #254 brings a sessions benchmark that pushes load), and a
-graceful restart (only a crash is measured).
+than 10K edges, and a graceful restart (only a crash is measured).
+`sessions` spaces writes 200 ms apart; sessions at saturation are measured
+by #254's benchmark, in
+[`session-scale-2026-10-05.md`](session-scale-2026-10-05.md).
 
 ## Noise and the gate (A/A calibration)
 
