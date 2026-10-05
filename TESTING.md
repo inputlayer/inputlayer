@@ -200,20 +200,27 @@ seconds of the suite.
 |----------|------|---------------------|---------------------|
 | S1 agent lifecycle on a deployed rule | `lifecycle::s1_agent_lifecycle_on_a_deployed_rule` | 1, 3 | V10 #317, V11 #318, V14 #320 |
 | S7 concurrent claim refused with the reason | `claims::s7_concurrent_claim_is_refused_with_the_reason` | 1 (`expect_revision`, decider keys) | V14 #320 |
-| S9 retraction through recursion and negation | `retraction::s9_*` (live and through the oracle) | 1, 3 | V4 #311, V5 #312; V0 #307 keeps it green |
+| S9 retraction through recursion and negation, and S9b with a second support | `retraction::s9_*`, `retraction::s9b_*` (live, and both through the oracle) | 1, 3 | V4 #311, V5 #312; V0 #307 keeps it green |
 | S12 restart mid-scenario | `restart::s12_restart_mid_scenario_preserves_revisions` | 3 | V18 #330 |
 | S15 multi-tenant isolation and scoped keys | `tenancy::s15_tenants_and_scoped_keys_are_isolated` | 1 (per tenant) | V10 #317 |
 
-Each scenario's doc comment states its steps, its row and its gates. S9's
-history also runs through the differential oracle (`oracle_check`, which
+Each scenario's doc comment states its steps, its row and its gates. S9
+follows the table on the shop pack: the cut retracts (i1, i3), (i1, i4) and
+the offers behind them, and blocking and unblocking i4 are quiet because
+nothing reaches i4 from o-42 after the cut; S9b adds `link(i5, i4)` so the
+cut keeps (o-42, i4) and the negation flips it one row each way. Both
+histories also run through the differential oracle (`oracle_check`, which
 includes the oracle's adapters by path): the reference, recompute,
 subscription and subscription-group adapters must agree at every checkpoint,
 and the reference must model the whole history.
 
 Where the strategy's table and the documented contract differ, a scenario
 asserts the contract and says so in its doc comment: revisions restart with
-the engine and are paired with the run's stream epoch (S12 asserts a new epoch
-and a refused pre-crash `expect_revision`), and a `writer` key may subscribe on
+the engine and are paired with the run's stream epoch (S12 asserts a new epoch,
+a refused pre-crash `expect_revision` pinned to its epoch, and, as an expected
+failure (#380), a refused bare pre-crash `expect_revision` once the new run
+has issued that revision again; it also asserts the notifications after the
+reconnect are exactly the new run's writes with contiguous `seq`), and a `writer` key may subscribe on
 its own graph (S15 refuses its access to the other graph instead). A
 permission refusal carries no structured `code` today; S15 asserts
 `access_denied` as an expected failure (`KnownDefect`, #364), so it fails
@@ -280,7 +287,8 @@ quarantined for a rare engine hang in `.index create` (#377).
 Tracked defects run as **expected failures** through
 `inputlayer_testkit::KnownDefect`, naming the issue that fixes them (today:
 `harness::counters_scrape_the_running_engine`, #308;
-`tenancy::s15_tenants_and_scoped_keys_are_isolated`, #364). Each asserts the
+`tenancy::s15_tenants_and_scoped_keys_are_isolated`, #364;
+`restart::s12_restart_mid_scenario_preserves_revisions`, #380). Each asserts the
 correct contract; its own violation passes as `XFAIL`, any other violation
 fails, and a holding contract fails as `XPASS` so the marker is removed and
 the scenario becomes required when the issue lands.
