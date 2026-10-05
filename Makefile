@@ -334,7 +334,8 @@ e2e-test:
 # Scenario suite (tests/scenarios) in a release build for representative
 # latency: real engine processes, agents subscribed over /ws, independent
 # writers. Plain `cargo test` runs the same scenarios in debug. Known defects
-# run as expected failures. Raw writer->agent delta
+# run as expected failures; quarantined scenarios run here too (--include-ignored)
+# until a nightly workflow exists. Raw writer->agent delta
 # latency samples (schema inputlayer.reactive.delta_latency.v1) land in
 # $(E2E_REACTIVE_SAMPLES)/<scenario>.jsonl.
 E2E_REACTIVE_SAMPLES ?= target/e2e-reactive
@@ -342,7 +343,7 @@ e2e-reactive:
 	rm -rf $(E2E_REACTIVE_SAMPLES)
 	cargo test --release -p inputlayer-testkit
 	INPUTLAYER_REACTIVE_SAMPLES_DIR=$(abspath $(E2E_REACTIVE_SAMPLES)) \
-		cargo test --release --test scenarios -- --nocapture
+		cargo test --release --test scenarios -- --nocapture --include-ignored
 	@ls $(E2E_REACTIVE_SAMPLES)/*.jsonl >/dev/null || { echo "ERROR: no latency samples written"; exit 1; }
 
 # Regenerate snapshot .iql.out files (sequential mode)

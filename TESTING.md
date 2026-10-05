@@ -231,6 +231,12 @@ acknowledgement, and no session gets a stray delta or a `subscription_error`
 release engine, so it runs only in `make e2e-reactive` and is ignored in
 debug builds.
 
+Quarantined scenarios are ignored unconditionally, so the PR gate (plain
+`cargo test`) stays deterministic, and run in the nightly tier. Until a
+nightly workflow exists, `make e2e-reactive` stands in for it and passes
+`--include-ignored`. Today: `harness::shop_pack_vector_serves_the_near_rule`,
+quarantined for a rare engine hang in `.index create` (#377).
+
 Tracked defects run as **expected failures** through
 `inputlayer_testkit::KnownDefect`, naming the issue that fixes them (today:
 `harness::counters_scrape_the_running_engine`, #308). Each asserts the
