@@ -242,6 +242,9 @@ pub struct KnowledgeGraph {
     /// Set under the write lock when the KG is dropped or unloaded; writers
     /// holding the stale handle bail or retry
     retired: Option<residency::Retired>,
+    /// The catalogs hold changes their files lack (a save failed). The WAL
+    /// keeps them for a restart; until a save succeeds the KG stays loaded
+    catalog_unsaved: bool,
 }
 
 impl StorageEngine {
@@ -1954,21 +1957,21 @@ impl StorageEngine {
         &self,
         queries: Vec<(&str, &str)>,
     ) -> StorageResult<Vec<(String, Vec<(i32, i32)>)>> {
+        // Get each knowledge graph's snapshot once, loading it if dormant
+        let mut snapshots = std::collections::HashMap::new();
+        for (kg, _) in &queries {
+            if !snapshots.contains_key(kg) {
+                let snapshot = self.kg_handle(kg)?.read().snapshot();
+                snapshots.insert(*kg, snapshot);
+            }
+        }
+
         // Use Rayon to execute queries in parallel with lock-free snapshot reads
         let results: Result<Vec<_>, StorageError> = queries
             .par_iter()
             .map(|(kg, program)| {
-                // Get knowledge graph
-                let kg_lock = self.kg_handle(kg)?;
-
-                // Get snapshot atomically - O(1)
-                let snapshot = {
-                    let kg_guard = kg_lock.read();
-                    kg_guard.snapshot()
-                };
-
                 // Execute on snapshot - completely lock-free
-                let results = snapshot
+                let results = snapshots[kg]
                     .execute(program)
                     .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))?;
 
@@ -2120,6 +2123,7 @@ impl KnowledgeGraph {
             max_recursion_iterations: 0,
             optimization: crate::OptimizationConfig::default(),
             retired: None,
+            catalog_unsaved: false,
         }
     }
 
@@ -2137,23 +2141,7 @@ impl KnowledgeGraph {
         last_published: Option<&(u64, precondition::ChangeLog)>,
     ) -> StorageResult<Self> {
         let store = RelationStore::from_relations(relations);
-
-        // Load view catalog (will load existing views if present)
-        let rule_catalog = RuleCatalog::new(data_dir.clone())
-            .map_err(|e| StorageError::Other(format!("Failed to load view catalog: {e}")))?;
-
-        // Load schema catalog (will load existing schemas if present)
-        let schema_path = data_dir.join(SCHEMA_CATALOG_FILE);
-        let schema_catalog = if schema_path.exists() {
-            SchemaCatalog::load(&schema_path).unwrap_or_else(|e| {
-                eprintln!(
-                    "Warning: Failed to load schema catalog for '{name}': {e}. Creating empty catalog."
-                );
-                SchemaCatalog::new()
-            })
-        } else {
-            SchemaCatalog::new()
-        };
+        let (rule_catalog, schema_catalog) = Self::load_catalogs(name, &data_dir)?;
 
         // Create initial snapshot from loaded data
         let performance = &engine.config.storage.performance;
@@ -2194,12 +2182,34 @@ impl KnowledgeGraph {
             max_recursion_iterations: performance.recursion_iteration_limit(),
             optimization: engine.config.optimization.clone(),
             retired: None,
+            catalog_unsaved: false,
         };
         kg.restore_indexes();
         if !kg.indexes.is_empty() {
             kg.publish_snapshot();
         }
         Ok(kg)
+    }
+
+    /// The rule and schema catalogs saved in `data_dir`.
+    fn load_catalogs(name: &str, data_dir: &Path) -> StorageResult<(RuleCatalog, SchemaCatalog)> {
+        // Load view catalog (will load existing views if present)
+        let rule_catalog = RuleCatalog::new(data_dir.to_path_buf())
+            .map_err(|e| StorageError::Other(format!("Failed to load view catalog: {e}")))?;
+
+        // Load schema catalog (will load existing schemas if present)
+        let schema_path = data_dir.join(SCHEMA_CATALOG_FILE);
+        let schema_catalog = if schema_path.exists() {
+            SchemaCatalog::load(&schema_path).unwrap_or_else(|e| {
+                eprintln!(
+                    "Warning: Failed to load schema catalog for '{name}': {e}. Creating empty catalog."
+                );
+                SchemaCatalog::new()
+            })
+        } else {
+            SchemaCatalog::new()
+        };
+        Ok((rule_catalog, schema_catalog))
     }
 
     /// Set the optimizer passes for this KG's engines and published snapshots.

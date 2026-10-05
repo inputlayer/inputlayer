@@ -4,7 +4,7 @@ InputLayer keeps all of its state in one data directory (`storage.data_dir`).
 There are two ways to back it up, and one way to restore both:
 
 - **Online export** (`.backup`, no downtime): the running server captures a
-  checkpoint of every knowledge graph at one committed revision and writes it
+  checkpoint of every knowledge graph, each at its own committed revision, and writes it
   out in the background while it keeps serving. See
   [Online Export](#online-export).
 - **Offline copy** (`inputlayer-backup create`): stop the server, copy the
@@ -112,10 +112,13 @@ started; `.backup status` reports a running export or how the last one ended.
 
 ### What an Export Holds
 
-Exactly the committed state at the revision it names: every commit up to
-that revision, in every knowledge graph, and none after it, including the
-`_internal` users, API key hashes and ACLs. Writes that commit while the
-export is written are not in it. The export is a complete, compacted data
+Each knowledge graph's committed state at its own revision: every commit to
+it up to that revision, and none after it, including the `_internal` users,
+API key hashes and ACLs. Knowledge graphs are independent, so they are not
+frozen together: a graph that is not in memory is captured after the others,
+and may hold commits newer than theirs. The revision the export names is
+the newest it holds. Writes that commit while the export is written are not
+in it. The export is a complete, compacted data
 directory (one batch file per relation, no WAL, each knowledge graph's
 rule, schema and vector index catalogs) plus the same
 `inputlayer-backup.json` manifest as an offline backup, which also records
@@ -140,11 +143,15 @@ rebuilt from their definitions.
 ### How It Stays Consistent Without Stopping
 
 1. **Capture.** The server briefly holds off commits (and knowledge graph
-   creation) on every knowledge graph at once, notes the newest committed
-   revision, and takes shared references to each graph's facts and copies of
-   its rule, schema and index catalogs. No data is copied, so the pause is
-   short (see [Timing](#timing)); it is reported as "commits held". Queries
-   are not held off: they read published snapshots.
+   creation) on every knowledge graph in memory at once, notes the newest
+   committed revision, and takes shared references to each graph's facts and
+   copies of its rule, schema and index catalogs. No data is copied, so the
+   pause is short (see [Timing](#timing)); it is reported as "commits held".
+   Queries are not held off: they read published snapshots. Then each
+   knowledge graph not in memory is held from loading only while its
+   revision and catalogs are read; its facts up to that revision are read
+   from disk after, so requests to it are never kept waiting for the
+   backup.
 2. **Write.** One background thread writes the captured state to the
    destination, then makes every file durable, hashes it, and writes the
    manifest last. It uses one core and one writer's disk bandwidth, never the

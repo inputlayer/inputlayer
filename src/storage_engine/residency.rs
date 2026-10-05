@@ -21,8 +21,9 @@
 //! - a [`KgPin`] is held on it (a subscription holds one for its lifetime).
 //!
 //! A KG whose state is not all on disk stays loaded: session schemas, the
-//! incremental engine, and vector indexes (rebuilding them on reload would be
-//! slow and could change approximate results).
+//! incremental engine, vector indexes (rebuilding them on reload would be
+//! slow and could change approximate results), and catalog changes whose save
+//! to the catalog files failed (only a restart replays them from the WAL).
 //!
 //! The hot path takes no lock: a lookup is a map read, an atomic pointer load
 //! and an atomic store of the access time. Activation, unloading and removal
@@ -252,6 +253,7 @@ impl KnowledgeGraph {
             && !self.auto_materialize
             && self.schema_catalog.session_len() == 0
             && self.indexes.is_empty()
+            && !self.catalog_unsaved
     }
 
     /// This KG's counts.
@@ -438,16 +440,7 @@ impl StorageEngine {
         let data_dir = self.config.storage.data_dir.join(kg);
         std::fs::create_dir_all(&data_dir)?;
 
-        let tombstones = if self.has_relation_tombstones.load(Ordering::Acquire) {
-            self.tombstones.lock().relations.clone()
-        } else {
-            std::collections::BTreeSet::new()
-        };
-        let shards: Vec<&(String, String)> = dormant
-            .shards
-            .iter()
-            .filter(|(_, relation)| !tombstones.contains(&RelationTombstone::new(kg, relation)))
-            .collect();
+        let shards = self.live_shards(kg, dormant);
         let loaded: Vec<LoadedShard> = shards
             .par_iter()
             .map(|(shard, relation)| self.load_shard(shard, relation))
@@ -500,11 +493,32 @@ impl StorageEngine {
                 }
                 Ok(None) => {}
                 // Memory has the changes and the WAL keeps them.
-                Err(e) => warn!(kg = %kg, error = %e, "catalog_replay_save_failed"),
+                Err(e) => {
+                    warn!(kg = %kg, error = %e, "catalog_replay_save_failed");
+                    graph.catalog_unsaved = true;
+                }
             }
             graph.publish_snapshot();
         }
         Ok(graph)
+    }
+
+    /// The shards of dormant `kg` whose relation was not dropped.
+    pub(super) fn live_shards<'d>(
+        &self,
+        kg: &str,
+        dormant: &'d Dormant,
+    ) -> Vec<&'d (String, String)> {
+        let tombstones = if self.has_relation_tombstones.load(Ordering::Acquire) {
+            self.tombstones.lock().relations.clone()
+        } else {
+            std::collections::BTreeSet::new()
+        };
+        dormant
+            .shards
+            .iter()
+            .filter(|(_, relation)| !tombstones.contains(&RelationTombstone::new(kg, relation)))
+            .collect()
     }
 
     /// Read `shard` and consolidate it to its current tuples.

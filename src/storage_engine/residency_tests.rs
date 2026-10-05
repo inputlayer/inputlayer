@@ -272,6 +272,77 @@ fn a_knowledge_graph_with_state_only_in_memory_stays_loaded() {
     assert!(loaded(&storage, "a") && loaded(&storage, "b"));
 }
 
+/// A catalog change whose save to the catalog files failed is only in memory
+/// and the WAL, which only a restart replays: the KG stays loaded until a
+/// later save succeeds, and then reloads with every rule.
+#[test]
+fn a_knowledge_graph_whose_catalog_save_failed_stays_loaded() {
+    let temp = TempDir::new().unwrap();
+    seed(temp.path());
+    let storage = open(temp.path());
+    let rules_dir = temp.path().join("a").join("rules");
+    // Loading replays the rule the crash left only in the WAL.
+    crate::storage::persist::inject_sync_fault(rules_dir.clone());
+    storage.get_snapshot_for("a").unwrap();
+    assert_eq!(storage.unload_idle_knowledge_graphs(Duration::ZERO), 0);
+    assert!(loaded(&storage, "a"));
+
+    let small = crate::statement::parse_rule_definition("small(X) <- e(X), X < 3").unwrap();
+    crate::storage::persist::inject_sync_fault(rules_dir);
+    storage.register_rule_in("a", &small).unwrap();
+    assert_eq!(storage.unload_idle_knowledge_graphs(Duration::ZERO), 0);
+    assert!(loaded(&storage, "a"));
+
+    let one = crate::statement::parse_rule_definition("one(X) <- e(X), X = 1").unwrap();
+    storage.register_rule_in("a", &one).unwrap();
+    assert_eq!(storage.unload_idle_knowledge_graphs(Duration::ZERO), 1);
+    assert!(!loaded(&storage, "a"));
+    for (rule, rows) in [("big", 2), ("small", 2), ("one", 1)] {
+        let derived = storage
+            .execute_query_with_rules_tuples_on("a", &format!("q(X) <- {rule}(X)"))
+            .unwrap();
+        assert_eq!(derived.len(), rows, "{rule}");
+    }
+}
+
+/// Parallel queries naming the same dormant KG load it once, before any of
+/// them runs: never from inside the parallel part, where a worker loading it
+/// could pick up another query waiting for that load.
+#[test]
+fn parallel_queries_naming_a_dormant_graph_twice_load_it_once() {
+    let temp = TempDir::new().unwrap();
+    {
+        let storage = open(temp.path());
+        storage.create_knowledge_graph("p").unwrap();
+        for relation in 0..16 {
+            storage
+                .insert_tuples_into(
+                    "p",
+                    &format!("edge{relation}"),
+                    vec![Tuple::from_pair(1, 2)],
+                )
+                .unwrap();
+        }
+        crash(storage);
+    }
+    let storage = Arc::new(open(temp.path()));
+    let (done, finished) = std::sync::mpsc::channel();
+    let running = Arc::clone(&storage);
+    std::thread::spawn(move || {
+        let queries = vec![("p", "q(X, Y) <- edge0(X, Y)"); 64];
+        let _ = done.send(running.execute_parallel_queries_on_knowledge_graphs(queries));
+    });
+    let results = finished
+        .recv_timeout(Duration::from_secs(60))
+        .expect("parallel queries finish")
+        .unwrap();
+    assert_eq!(results.len(), 64);
+    assert!(results
+        .iter()
+        .all(|(kg, rows)| kg == "p" && *rows == [(1, 2)]));
+    assert_eq!(storage.knowledge_graph_residency_counts().0, 1);
+}
+
 #[test]
 fn idle_unloading_spares_recent_and_internal_knowledge_graphs() {
     let temp = TempDir::new().unwrap();
@@ -363,6 +434,50 @@ fn a_checkpoint_reads_dormant_knowledge_graphs_without_loading_them() {
         .collect();
     assert_eq!(kgs, BTreeMap::from([("a", 5), ("b", 3), ("default", 0)]));
     assert!(!loaded(&storage, "b"), "the capture does not keep b loaded");
+}
+
+/// A backup holds a dormant KG only while it reads its revision and catalogs:
+/// a request to another dormant KG is served while the backup reads one, and
+/// a commit made meanwhile is past the revision it captures that one at.
+#[test]
+fn a_request_to_a_dormant_graph_is_served_during_a_backup() {
+    let temp = TempDir::new().unwrap();
+    seed(temp.path());
+    let storage = Arc::new(open(temp.path()));
+    let during = Arc::clone(&storage);
+    crate::storage_engine::checkpoint::BEFORE_DORMANT_READ.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move |kg: &str| {
+            if kg != "a" {
+                return;
+            }
+            let (served, rows_b) = std::sync::mpsc::channel();
+            let request = Arc::clone(&during);
+            std::thread::spawn(move || {
+                let _ = served.send(rows(&request, "b", "e").len());
+            });
+            let rows_b = rows_b
+                .recv_timeout(Duration::from_secs(10))
+                .expect("b is served while the backup reads a");
+            assert_eq!(rows_b, 3);
+            insert(&during, "a", "e", &[4]);
+        }));
+    });
+    let checkpoint = storage.capture_checkpoint();
+    crate::storage_engine::checkpoint::BEFORE_DORMANT_READ.with(|hook| hook.borrow_mut().take());
+    let checkpoint = checkpoint.unwrap();
+
+    let kgs: BTreeMap<&str, usize> = checkpoint
+        .knowledge_graphs
+        .iter()
+        .map(|kg| {
+            let facts = kg.relations.iter().map(|(_, tuples)| tuples.len()).sum();
+            (kg.name.as_str(), facts)
+        })
+        .collect();
+    assert_eq!(kgs, BTreeMap::from([("a", 3), ("b", 3), ("default", 0)]));
+    let a = &checkpoint.knowledge_graphs[0];
+    assert_eq!(a.rules.len(), 1, "a's rule is captured with its facts");
+    assert_eq!(rows(&storage, "a", "e").len(), 4);
 }
 
 #[test]

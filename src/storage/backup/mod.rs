@@ -22,9 +22,10 @@
 //! ## Online export
 //!
 //! A running server backs itself up without stopping: it captures a
-//! [`Checkpoint`] of every knowledge graph at one committed revision, then
-//! [`Export`] writes it out on a background thread as a complete data
-//! directory with the same manifest, marked with that revision. [`verify`]
+//! [`Checkpoint`] of every knowledge graph, each consistent at its own
+//! committed revision, then [`Export`] writes it out on a background thread
+//! as a complete data directory with the same manifest, marked with the
+//! newest of those revisions. [`verify`]
 //! and [`restore`] treat it like any other backup.
 
 mod checkpoint;

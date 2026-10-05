@@ -1,8 +1,8 @@
 //! Writing a [`Checkpoint`] out as a backup.
 //!
 //! The export is a complete, compacted data directory holding exactly the
-//! checkpoint's revision: one batch file per relation with every fact at that
-//! revision, no WAL, each knowledge graph's rule, schema and index
+//! checkpoint: each knowledge graph at its own revision, with one batch file
+//! per relation holding every fact at the checkpoint's (newest) revision, no WAL, each knowledge graph's rule, schema and index
 //! catalogs, and the knowledge graph listing. The manifest is written last and
 //! records the revision, so [`verify`](super::verify) and
 //! [`restore`](super::restore) handle an export like any other backup, and
