@@ -264,6 +264,7 @@ impl WriteProgram {
             );
             view.max_result_rows = snapshot.max_result_rows;
             view.max_query_cost = snapshot.max_query_cost;
+            view.max_recursion_iterations = snapshot.max_recursion_iterations;
             view.optimization = snapshot.optimization.clone();
             view.hnsw_search_fn.clone_from(&snapshot.hnsw_search_fn);
             view

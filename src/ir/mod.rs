@@ -417,6 +417,53 @@ pub enum IRNode {
     },
 }
 
+/// What [`IRNode::estimate_rows`] expects a plan to produce.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RowEstimate {
+    /// Rows the plan's root produces.
+    pub rows: u64,
+    /// The plan's join with the most estimated output rows, if it has one.
+    pub largest_join: Option<JoinEstimate>,
+}
+
+impl RowEstimate {
+    fn rows(rows: u64) -> Self {
+        Self {
+            rows,
+            largest_join: None,
+        }
+    }
+
+    /// The larger of the largest joins of `a` and `b`.
+    fn larger_join(a: Self, b: Self) -> Option<JoinEstimate> {
+        a.largest_join
+            .into_iter()
+            .chain(b.largest_join)
+            .max_by_key(JoinEstimate::rank)
+    }
+}
+
+/// One join's estimated output and inputs; see [`IRNode::estimate_rows`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JoinEstimate {
+    /// Rows the join is estimated to produce.
+    pub rows: u64,
+    /// Rows of its left input.
+    pub left: u64,
+    /// Rows of its right input.
+    pub right: u64,
+    /// Whether it joins on no keys: every left row meets every right row.
+    pub cross_product: bool,
+}
+
+impl JoinEstimate {
+    /// Order of joins by size; on a tie a cross product ranks first, as
+    /// the join that makes the rows of the joins above it.
+    pub fn rank(&self) -> (u64, bool) {
+        (self.rows, self.cross_product)
+    }
+}
+
 impl IRNode {
     /// Get the output schema of this node
     ///
@@ -453,37 +500,72 @@ impl IRNode {
         }
     }
 
-    /// Estimate the computational cost of executing this IR subtree.
-    ///
-    /// Cost is a unitless score that approximates relative computational
-    /// complexity. Higher costs indicate more expensive operations:
-    /// - Scan: 10 (base cost of reading a relation)
-    /// - Filter/Map/Distinct: pass-through (child cost + small overhead)
-    /// - Join: product of child costs (cartesian product risk)
-    /// - Aggregate: 2× child cost (hash grouping)
-    /// - Antijoin: sum of child costs + overhead
-    /// - HnswScan: fixed cost based on k
-    ///
-    /// Returns 0 for trivially cheap operations.
-    pub fn estimate_cost(&self) -> u64 {
+    /// Estimate, before the plan runs, how many rows it produces and its
+    /// largest join, given the number of rows each relation it scans holds
+    /// (`rows_of`). A join on shared keys is estimated as its larger input,
+    /// as when it matches each row with a few others; a join without keys,
+    /// a cross product, as the product of its inputs, which it always is.
+    /// Filters are assumed to keep every row. The estimate is coarse on
+    /// purpose: it exists to catch plans that multiply large relations
+    /// before they run, not to rank plans.
+    pub fn estimate_rows(&self, rows_of: &dyn Fn(&str) -> u64) -> RowEstimate {
         match self {
-            IRNode::Scan { .. } => 10,
-            IRNode::Map { input, .. } | IRNode::FlatMap { input, .. } => input.estimate_cost() + 1,
-            IRNode::Filter { input, .. } => input.estimate_cost() + 1,
-            IRNode::Distinct { input } => input.estimate_cost() + 5,
-            IRNode::Compute { input, .. } => input.estimate_cost() + 1,
-            IRNode::Join { left, right, .. } | IRNode::JoinFlatMap { left, right, .. } => {
-                let lc = left.estimate_cost();
-                let rc = right.estimate_cost();
-                // Joins multiply costs (worst case: cartesian product)
-                lc.saturating_mul(rc).max(lc + rc)
+            IRNode::Scan { relation, .. } => RowEstimate::rows(rows_of(relation)),
+            IRNode::Map { input, .. }
+            | IRNode::FlatMap { input, .. }
+            | IRNode::Filter { input, .. }
+            | IRNode::Distinct { input }
+            | IRNode::Compute { input, .. }
+            | IRNode::Aggregate { input, .. } => input.estimate_rows(rows_of),
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                ..
+            }
+            | IRNode::JoinFlatMap {
+                left,
+                right,
+                left_keys,
+                ..
+            } => {
+                let left = left.estimate_rows(rows_of);
+                let right = right.estimate_rows(rows_of);
+                let cross_product = left_keys.is_empty();
+                let join = JoinEstimate {
+                    rows: if cross_product {
+                        left.rows.saturating_mul(right.rows)
+                    } else {
+                        left.rows.max(right.rows)
+                    },
+                    left: left.rows,
+                    right: right.rows,
+                    cross_product,
+                };
+                RowEstimate {
+                    rows: join.rows,
+                    largest_join: [left.largest_join, right.largest_join, Some(join)]
+                        .into_iter()
+                        .flatten()
+                        .max_by_key(JoinEstimate::rank),
+                }
             }
             IRNode::Antijoin { left, right, .. } => {
-                left.estimate_cost() + right.estimate_cost() + 10
+                let left = left.estimate_rows(rows_of);
+                let right = right.estimate_rows(rows_of);
+                RowEstimate {
+                    rows: left.rows,
+                    largest_join: RowEstimate::larger_join(left, right),
+                }
             }
-            IRNode::Union { inputs } => inputs.iter().map(IRNode::estimate_cost).sum::<u64>() + 1,
-            IRNode::Aggregate { input, .. } => input.estimate_cost().saturating_mul(2),
-            IRNode::HnswScan { k, .. } => (*k as u64) * 10 + 50,
+            IRNode::Union { inputs } => inputs.iter().fold(RowEstimate::default(), |acc, input| {
+                let input = input.estimate_rows(rows_of);
+                RowEstimate {
+                    rows: acc.rows.saturating_add(input.rows),
+                    largest_join: RowEstimate::larger_join(acc, input),
+                }
+            }),
+            IRNode::HnswScan { k, .. } => RowEstimate::rows(*k as u64),
         }
     }
 
@@ -2096,134 +2178,122 @@ mod tests {
         assert!(output_2.starts_with("    ")); // 2 * 2 spaces
     }
 
-    // === Query cost estimation tests (#47) ===
+    // === Plan row estimates (max_query_cost) ===
 
-    #[test]
-    fn test_cost_scan() {
-        let scan = IRNode::Scan {
-            relation: "data".to_string(),
-            schema: vec!["x".to_string()],
-        };
-        assert_eq!(scan.estimate_cost(), 10);
+    fn scan_of(relation: &str, column: &str) -> IRNode {
+        IRNode::Scan {
+            relation: relation.to_string(),
+            schema: vec![column.to_string()],
+        }
     }
 
-    #[test]
-    fn test_cost_filter_marginal() {
-        let scan = IRNode::Scan {
-            relation: "data".to_string(),
-            schema: vec!["x".to_string()],
-        };
-        let filtered = IRNode::Filter {
-            input: Box::new(scan),
-            predicate: Predicate::ColumnEqConst(0, 1),
-        };
-        assert_eq!(filtered.estimate_cost(), 11); // scan(10) + 1
-    }
-
-    #[test]
-    fn test_cost_join_multiplicative() {
-        let left = IRNode::Scan {
-            relation: "a".to_string(),
-            schema: vec!["x".to_string()],
-        };
-        let right = IRNode::Scan {
-            relation: "b".to_string(),
-            schema: vec!["y".to_string()],
-        };
-        let join = IRNode::Join {
+    fn join_of(left: IRNode, right: IRNode, keys: &[usize]) -> IRNode {
+        IRNode::Join {
             left: Box::new(left),
             right: Box::new(right),
-            left_keys: vec![0],
-            right_keys: vec![0],
-            output_schema: vec!["x".to_string(), "y".to_string()],
-        };
-        // 10 * 10 = 100
-        assert_eq!(join.estimate_cost(), 100);
+            left_keys: keys.to_vec(),
+            right_keys: keys.to_vec(),
+            output_schema: vec![],
+        }
+    }
+
+    /// `a`: 1000 rows, `b`: 300, `c`: 20, anything else: none.
+    fn sizes(relation: &str) -> u64 {
+        match relation {
+            "a" => 1000,
+            "b" => 300,
+            "c" => 20,
+            _ => 0,
+        }
     }
 
     #[test]
-    fn test_cost_triple_join() {
-        let a = IRNode::Scan {
-            relation: "a".to_string(),
-            schema: vec!["x".to_string()],
+    fn test_estimate_scan_filter_and_aggregate_keep_input_rows() {
+        let scan = scan_of("a", "x");
+        assert_eq!(scan.estimate_rows(&sizes), RowEstimate::rows(1000));
+        let filtered = IRNode::Filter {
+            input: Box::new(scan.clone()),
+            predicate: Predicate::ColumnEqConst(0, 1),
         };
-        let b = IRNode::Scan {
-            relation: "b".to_string(),
-            schema: vec!["y".to_string()],
-        };
-        let c = IRNode::Scan {
-            relation: "c".to_string(),
-            schema: vec!["z".to_string()],
-        };
-        let join_ab = IRNode::Join {
-            left: Box::new(a),
-            right: Box::new(b),
-            left_keys: vec![0],
-            right_keys: vec![0],
-            output_schema: vec!["x".to_string(), "y".to_string()],
-        };
-        let join_abc = IRNode::Join {
-            left: Box::new(join_ab),
-            right: Box::new(c),
-            left_keys: vec![0],
-            right_keys: vec![0],
-            output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
-        };
-        // (10*10) * 10 = 1000
-        assert_eq!(join_abc.estimate_cost(), 1000);
-    }
-
-    #[test]
-    fn test_cost_aggregate() {
-        let scan = IRNode::Scan {
-            relation: "data".to_string(),
-            schema: vec!["x".to_string(), "y".to_string()],
-        };
+        assert_eq!(filtered.estimate_rows(&sizes).rows, 1000);
         let agg = IRNode::Aggregate {
             input: Box::new(scan),
             group_by: vec![0],
-            aggregations: vec![(AggregateFunction::Count, 1)],
+            aggregations: vec![(AggregateFunction::Count, 0)],
             output_schema: vec!["x".to_string(), "count".to_string()],
         };
-        assert_eq!(agg.estimate_cost(), 20); // 10 * 2
+        assert_eq!(agg.estimate_rows(&sizes), RowEstimate::rows(1000));
+        assert_eq!(scan_of("missing", "x").estimate_rows(&sizes).rows, 0);
     }
 
     #[test]
-    fn test_cost_antijoin() {
-        let left = IRNode::Scan {
-            relation: "a".to_string(),
-            schema: vec!["x".to_string()],
+    fn test_estimate_keyed_join_is_its_larger_input() {
+        let join = join_of(scan_of("a", "x"), scan_of("b", "x"), &[0]);
+        let estimate = join.estimate_rows(&sizes);
+        assert_eq!(estimate.rows, 1000);
+        assert_eq!(
+            estimate.largest_join,
+            Some(JoinEstimate {
+                rows: 1000,
+                left: 1000,
+                right: 300,
+                cross_product: false,
+            })
+        );
+        // Chains of keyed joins never grow past their largest input.
+        let chain = join_of(join, scan_of("c", "x"), &[0]);
+        assert_eq!(chain.estimate_rows(&sizes).rows, 1000);
+    }
+
+    #[test]
+    fn test_estimate_cross_product_multiplies_and_is_the_largest_join() {
+        let cross = join_of(scan_of("a", "x"), scan_of("b", "y"), &[]);
+        let keyed = join_of(cross, scan_of("c", "x"), &[0]);
+        let estimate = keyed.estimate_rows(&sizes);
+        assert_eq!(estimate.rows, 300_000);
+        let largest = estimate.largest_join.unwrap();
+        assert!(largest.cross_product);
+        assert_eq!(
+            (largest.rows, largest.left, largest.right),
+            (300_000, 1000, 300)
+        );
+
+        // Fused joins estimate the same, and products saturate.
+        let fused = IRNode::JoinFlatMap {
+            left: Box::new(scan_of("a", "x")),
+            right: Box::new(scan_of("a", "y")),
+            left_keys: vec![],
+            right_keys: vec![],
+            projection: vec![0, 1],
+            filter_predicate: None,
+            output_schema: vec![],
         };
-        let right = IRNode::Scan {
-            relation: "b".to_string(),
-            schema: vec!["y".to_string()],
+        assert_eq!(fused.estimate_rows(&sizes).rows, 1_000_000);
+        let huge = |_: &str| u64::MAX / 2;
+        assert_eq!(fused.estimate_rows(&huge).rows, u64::MAX);
+    }
+
+    #[test]
+    fn test_estimate_union_sums_and_antijoin_keeps_left() {
+        let union = IRNode::Union {
+            inputs: vec![scan_of("a", "x"), scan_of("b", "x")],
         };
+        assert_eq!(union.estimate_rows(&sizes).rows, 1300);
+        let cross = join_of(scan_of("b", "x"), scan_of("c", "y"), &[]);
         let antijoin = IRNode::Antijoin {
-            left: Box::new(left),
-            right: Box::new(right),
+            left: Box::new(scan_of("a", "x")),
+            right: Box::new(cross),
             left_keys: vec![0],
             right_keys: vec![0],
             output_schema: vec!["x".to_string()],
         };
-        assert_eq!(antijoin.estimate_cost(), 30); // 10 + 10 + 10
+        let estimate = antijoin.estimate_rows(&sizes);
+        assert_eq!(estimate.rows, 1000);
+        assert_eq!(estimate.largest_join.map(|j| j.rows), Some(6000));
     }
 
     #[test]
-    fn test_cost_union() {
-        let a = IRNode::Scan {
-            relation: "a".to_string(),
-            schema: vec!["x".to_string()],
-        };
-        let b = IRNode::Scan {
-            relation: "b".to_string(),
-            schema: vec!["x".to_string()],
-        };
-        let union = IRNode::Union { inputs: vec![a, b] };
-        assert_eq!(union.estimate_cost(), 21); // 10 + 10 + 1
-    }
-
-    #[test]
-    fn test_cost_hnsw_scan() {
+    fn test_estimate_hnsw_scan_is_k() {
         let hnsw = IRNode::HnswScan {
             index_name: "idx".to_string(),
             query: IRExpression::Column(0),
@@ -2231,6 +2301,6 @@ mod tests {
             ef_search: None,
             output_schema: vec!["id".to_string(), "dist".to_string()],
         };
-        assert_eq!(hnsw.estimate_cost(), 150); // 10 * 10 + 50
+        assert_eq!(hnsw.estimate_rows(&sizes), RowEstimate::rows(10));
     }
 }

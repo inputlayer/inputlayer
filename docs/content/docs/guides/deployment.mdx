@@ -583,12 +583,27 @@ Three limits keep the server inside that memory and refuse work with
 - `max_total_query_memory_bytes` bounds the working sets of **all queries
   running at once**. Up to about three quarters of the CPUs run queries
   concurrently; a query that grows while they hold this much is stopped, so
-  concurrency can never push the server past its memory. Unset, it is 60%
-  of the container's memory limit (its cgroup), or no limit when the server
-  runs outside a memory-limited container. That default leaves room only
+  concurrency can never push the server past its memory. A query holding
+  next to nothing (under 1/64 of this, at most 16 MiB) is not stopped for
+  it: the queries that filled it are. Unset, it is 60% of the container's
+  memory limit (the tightest cgroup limit on the process, as a container or
+  a systemd unit's `MemoryMax=` sets it), or no limit when the server runs
+  without one. That default leaves room only
   for the server and small graphs: set it explicitly whenever graphs hold
   real data, and outside a memory-limited container. The server logs the
   budget it uses at startup (`query_memory_limits`).
+
+The query limits hold while a query computes, not only between its steps:
+the evaluator checks them every few thousand rows a join forms, so even a
+join pairing millions of rows in one step is stopped a few hundred KB past
+its limit. After a query that held a lot of memory, the server returns what
+it freed to the operating system.
+
+Two more limits refuse runaway queries with `validation` before they cost
+memory: `max_query_cost` (default 100,000,000) refuses, before it runs, a
+query whose plan joins relations on no shared variable into a cross product
+estimated past it, and `max_recursion_iterations` (default 100,000) stops
+recursion that keeps deriving new values, whatever the deadline.
 
 Stored graphs and the queries' working memory are separate, so they add up.
 The sizing rule that keeps the process inside its memory limit is:

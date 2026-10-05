@@ -225,8 +225,10 @@ pub struct KnowledgeGraph {
     num_workers: usize,
     /// Maximum result rows per query (0 = unlimited)
     max_result_rows: usize,
-    /// Maximum query cost score (0 = unlimited)
+    /// Most rows one join of a query may be estimated to produce (0 = unlimited)
     max_query_cost: u64,
+    /// Most fixpoint iterations a recursive evaluation may run (0 = unlimited)
+    max_recursion_iterations: u32,
     /// Optimizer passes for every engine this KG builds
     optimization: crate::OptimizationConfig,
     /// Set by drop under the write lock; writers holding a stale handle bail
@@ -350,6 +352,8 @@ impl StorageEngine {
                     KnowledgeGraph::new_with_workers(name.to_string(), db_dir, num_workers);
                 kg.max_result_rows = self.config.storage.performance.max_result_rows;
                 kg.max_query_cost = self.config.storage.performance.max_query_cost;
+                kg.max_recursion_iterations =
+                    self.config.storage.performance.recursion_iteration_limit();
                 kg.set_optimization(self.config.optimization.clone());
                 let revision = kg.snapshot.load().revision;
 
@@ -1978,6 +1982,12 @@ impl StorageEngine {
             num_workers,
         );
         initial.optimization = self.config.optimization.clone();
+        // Queries before the graph's first write run on this snapshot: it
+        // carries the configured limits like every later one.
+        let perf = &self.config.storage.performance;
+        initial.max_result_rows = perf.max_result_rows;
+        initial.max_query_cost = perf.max_query_cost;
+        initial.max_recursion_iterations = perf.recursion_iteration_limit();
         let changes = precondition::ChangeLog::first(&initial);
         initial.set_changes(changes);
         let snapshot = ArcSwap::from_pointee(initial);
@@ -1996,6 +2006,7 @@ impl StorageEngine {
             num_workers,
             max_result_rows: self.config.storage.performance.max_result_rows,
             max_query_cost: self.config.storage.performance.max_query_cost,
+            max_recursion_iterations: self.config.storage.performance.recursion_iteration_limit(),
             optimization: self.config.optimization.clone(),
             dropped: false,
         };
@@ -2294,6 +2305,7 @@ impl KnowledgeGraph {
             num_workers,
             max_result_rows: 0,
             max_query_cost: 0,
+            max_recursion_iterations: 0,
             optimization: crate::OptimizationConfig::default(),
             dropped: false,
         }
@@ -2413,6 +2425,7 @@ impl KnowledgeGraph {
             );
             new_snapshot.max_result_rows = self.max_result_rows;
             new_snapshot.max_query_cost = self.max_query_cost;
+            new_snapshot.max_recursion_iterations = self.max_recursion_iterations;
             new_snapshot.optimization = self.optimization.clone();
             new_snapshot.hnsw_search_fn = self.hnsw_search_fn();
             self.stamp_changes(&mut new_snapshot);
@@ -2430,6 +2443,7 @@ impl KnowledgeGraph {
             );
             new_snapshot.max_result_rows = self.max_result_rows;
             new_snapshot.max_query_cost = self.max_query_cost;
+            new_snapshot.max_recursion_iterations = self.max_recursion_iterations;
             new_snapshot.optimization = self.optimization.clone();
             new_snapshot.hnsw_search_fn = self.hnsw_search_fn();
             self.stamp_changes(&mut new_snapshot);
@@ -2550,6 +2564,8 @@ impl KnowledgeGraph {
         let mut temp_engine = crate::IQLEngine::with_config(self.optimization.clone());
         temp_engine.set_inputs(self.store.relations().clone());
         temp_engine.set_num_workers(self.num_workers);
+        temp_engine.set_max_query_cost(self.max_query_cost);
+        temp_engine.set_max_recursion_iterations(self.max_recursion_iterations);
         temp_engine.execute_tuples(&program)
     }
 
@@ -6070,25 +6086,64 @@ mod tests {
     fn test_max_query_cost_rejects_expensive_query() {
         let temp = TempDir::new().unwrap();
         let mut config = create_test_config(temp.path().to_path_buf());
-        config.storage.performance.max_query_cost = 5; // Very low threshold
+        config.storage.performance.max_query_cost = 5_000;
         let storage = StorageEngine::new(config).unwrap();
 
         storage.create_knowledge_graph("cost_kg").unwrap();
-        storage
-            .insert_into("cost_kg", "edge", vec![(1, 2), (2, 3)])
-            .unwrap();
+        let rows: Vec<(i32, i32)> = (0..100).map(|i| (i, i)).collect();
+        storage.insert_into("cost_kg", "a", rows.clone()).unwrap();
+        storage.insert_into("cost_kg", "b", rows).unwrap();
 
-        // A simple query should cost 10+ (scan alone costs 10), so it will be rejected
-        let result = storage.execute_query_tuples_on("cost_kg", "result(X, Y) <- edge(X, Y)");
-        assert!(
-            result.is_err(),
-            "Query should be rejected when cost exceeds threshold"
-        );
+        // 100 x 100 pairs: over the limit, refused before it runs.
+        let result = storage.execute_query_tuples_on("cost_kg", "result(X, Y) <- a(X, P), b(Y, Q)");
         let err = format!("{}", result.unwrap_err());
         assert!(
-            err.contains("Query too complex"),
-            "Error should mention complexity: {err}"
+            err.contains("Query too complex") && err.contains("a cross product of about 10000"),
+            "Error should name the cross product: {err}"
         );
+        // A derived relation is estimated from its rule.
+        let result = storage.execute_query_tuples_on(
+            "cost_kg",
+            "lhs(X) <- a(X, P)\nresult(X, Y) <- lhs(X), b(Y, Q)",
+        );
+        assert!(result.is_err(), "derived cross product must be refused");
+
+        // Joined on a shared variable, the same relations fit.
+        let result = storage.execute_query_tuples_on("cost_kg", "result(X, Y) <- a(X, Y), b(X, Q)");
+        assert_eq!(result.unwrap().len(), 100);
+    }
+
+    /// A graph loaded at startup serves its first queries, before any
+    /// write, under the configured limits.
+    #[test]
+    fn test_query_limits_apply_before_the_first_write_after_restart() {
+        let temp = TempDir::new().unwrap();
+        let config = || {
+            let mut config = create_test_config(temp.path().to_path_buf());
+            config.storage.performance.max_query_cost = 5_000;
+            config.storage.performance.max_recursion_iterations = 10;
+            config
+        };
+        {
+            let storage = StorageEngine::new(config()).unwrap();
+            storage.create_knowledge_graph("restart_kg").unwrap();
+            let rows: Vec<(i32, i32)> = (0..100).map(|i| (i, i + 1)).collect();
+            storage.insert_into("restart_kg", "a", rows).unwrap();
+        }
+        let storage = StorageEngine::new(config()).unwrap();
+        let err = storage
+            .execute_query_tuples_on("restart_kg", "result(X, Y) <- a(X, P), a(Y, Q)")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Query too complex"), "{err}");
+        let err = storage
+            .execute_query_tuples_on(
+                "restart_kg",
+                "path(X, Y) <- a(X, Y)\npath(X, Z) <- path(X, Y), a(Y, Z)\nresult(X, Y) <- path(X, Y)",
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("within 10 iterations"), "{err}");
     }
 
     #[test]

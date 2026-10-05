@@ -246,3 +246,24 @@ Error: Request stopped: the queries running on the server hold their whole memor
 Nothing was applied, and the query may succeed once the others finish: retry it later.
 
 A write fails with the same code when it would grow its knowledge graph's facts past `storage.performance.max_graph_memory_bytes`. Nothing is applied; deleting facts is always allowed, so free space and retry.
+
+### Query Too Complex
+
+```
+Error: Query execution failed: Query too complex: it joins 30000 rows with 30000 rows on no shared variable, a cross product of about 900000000 rows, over the limit of 100000000 (storage.performance.max_query_cost). Join them on a shared variable, or order the rule body so each atom shares a variable with one before it
+```
+
+Code `validation`. Before a query runs, each join of its plan is estimated from the sizes of the relations it reads. Atoms that share no variable (`?a(X), b(Y)`) pair every row of one with every row of the other, a cross product; one estimated past `storage.performance.max_query_cost` is refused before it runs, so nothing was applied. Try:
+- Joining the atoms on a shared variable
+- Ordering the rule body so each atom shares a variable with one before it: the planner reorders joins in most rules, but not in every rule (rules with negation keep their order)
+- Filtering each side before they meet, or raising the limit in config
+
+### Recursion Did Not Reach a Fixpoint
+
+```
+Error: Query execution failed: Recursion did not reach a fixpoint within 100000 iterations (storage.performance.max_recursion_iterations): a recursive rule keeps deriving new facts, such as a counter without an upper bound. Bound the recursion, for example with N < 1000
+```
+
+Code `validation`. Each iteration of a recursive rule extends its paths by one step. A rule that keeps deriving new values (`nat(N) <- nat(M), N = M + 1`) never reaches a fixpoint, so it is stopped at `storage.performance.max_recursion_iterations` whatever the deadline. Try:
+- Bounding the derived value (`N < 1000`)
+- Raising the limit, if a path really is longer than that many steps

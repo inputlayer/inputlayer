@@ -265,11 +265,23 @@ pub struct PerformanceConfig {
     #[serde(default = "default_slow_query_log_ms")]
     pub slow_query_log_ms: u64,
 
-    /// Maximum query cost score. Queries exceeding this are rejected before
-    /// execution. Cost is estimated from the IR tree (joins, aggregations,
-    /// negation, recursion). 0 = no limit.
-    #[serde(default)]
+    /// Most rows one join of a query's plan may be estimated to produce.
+    /// Before a query runs, each join is estimated from the sizes of the
+    /// relations it reads: a join on shared variables as its larger input, a
+    /// join without one (a cross product) as the product of its inputs, so
+    /// in practice only large cross products go over it. A query with a
+    /// join over it is refused with `validation` before it runs. 0 = no
+    /// limit.
+    #[serde(default = "default_max_query_cost")]
     pub max_query_cost: u64,
+
+    /// Most fixpoint iterations a recursive evaluation may run. Recursion
+    /// that keeps deriving new facts (a counter without an upper bound) is
+    /// refused with `validation` when it reaches it, whatever the deadline.
+    /// Each iteration extends paths by one step, so this also bounds the
+    /// longest chain a recursive rule can follow. 0 = no limit.
+    #[serde(default = "default_max_recursion_iterations")]
+    pub max_recursion_iterations: u64,
 
     /// Most heap bytes one request's computation may hold, summed over all
     /// the threads evaluating it. A query that grows past it is stopped and
@@ -282,7 +294,8 @@ pub struct PerformanceConfig {
     /// together. A query that grows while they hold more is stopped and
     /// refused with `resource_exhausted`, so concurrent queries never push
     /// the server past its container. Unset: 60% of the container's memory
-    /// limit (cgroup); no limit outside a memory-limited container. Stored
+    /// limit (the tightest cgroup limit on the process, as a container or a
+    /// systemd unit's `MemoryMax=` sets it); no limit outside one. Stored
     /// graphs are separate from it: graph budgets summed, plus this, plus
     /// the server's overhead must stay within 80% of the container's limit.
     /// 0 = no limit.
@@ -679,6 +692,14 @@ fn default_max_result_rows() -> usize {
 fn default_max_query_memory_bytes() -> u64 {
     4 << 30 // 4 GiB
 }
+fn default_max_query_cost() -> u64 {
+    // 10,000 x 10,000. Past it a cross product cannot fit the default
+    // per-query memory limit or finish within the default deadline.
+    100_000_000
+}
+fn default_max_recursion_iterations() -> u64 {
+    100_000
+}
 fn default_max_string_value_bytes() -> usize {
     65_536 // 64 KB
 }
@@ -992,6 +1013,13 @@ impl Config {
                  One runaway query can take the whole server's memory."
             );
         }
+        if self.storage.performance.max_query_cost == 0 {
+            eprintln!(
+                "WARNING: max_query_cost = 0 (unlimited). \
+                 A query joining large relations without a shared variable \
+                 (a cross product) runs until a deadline or memory limit stops it."
+            );
+        }
         if self.http.cors_allow_all {
             eprintln!(
                 "WARNING: cors_allow_all = true. \
@@ -1050,7 +1078,8 @@ impl Config {
                     max_string_value_bytes: 65_536,
                     max_result_rows: default_max_result_rows(),
                     slow_query_log_ms: 5000,
-                    max_query_cost: 0,
+                    max_query_cost: default_max_query_cost(),
+                    max_recursion_iterations: default_max_recursion_iterations(),
                     max_query_memory_bytes: default_max_query_memory_bytes(),
                     max_graph_memory_bytes: 0,
                     max_total_query_memory_bytes: None,
@@ -1077,6 +1106,12 @@ impl Default for Config {
 }
 
 impl PerformanceConfig {
+    /// [`Self::max_recursion_iterations`] as the evaluator's iteration
+    /// counter; a value past its range is no ceiling it could reach anyway.
+    pub fn recursion_iteration_limit(&self) -> u32 {
+        u32::try_from(self.max_recursion_iterations).unwrap_or(0)
+    }
+
     /// The budget of all requests' computations together, in bytes; 0 = no
     /// limit. See [`Self::max_total_query_memory_bytes`].
     pub fn total_query_memory_bytes(&self) -> u64 {
@@ -1105,7 +1140,8 @@ impl Default for PerformanceConfig {
             max_string_value_bytes: default_max_string_value_bytes(),
             max_result_rows: default_max_result_rows(),
             slow_query_log_ms: default_slow_query_log_ms(),
-            max_query_cost: 0, // 0 = unlimited
+            max_query_cost: default_max_query_cost(),
+            max_recursion_iterations: default_max_recursion_iterations(),
             max_query_memory_bytes: default_max_query_memory_bytes(),
             max_graph_memory_bytes: 0,          // 0 = unlimited
             max_total_query_memory_bytes: None, // 60% of the container's limit
@@ -1194,6 +1230,42 @@ mod tests {
         assert_eq!(budget(v2.path()), 0, "v2 unlimited");
         let none = tempfile::TempDir::new().unwrap();
         assert_eq!(budget(none.path()), 0, "no cgroup");
+
+        // A process in a nested v2 cgroup (a systemd unit with MemoryMax=)
+        // is held to the tightest limit on its way up to the root.
+        use crate::execution::memory::process_memory_limit;
+        let nested = tempfile::TempDir::new().unwrap();
+        let unit = nested.path().join("system.slice/inputlayer.service");
+        std::fs::create_dir_all(&unit).unwrap();
+        std::fs::write(nested.path().join("system.slice/memory.max"), "max\n").unwrap();
+        std::fs::write(unit.join("memory.max"), "6442450944\n").unwrap();
+        let own = "0::/system.slice/inputlayer.service\n";
+        assert_eq!(
+            process_memory_limit(nested.path(), Some(own)),
+            Some(6442450944)
+        );
+        std::fs::write(
+            nested.path().join("system.slice/memory.max"),
+            "4294967296\n",
+        )
+        .unwrap();
+        assert_eq!(
+            process_memory_limit(nested.path(), Some(own)),
+            Some(4294967296)
+        );
+        assert_eq!(process_memory_limit(nested.path(), Some("0::/\n")), None);
+        assert_eq!(process_memory_limit(nested.path(), None), None);
+        assert_eq!(
+            process_memory_limit(v2.path(), Some("0::/elsewhere\n")),
+            None,
+            "v2 root unlimited, no cgroup below it"
+        );
+        std::fs::write(v2.path().join("memory.max"), "8589934592\n").unwrap();
+        assert_eq!(
+            process_memory_limit(v2.path(), Some("0::/\n")),
+            Some(8589934592),
+            "a container's own mount"
+        );
 
         let configured = PerformanceConfig {
             max_total_query_memory_bytes: Some(1 << 20),

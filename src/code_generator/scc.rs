@@ -8,7 +8,7 @@
 
 use super::{
     abandon_if_stopped, dataflow_error, is_query_cancelled, query_stopped_error, stop_point,
-    CodeGenerator, Iter,
+    CodeGenerator, Iter, Pacer,
 };
 use crate::boolean_specialization::SemiringType;
 use crate::ir::IRNode;
@@ -123,6 +123,7 @@ impl CodeGenerator {
             Arc::new(plans.iter().map(|_| Mutex::new(HashMap::new())).collect());
         let results_clone = Arc::clone(&results);
         let input_data = self.input_tuples.clone();
+        let max_iterations = self.max_iterations;
 
         catch_unwind(AssertUnwindSafe(|| {
             timely::execute_directly(move |worker| {
@@ -173,7 +174,7 @@ impl CodeGenerator {
                                 let combined = base.enter(inner).concat(recursive);
                                 let next =
                                     Self::fixpoint_dedup(combined, plan.agg_in_loop.as_ref());
-                                let next = stop_point(next);
+                                let next = stop_point(next, max_iterations);
                                 variable.set(next.clone());
                                 next.leave()
                             })
@@ -182,9 +183,11 @@ impl CodeGenerator {
 
                     for (idx, output) in outputs.into_iter().enumerate() {
                         let results_ref = Arc::clone(&results_clone);
+                        let mut pacer = Pacer::default();
                         output
                             .inner
                             .inspect(move |(data, _time, diff)| {
+                                pacer.tick();
                                 let mut guard = results_ref[idx].lock();
                                 *guard.entry(data.clone()).or_insert(0) += diff.to_count();
                             })

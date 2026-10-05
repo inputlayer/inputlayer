@@ -118,6 +118,17 @@ impl Client {
         reply
     }
 
+    /// Run `program` with a deadline `timeout_ms` from now; return its reply.
+    async fn execute_within(&mut self, id: &str, program: &str, timeout_ms: u64) -> Value {
+        self.send(
+            json!({"type": "execute", "id": id, "program": program, "timeout_ms": timeout_ms}),
+        )
+        .await;
+        let reply = self.reply().await;
+        assert_eq!(reply["id"], id, "{reply}");
+        reply
+    }
+
     /// The next reply; pushes are skipped.
     async fn reply(&mut self) -> Value {
         loop {
@@ -314,4 +325,134 @@ async fn a_write_past_the_graph_budget_is_refused_and_deletes_still_work() {
     let reply = client.execute("again", &edges(100, 200)).await;
     assert_eq!(reply["type"], "result", "{reply}");
     assert!(server.count("edge") > 250);
+}
+
+/// One-column relations `a`, `b` and `c` of `rows` rows each, written in
+/// inserts the default insert limit takes.
+async fn wide(server: &Server, rows: i64) {
+    for relation in ["a", "b", "c"] {
+        for start in (0..rows).step_by(10_000) {
+            let chunk: Vec<String> = (start..(start + 10_000).min(rows))
+                .map(|i| format!("({i})"))
+                .collect();
+            server
+                .write(&format!("+{relation}[{}]", chunk.join(", ")))
+                .await;
+        }
+    }
+}
+
+/// Every pair of `a` and `b`, and the same pairs filtered by a negation.
+const CROSS_PRODUCTS: [&str; 2] = ["?a(X), b(Y)", "?a(X), b(Y), !c(Y)"];
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_large_cross_product_is_refused_before_it_runs_on_shipped_defaults() {
+    let server = start_server(|_| {}).await;
+    wide(&server, 30_000).await;
+    let mut client = Client::connect(&server).await;
+
+    for program in CROSS_PRODUCTS {
+        let started = std::time::Instant::now();
+        let reply = client.execute("cross", program).await;
+        assert_eq!(reply["type"], "error", "{reply}");
+        assert_eq!(reply["code"], "validation", "{reply}");
+        let message = reply["message"].as_str().unwrap();
+        assert!(
+            message.contains("a cross product of about 900000000 rows")
+                && message.contains("max_query_cost"),
+            "{reply}"
+        );
+        let refused_in = started.elapsed();
+        assert!(refused_in < Duration::from_secs(5), "took {refused_in:?}");
+    }
+
+    // The same relations joined on a shared variable run.
+    let reply = client.execute("keyed", "?a(X), b(X), X < 3").await;
+    assert_eq!(reply["type"], "result", "{reply}");
+    assert_eq!(reply["row_count"], 3, "{reply}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cross_product_past_the_memory_limit_is_stopped_while_it_forms_pairs() {
+    let server = start_server(|config| {
+        config.storage.performance.max_query_cost = 0;
+        config.storage.performance.max_query_memory_bytes = 32 << 20;
+        config.storage.performance.query_timeout_ms = 0;
+    })
+    .await;
+    wide(&server, 3000).await;
+    let mut client = Client::connect(&server).await;
+
+    for program in CROSS_PRODUCTS {
+        // A join forms all 9 million pairs (about 1 GB) in one dataflow
+        // step: the limit must stop it inside that step.
+        let started = std::time::Instant::now();
+        let reply = client.execute("cross", program).await;
+        assert_exhausted(&reply, "max_query_memory_bytes");
+        let stopped_in = started.elapsed();
+        assert!(stopped_in < Duration::from_secs(20), "took {stopped_in:?}");
+    }
+
+    let reply = client.execute("after", "?a(X), X < 3").await;
+    assert_eq!(reply["type"], "result", "{reply}");
+    assert_eq!(reply["row_count"], 3, "{reply}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cross_product_past_its_deadline_is_stopped_while_others_answer() {
+    let server = start_server(|config| {
+        config.storage.performance.max_query_cost = 0;
+        config.storage.performance.max_query_memory_bytes = 0;
+    })
+    .await;
+    wide(&server, 3000).await;
+    let mut client = Client::connect(&server).await;
+    let mut other = Client::connect(&server).await;
+
+    for program in CROSS_PRODUCTS {
+        let started = std::time::Instant::now();
+        let reply = client.execute_within("cross", program, 300).await;
+        assert_eq!(reply["type"], "error", "{reply}");
+        assert_eq!(reply["code"], "deadline_exceeded", "{reply}");
+        let stopped_in = started.elapsed();
+        assert!(stopped_in < Duration::from_secs(20), "took {stopped_in:?}");
+
+        let reply = other.execute("other", "?c(X), X < 3").await;
+        assert_eq!(reply["type"], "result", "{reply}");
+        assert_eq!(reply["row_count"], 3, "{reply}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recursion_without_a_bound_stops_at_the_iteration_ceiling() {
+    let server = start_server(|config| {
+        config.storage.performance.max_recursion_iterations = 200;
+        config.storage.performance.query_timeout_ms = 0;
+    })
+    .await;
+    server.write("+seed[(0)]").await;
+    let mut client = Client::connect(&server).await;
+
+    // Session rules, then the query: the query's statement fails.
+    let reply = client
+        .execute(
+            "counter",
+            "nat(N) <- seed(N)\nnat(N) <- nat(M), N = M + 1\n?nat(X)",
+        )
+        .await;
+    assert_eq!(reply["type"], "result", "{reply}");
+    let errors = reply["errors"].as_array().unwrap();
+    assert_eq!(errors.len(), 1, "{reply}");
+    assert_eq!(errors[0]["index"], 2, "{reply}");
+    assert_eq!(errors[0]["code"], "validation", "{reply}");
+    let message = errors[0]["message"].as_str().unwrap();
+    assert!(message.contains("within 200 iterations"), "{reply}");
+
+    // Recursion that converges under the ceiling is unaffected.
+    server
+        .write("+upto(N) <- seed(N)\n+upto(N) <- upto(M), N = M + 1, N < 100")
+        .await;
+    let reply = client.execute("bounded", "?upto(X)").await;
+    assert_eq!(reply["type"], "result", "{reply}");
+    assert_eq!(reply["row_count"], 100, "{reply}");
 }
