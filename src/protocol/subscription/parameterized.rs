@@ -1,5 +1,5 @@
 //! Parameterized views: standing queries that differ only in bound constants
-//! share one evaluation per change.
+//! share their evaluations.
 //!
 //! `?speech("s-1", G, T), speech_owner("s-1", "sp-1", 1)` and the same query for
 //! `"s-2"` are different views, each with its own subscribers, result and
@@ -43,23 +43,22 @@
 //! shares while its views' own evaluations fit on the standing-query permits
 //! (as many as compute permits) at once, and otherwise shares only while a
 //! round is, on average, no slower than those evaluations run in parallel on
-//! the permits. Costs leave out
-//! waiting for a permit and compiling a plan, and a view's own cost counts
-//! only evaluations that reused a compiled plan. Costs hold under the rules
-//! they were measured with: a rule change stops sharing and starts them
-//! over. A family never evaluates its lifted query while a parameter binds
-//! an atom that reads, under the current rules, a recursive relation: the
-//! constant lets Magic Sets restrict the work, and the lifted query may
-//! compute the whole closure. Otherwise, once it has a view's own cost to
-//! compare with, a family probes: it evaluates the round of that revision,
-//! which no view waits for, under the server's probe permit rather than a
-//! standing-query permit, and starts sharing only when that round is fast
-//! enough. Views that then share at the probe's revision read the probe's
-//! round, so the lifted query is evaluated at most once per revision. With
-//! too few permits for that, a family shares without a probe. It stops when
-//! rounds are slower on average, and probes (or decides) again after some
-//! commits, waiting longer after each failure. While sharing, a view
-//! evaluates its own query now and then to keep that cost current.
+//! the permits. Costs leave out waiting for a permit and compiling a plan,
+//! and a view's own cost counts only evaluations that reused a compiled plan.
+//! Costs hold under the rules they were measured with: a rule change stops
+//! sharing and starts them over. A family never evaluates its lifted query
+//! while a parameter binds an atom that reads, under the current rules, a
+//! recursive relation: the constant lets Magic Sets restrict the work, and
+//! the lifted query may compute the whole closure. Otherwise, once it has a
+//! view's own cost to compare with, a family probes: it evaluates the round
+//! of that revision, which no view waits for, under the server's probe
+//! permit rather than a standing-query permit, and starts sharing only when
+//! that round is fast enough. Views that then share at the probe's revision
+//! read the probe's round, so the lifted query is evaluated at most once per
+//! revision. With too few permits for that, a family shares without a probe.
+//! It stops when rounds are slower on average, and probes (or decides) again
+//! after some commits, waiting longer after each failure. While sharing, a
+//! view evaluates its own query now and then to keep that cost current.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -814,11 +813,12 @@ impl Family {
             && (stops == 0 || since_stop >= probe_after(bindings, stops))
     }
 
-    /// Evaluate the round at `snapshot`, which no view waits for, at most one
-    /// probe at a time, under the server's probe permit: the guard judging
-    /// it decides whether views share, and views that then share at its
-    /// revision read it, while a round judged too slow is let go. With too
-    /// few compute permits to spare the CPU, share without one.
+    /// Evaluate the round of `snapshot`'s revision (the pending round, which
+    /// starts no older, if there is one), which no view waits for, at most
+    /// one probe at a time, under the server's probe permit: the guard
+    /// judging it decides whether views share, and views that then share at
+    /// its revision read it, while a round judged too slow is let go. With
+    /// too few compute permits to spare the CPU, share without one.
     fn probe(family: &Arc<Family>, snapshot: Arc<KnowledgeGraphSnapshot>) {
         if family.handler.compute_permits() < MIN_PERMITS_FOR_PROBES {
             family.start_sharing(snapshot.persistent_rules());

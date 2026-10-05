@@ -434,7 +434,7 @@ pub struct LoggingConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SubscriptionsConfig {
-    /// Share one evaluation per commit among standing queries that differ
+    /// Share evaluations, one at a time, among standing queries that differ
     /// only in bound constants (`?speech("s-1", ...)`, `?speech("s-2", ...)`),
     /// routing each subscriber exactly its own rows. A family whose shared
     /// query is slower than its members' own run in parallel stops sharing
