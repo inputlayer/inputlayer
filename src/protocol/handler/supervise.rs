@@ -20,6 +20,7 @@ use tracing::{info, warn};
 use super::ProgramError;
 use crate::execution::{memory, RequestControl, Stop};
 use crate::protocol::wire::ErrorCode;
+use crate::statement::meta::MetaCommand;
 use crate::statement::Statement;
 
 /// Longest wait for a compute permit, whatever the request's deadline: past
@@ -114,12 +115,17 @@ impl Drop for ControlScope {
 
 /// Gate the next statement of the running program: a stopped request runs
 /// no further statement, and a command changing durable state first enters
-/// the commit, so once it starts it is not interrupted.
+/// the commit, so once it starts it is not interrupted. An index build is the
+/// exception: it runs under the request's deadline and enters the commit
+/// only to install the index it built.
 pub(super) fn statement_gate(statement: &Statement) -> Result<(), Stop> {
     let Some(control) = crate::code_generator::current_request_control() else {
         return Ok(());
     };
     match statement {
+        Statement::Meta(MetaCommand::IndexCreate(_) | MetaCommand::IndexRebuild(_)) => {
+            control.stopped().map_or(Ok(()), Err)
+        }
         Statement::Meta(command) if command.changes_durable_state() => control.begin_commit(),
         _ => control.stopped().map_or(Ok(()), Err),
     }

@@ -51,6 +51,7 @@ jobs:
               - 'ontology-client/**'
               - 'ws-protocol/**'
               - 'perf-gate/**'
+              - 'vendor/**'
               - 'docs/spec/**'
               - '**/Cargo.toml'
               - 'config.toml'

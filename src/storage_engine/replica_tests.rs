@@ -199,7 +199,7 @@ fn write_everything(primary: &StorageEngine) {
     primary
         .insert_tuples_into(KG, "doc", vec![doc(1, 0.0, 1.0), doc(2, 1.0, 0.0)])
         .unwrap();
-    primary.create_index_in(KG, &index_options()).unwrap();
+    primary.create_index_in(KG, &index_options(), None).unwrap();
     primary.create_knowledge_graph("other").unwrap();
     primary
         .insert_tuples_into("other", "scratch", vec![pair(9, 9)])
@@ -218,9 +218,13 @@ fn write_everything(primary: &StorageEngine) {
     primary
         .insert_tuples_into("doomed", "doc", vec![doc(1, 0.0, 1.0)])
         .unwrap();
-    primary.create_index_in("doomed", &index_options()).unwrap();
+    primary
+        .create_index_in("doomed", &index_options(), None)
+        .unwrap();
     primary.drop_index_in("doomed", "doc_emb").unwrap();
-    primary.create_index_in("doomed", &index_options()).unwrap();
+    primary
+        .create_index_in("doomed", &index_options(), None)
+        .unwrap();
     primary.drop_knowledge_graph("doomed").unwrap();
 }
 
@@ -343,7 +347,11 @@ fn a_follower_refuses_every_client_write() {
     refused(follower.create_knowledge_graph("new"));
     refused(follower.drop_knowledge_graph(crate::auth::INTERNAL_KG));
     refused(follower.clear_relations_by_prefix_in(KG, "e").map(drop));
-    refused(follower.create_index_in(KG, &index_options()).map(drop));
+    refused(
+        follower
+            .create_index_in(KG, &index_options(), None)
+            .map(drop),
+    );
     // The replication applier still writes.
     let mut txn = Transaction::new(5);
     txn.insert(format!("{KG}:edge"), vec![pair(1, 2)]);

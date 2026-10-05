@@ -4,6 +4,7 @@ use super::*;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::collections::HashSet;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 fn config(metric: DistanceMetric) -> HnswConfig {
@@ -323,4 +324,73 @@ fn test_hnsw_build_clamps_unbounded_saved_parameters() {
     let index = HnswIndex::build(saved, rows.clone()).unwrap();
     let (_, q) = &rows[3];
     assert_eq!(index.search(q, 3, None, index.epoch()).unwrap().len(), 3);
+}
+
+#[test]
+fn test_hnsw_build_unless_stops_when_asked() {
+    let rows = random_rows(2000, 8, 5);
+    let asked = AtomicUsize::new(0);
+    let built = HnswIndex::build_unless(config(DistanceMetric::Cosine), rows.clone(), || {
+        asked.fetch_add(1, Ordering::Relaxed) >= 100
+    });
+    assert!(matches!(built, Err(BuildError::Stopped)));
+
+    let built = HnswIndex::build_unless(config(DistanceMetric::Cosine), rows, || false).unwrap();
+    assert_eq!(built.len(), 2000);
+}
+
+/// Regression (#377): `hnsw_rs` held a lock on a new vector's neighbour list
+/// while it waited for a neighbour's, so two inserts whose vectors listed each
+/// other hung a parallel build forever. Unpatched, many small builds at once
+/// on an oversubscribed pool hit it within a minute in a release build (a
+/// debug build is too slow to interleave enough), so this runs on demand:
+/// `HNSW_STRESS_SECS=60 taskset -c 0-3 cargo test --release --lib
+/// test_hnsw_concurrent_builds_never_hang -- --ignored`.
+#[test]
+#[ignore = "stress test: run in release on demand, see its doc"]
+fn test_hnsw_concurrent_builds_never_hang() {
+    let secs: u64 = std::env::var("HNSW_STRESS_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
+    // The scenario that hung: 100 vectors of dimension 8, metric cosine.
+    let rows: Vec<(TupleId, Vec<f32>)> = (0..100usize)
+        .map(|n| {
+            let v = (0..8)
+                .map(|d| ((n * 31 + d * 17) % 100) as f32 / 100.0)
+                .collect();
+            (n as TupleId, v)
+        })
+        .collect();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    let builds = Arc::new(AtomicUsize::new(0));
+    let (done, finished) = std::sync::mpsc::channel();
+    for _ in 0..8 {
+        let (rows, builds, done) = (rows.clone(), Arc::clone(&builds), done.clone());
+        std::thread::spawn(move || {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(4)
+                .build()
+                .unwrap();
+            while std::time::Instant::now() < until {
+                let index = pool
+                    .install(|| HnswIndex::build(config(DistanceMetric::Cosine), rows.clone()))
+                    .unwrap();
+                assert_eq!(index.len(), 100);
+                builds.fetch_add(1, Ordering::Relaxed);
+            }
+            done.send(()).unwrap();
+        });
+    }
+    for _ in 0..8 {
+        finished
+            .recv_timeout(std::time::Duration::from_secs(secs + 30))
+            .unwrap_or_else(|_| {
+                panic!(
+                    "a parallel build hung after {} builds",
+                    builds.load(Ordering::Relaxed)
+                )
+            });
+    }
+    println!("{} builds, none hung", builds.load(Ordering::Relaxed));
 }

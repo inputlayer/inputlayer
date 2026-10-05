@@ -141,7 +141,8 @@ impl MetaCommand {
     /// relations, rules, indexes, ontologies, users, credentials or access,
     /// or claims a backup destination and starts an export.
     /// Such a command is not interrupted once it starts, so a stopped request
-    /// never leaves it half done.
+    /// never leaves it half done; `.index create` and `.index rebuild` start
+    /// only once their index is built, so a stop during the build stops them.
     pub fn changes_durable_state(&self) -> bool {
         match self {
             Self::KgCreate(_)
