@@ -1,9 +1,11 @@
 name: CI
 
-# Fast gate: pull requests only. Format, clippy and
-# the unit + integration tests, skipped entirely when a change touches no
-# Rust inputs. The full suite runs on release commits or manually on main;
-# CONTRIBUTING describes the policy.
+# PR gate: pull requests only. Format, clippy, supply chain and one debug
+# build that runs the unit, integration, scenario and oracle tests and the
+# snapshot specs the change affects, skipped entirely when a change touches
+# no Rust inputs; the SDK unit suites when their inputs change. Pushes to
+# main run main.yml; the full suite runs on release commits or manually on
+# main. CONTRIBUTING describes the policy.
 
 on:
   pull_request:
@@ -56,14 +58,24 @@ jobs:
               - 'Makefile'
               - 'deny.toml'
               - '.cargo/audit.toml'
+              - 'scripts/run_snapshot_tests.sh'
+              - 'scripts/test-timings.sh'
               - '.github/workflows/ci.yml'
+            # The SDKs speak the wire protocol the engine defines, so a
+            # protocol change runs their suites too.
             python:
               - 'packages/inputlayer-py/**'
               - 'packages/conformance/**'
+              - 'ws-protocol/**'
+              - 'docs/spec/**'
+              - 'src/protocol/**'
               - '.github/workflows/ci.yml'
             js:
               - 'packages/inputlayer-js/**'
               - 'packages/conformance/**'
+              - 'ws-protocol/**'
+              - 'docs/spec/**'
+              - 'src/protocol/**'
               - '.github/workflows/ci.yml'
 
   fmt:
@@ -185,11 +197,15 @@ jobs:
           cargo audit --deny warnings
           cargo audit --deny warnings --file perf-gate/Cargo.lock
 
+  # One debug build serves every tier: cargo test runs the unit, integration,
+  # scenario (tests/scenarios) and oracle tests and leaves the server and
+  # client in target/debug, which the snapshot specs then run against.
+  # Budget: 10 minutes wall on this runner.
   # Skipped when the full suite covers this commit (a PR labeled `release`,
   # or one from a release/** branch of this repo), since its test job runs
   # the same cargo test.
   test:
-    name: Tests (fast)
+    name: Tests
     needs: changes
     if: >-
       needs.changes.outputs.rust == 'true' &&
@@ -206,6 +222,10 @@ jobs:
       CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The PR's merge commit and its parents: HEAD^1 is the base the
+          # affected specs are computed against.
+          fetch-depth: 2
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -223,8 +243,19 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-test-fast-v2-${{ hashFiles('**/Cargo.toml') }}
 
-      - name: Run unit + integration tests
-        run: make unit-test
+      # shell: bash adds pipefail, so tee does not hide a failing test.
+      - name: Run unit, integration, scenario and oracle tests
+        shell: bash
+        run: make unit-test 2>&1 | tee "$RUNNER_TEMP/cargo-test.log"
+
+      - name: Run affected snapshot specs (debug binaries)
+        run: ./scripts/run_snapshot_tests.sh --debug --skip-build --affected "$(git rev-parse HEAD^1)"
+
+      - name: Per-binary test times
+        if: always()
+        run: |
+          [ -f "$RUNNER_TEMP/cargo-test.log" ] || exit 0
+          ./scripts/test-timings.sh "$RUNNER_TEMP/cargo-test.log" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # The Python SDK's unit tests, including the connection core against a
   # mock server replaying packages/conformance. The live tests run in the
@@ -261,7 +292,7 @@ jobs:
 
   # The TypeScript SDK's unit tests (the connection core against a scripted
   # server replaying its frame fixtures) and its type check. The live tests
-  # run in the full suite (make js-test-live), which builds the engine.
+  # run on pushes to main (main.yml, make js-test-live).
   js-sdk:
     name: JS SDK
     needs: changes

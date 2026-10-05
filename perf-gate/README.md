@@ -184,7 +184,7 @@ running: the report records the load average at the start and end of a run,
 and an A/A run (`--aa`) shows whether noise fits the budgets. If you can, pin
 the servers with `--server-cpus` (`taskset -c`) and run the gate itself on
 other CPUs. Per-PR CI does not measure: a shared runner is too noisy to
-give a verdict, so the fast gate only lints and tests the tool
+give a verdict, so the PR gate only lints and tests the tool
 (`make perf-gate-check`).
 
 ## At release checkpoints
