@@ -370,12 +370,17 @@ concurrent password logins from one address are throttled by design.
   server CPU (user plus system, from `/proc`) over the loaded window, plus
   peak RSS.
 
-A run fails when a probe's delta does not arrive within 10 s, when any delta
-arrives that no probe caused, or on an error. `--max-delta-p99-ms`
+A probe waits 10 s for its delta. A delta that comes later still counts, as
+**late**: it is reported with its latency (`late_delta_ms`) but kept out of
+the latency summaries. Once the load stops, overdue probes get 60 s more.
+A run fails when a probe's delta never arrives (**missing**), when any delta
+arrives that no probe caused (**stray**), or on an error. A saturated server
+can be late, never missing or stray. `--max-delta-p99-ms`
 additionally fails the working tree's run at any size up to
 `--budget-sessions` whose loaded write-to-delta p99 is over budget.
 `target/bench-sessions/latest/` holds `result.json` (schema
-`inputlayer-perf-gate/sessions/v1`) and `summary.md`.
+`inputlayer-perf-gate/sessions/v2`; v1 counted late deltas as missing and
+then stray) and `summary.md`.
 
 ## Extending
 

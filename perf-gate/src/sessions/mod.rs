@@ -49,8 +49,13 @@ const KG: &str = "voice";
 /// A time far in the future (2100-01-01), for leases and speech windows.
 const FAR: u64 = 4_102_444_800_000;
 
-/// Longest wait for a probe's delta.
+/// Longest wait for a probe's delta before the next probe; a delta that
+/// arrives later still counts, as late.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long, after the load stops, overdue probes may still deliver their
+/// delta before they count as missing.
+const LATE_DRAIN: Duration = Duration::from_secs(60);
 
 const WARM_UP: Duration = Duration::from_secs(2);
 const PROBE_INTERVAL: Duration = Duration::from_millis(150);
@@ -169,8 +174,13 @@ pub struct Run {
     pub load_commit_ms: Summary,
     pub load_delta_ms: Summary,
     pub receipt_commit_ms: Summary,
-    /// Probes whose delta did not arrive within the timeout.
+    /// Probes whose delta never arrived, even after the load stopped and the
+    /// late drain ran out.
     pub missing_deltas: usize,
+    /// Probes whose delta arrived after the probe timeout (they are not in
+    /// the latency summaries; see `late_delta_ms`).
+    pub late_deltas: usize,
+    pub late_delta_ms: Summary,
     /// Deltas no probe caused (receipts change no result).
     pub stray_deltas: usize,
     pub peak_rss_kb: Option<u64>,
@@ -258,7 +268,7 @@ pub fn run(args: &SessionsArgs) -> Result<ExitCode> {
     }
     environment.loadavg_end = crate::environment::loadavg();
     let record = Record {
-        schema: "inputlayer-perf-gate/sessions/v1",
+        schema: "inputlayer-perf-gate/sessions/v2",
         created_unix: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs()),
@@ -351,6 +361,8 @@ async fn measure(
         load_delta_ms: Summary::default(),
         receipt_commit_ms: Summary::default(),
         missing_deltas: 0,
+        late_deltas: 0,
+        late_delta_ms: Summary::of(&[]),
         stray_deltas: 0,
         peak_rss_kb: None,
         error: None,
@@ -384,6 +396,26 @@ struct Bench {
     revision: u64,
     rng: u64,
     sessions: usize,
+    /// Probes that timed out, still waiting for their delta.
+    overdue: Vec<Overdue>,
+    /// Write-to-delta latency of the probes whose delta came late.
+    late: Vec<Duration>,
+}
+
+/// A timed-out probe: its session, the ETA its delta must carry, its start.
+struct Overdue {
+    session: usize,
+    eta: &'static str,
+    start: Instant,
+}
+
+/// Whether `push` is `session`'s delta carrying `eta` as a `state` row.
+fn carries(push: &Push, session: usize, eta: &str) -> bool {
+    push.session == session
+        && push.inserted.iter().any(|row| {
+            row.get(4).and_then(Value::as_str) == Some(eta)
+                && row.get(5).and_then(Value::as_str) == Some("state")
+        })
 }
 
 struct Probe {
@@ -454,6 +486,9 @@ impl Bench {
         }
         let window = started.elapsed();
         let cpu_end = server.cpu_seconds();
+        // Receipts stop; sessions keep forwarding deltas for the late drain.
+        rig.load.store(false, std::sync::atomic::Ordering::SeqCst);
+        bench.drain_overdue(&mut out.stray_deltas).await;
         rig.stop.send(true).ok();
         let mut receipts = Vec::new();
         for task in rig.tasks {
@@ -480,11 +515,9 @@ impl Bench {
         out.load_commit_ms = commits(&loaded);
         out.load_delta_ms = deltas(&loaded);
         out.receipt_commit_ms = Summary::of(&in_window);
-        out.missing_deltas = idle
-            .iter()
-            .chain(&loaded)
-            .filter(|p| p.delta.is_none())
-            .count();
+        out.missing_deltas = bench.overdue.len();
+        out.late_deltas = bench.late.len();
+        out.late_delta_ms = Summary::of(&bench.late);
         Ok(())
     }
 
@@ -557,6 +590,8 @@ impl Bench {
             revision: 1000,
             rng: 0x2545_F491_4F6C_DD1D,
             sessions,
+            overdue: Vec::new(),
+            late: Vec::new(),
         };
         Ok((bench, Rig { tasks, stop, load }))
     }
@@ -584,26 +619,56 @@ impl Bench {
         loop {
             match tokio::time::timeout_at(deadline, self.pushes.recv()).await {
                 Ok(Some(push)) => {
-                    let ours = push.session == session
-                        && push.inserted.iter().any(|row| {
-                            row.get(4).and_then(Value::as_str) == Some(eta)
-                                && row.get(5).and_then(Value::as_str) == Some("state")
-                        });
-                    if ours {
+                    if carries(&push, session, eta) {
                         return Ok(Probe {
                             commit: reply.at - start,
                             delta: Some(push.at - start),
                         });
                     }
-                    *stray += 1;
+                    self.settle(&push, stray);
                 }
                 Ok(None) => bail!("every session connection closed"),
                 Err(_) => {
+                    self.overdue.push(Overdue {
+                        session,
+                        eta,
+                        start,
+                    });
                     return Ok(Probe {
                         commit: reply.at - start,
                         delta: None,
-                    })
+                    });
                 }
+            }
+        }
+    }
+}
+
+impl Bench {
+    /// A push that is not the current probe's: an overdue probe's delta
+    /// (late), or stray.
+    fn settle(&mut self, push: &Push, stray: &mut usize) {
+        let owner = self
+            .overdue
+            .iter()
+            .position(|o| carries(push, o.session, o.eta));
+        match owner {
+            Some(index) => {
+                let overdue = self.overdue.swap_remove(index);
+                self.late.push(push.at - overdue.start);
+            }
+            None => *stray += 1,
+        }
+    }
+
+    /// With the load stopped, wait up to [`LATE_DRAIN`] for every overdue
+    /// probe's delta. What is still overdue afterwards is missing.
+    async fn drain_overdue(&mut self, stray: &mut usize) {
+        let deadline = tokio::time::Instant::now() + LATE_DRAIN;
+        while !self.overdue.is_empty() {
+            match tokio::time::timeout_at(deadline, self.pushes.recv()).await {
+                Ok(Some(push)) => self.settle(&push, stray),
+                Ok(None) | Err(_) => return,
             }
         }
     }
@@ -777,13 +842,17 @@ fn progress_line(run: &Run) -> String {
         return format!("{} {:>4} sessions: ERROR {error}", run.arm, run.sessions);
     }
     format!(
-        "{} {:>4} sessions: cpu {:.2} cores, write->delta p50/p99 {:.1}/{:.1} ms under load, {:.1} receipts/s",
+        "{} {:>4} sessions: cpu {:.2} cores, write->delta p50/p99 {:.1}/{:.1} ms under load, {:.1} receipts/s, {} late (max {:.0} ms), {} missing, {} stray",
         run.arm,
         run.sessions,
         run.server_cpu_cores,
         run.load_delta_ms.p50,
         run.load_delta_ms.p99,
         run.receipts_per_sec,
+        run.late_deltas,
+        run.late_delta_ms.max,
+        run.missing_deltas,
+        run.stray_deltas,
     )
 }
 
@@ -805,7 +874,7 @@ fn markdown(record: &Record) -> String {
         record.environment.loadavg_end,
     );
     out.push_str(
-        "| Arm | Sessions | Receipts/s | Server CPU (cores) | No load: write->delta p50 / p99 | Under load: write->delta p50 / p95 / p99 | Receipt commit p50 / p99 | Missing / stray |\n\
+        "| Arm | Sessions | Receipts/s | Server CPU (cores) | No load: write->delta p50 / p99 | Under load: write->delta p50 / p95 / p99 | Receipt commit p50 / p99 | Late (max) / missing / stray |\n\
          |---|---|---|---|---|---|---|---|\n",
     );
     for run in &record.runs {
@@ -819,7 +888,7 @@ fn markdown(record: &Record) -> String {
         }
         let _ = writeln!(
             out,
-            "| {} | {} | {:.1} | {:.2} | {:.1} / {:.1} ms | {:.1} / {:.1} / {:.1} ms | {:.1} / {:.1} ms | {} / {} |",
+            "| {} | {} | {:.1} | {:.2} | {:.1} / {:.1} ms | {:.1} / {:.1} / {:.1} ms | {:.1} / {:.1} ms | {} ({:.0} ms) / {} / {} |",
             run.arm,
             run.sessions,
             run.receipts_per_sec,
@@ -831,6 +900,8 @@ fn markdown(record: &Record) -> String {
             run.load_delta_ms.p99,
             run.receipt_commit_ms.p50,
             run.receipt_commit_ms.p99,
+            run.late_deltas,
+            run.late_delta_ms.max,
             run.missing_deltas,
             run.stray_deltas,
         );
