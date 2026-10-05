@@ -10,9 +10,11 @@
 //! committing is not interrupted: the wait continues until it finishes, and
 //! its result is what it committed.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use parking_lot::Mutex;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
@@ -30,6 +32,10 @@ const MAX_ADMISSION_WAIT: Duration = Duration::from_secs(30);
 /// How long a stopped computation may take to notice the stop before that
 /// is reported as a fault.
 const SLOW_EXIT: Duration = Duration::from_secs(1);
+
+/// How long large computations must have been quiet before the memory they
+/// freed is returned to the operating system; see [`MemoryReleaser`].
+const RELEASE_QUIET: Duration = Duration::from_secs(1);
 
 /// The wire code of a request stopped for `stop`.
 pub(crate) fn stop_code(stop: Stop) -> ErrorCode {
@@ -89,15 +95,61 @@ where
         let scope = ControlScope::enter(Arc::clone(&job_control));
         let result = job();
         drop(scope);
-        // A computation that held a lot hands what it freed back to the
-        // system before its permit admits the next one.
         if job_control.memory_peak() > memory::RELEASE_AFTER_PEAK_BYTES {
-            memory::release_freed_memory();
+            RELEASER.finished_large(RELEASE_QUIET, memory::release_freed_memory);
         }
         drop(permit);
         result
     });
     supervise(control, task).await
+}
+
+/// Returns the memory large computations freed to the operating system
+/// once they have been quiet for a while.
+///
+/// A computation that held more than [`memory::RELEASE_AFTER_PEAK_BYTES`]
+/// leaves what it freed in the allocator, so a server that once ran a query
+/// to its memory limit would stay that large. Returning it right after every
+/// such computation cost each one about 50 ms (issue #384: the purge, then
+/// the next computation faulting the same pages back in), a fifth of a
+/// recursive read over 100K edges. So the release waits until no large
+/// computation has finished for [`RELEASE_QUIET`]: a stream of large reads
+/// keeps reusing its pages, and the memory goes back within a second of the
+/// last one. Resident memory meanwhile is bounded as before, by the memory
+/// limits the computations ran under.
+struct MemoryReleaser {
+    /// When the latest large computation finished.
+    last_large: Mutex<Option<Instant>>,
+    /// Whether a release is waiting for the quiet period.
+    scheduled: AtomicBool,
+}
+
+static RELEASER: MemoryReleaser = MemoryReleaser {
+    last_large: Mutex::new(None),
+    scheduled: AtomicBool::new(false),
+};
+
+impl MemoryReleaser {
+    /// Note that a large computation finished now; `release` runs on the
+    /// blocking pool once none has finished for `quiet`. Called within a
+    /// Tokio runtime.
+    fn finished_large(&'static self, quiet: Duration, release: fn()) {
+        *self.last_large.lock() = Some(Instant::now());
+        if self.scheduled.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        tokio::spawn(async move {
+            loop {
+                let due = self.last_large.lock().unwrap_or_else(Instant::now) + quiet;
+                if Instant::now() >= due {
+                    break;
+                }
+                tokio::time::sleep_until(due.into()).await;
+            }
+            self.scheduled.store(false, Ordering::Release);
+            let _ = tokio::task::spawn_blocking(release).await;
+        });
+    }
 }
 
 /// The thread's request control for one job; cleared on drop, panics
@@ -236,7 +288,7 @@ async fn report_exit<T>(mut task: JoinHandle<T>, stop: Stop) {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::AtomicUsize;
 
     fn permits(n: usize) -> Arc<Semaphore> {
         Arc::new(Semaphore::new(n))
@@ -354,5 +406,34 @@ mod tests {
         let result = run_blocking(&permits, &control, || Ok(7)).await;
         assert_eq!(result.unwrap(), 7);
         assert_eq!(control.cancel(), crate::execution::Halt::TooLate);
+    }
+
+    /// Large computations finishing back to back share one release, which
+    /// waits until they have been quiet; a later one schedules another.
+    #[tokio::test]
+    async fn freed_memory_is_released_once_large_computations_go_quiet() {
+        static RELEASED: AtomicUsize = AtomicUsize::new(0);
+        static RELEASER: MemoryReleaser = MemoryReleaser {
+            last_large: Mutex::new(None),
+            scheduled: AtomicBool::new(false),
+        };
+        fn release() {
+            RELEASED.fetch_add(1, Ordering::SeqCst);
+        }
+        let quiet = Duration::from_millis(100);
+        let started = Instant::now();
+        for _ in 0..5 {
+            RELEASER.finished_large(quiet, release);
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+        // Still busy: the fifth finished 30 ms ago.
+        assert_eq!(RELEASED.load(Ordering::SeqCst), 0);
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(RELEASED.load(Ordering::SeqCst), 1);
+        assert!(started.elapsed() >= 4 * Duration::from_millis(30) + quiet);
+
+        RELEASER.finished_large(quiet, release);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(RELEASED.load(Ordering::SeqCst), 2);
     }
 }

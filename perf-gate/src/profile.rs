@@ -18,6 +18,7 @@ pub struct Profile {
     pub delta_keyed: KeyedParams,
     pub interference: InterferenceParams,
     pub shop_install: ShopParams,
+    pub recursive_query: RecursiveParams,
     /// The engine suite's fixtures (not gated; see `fixtures::engine`).
     pub engine: EngineParams,
 }
@@ -93,6 +94,14 @@ pub struct InterferenceParams {
 pub struct ShopParams {
     /// Installs per round, each into a graph of its own.
     pub installs: usize,
+}
+
+/// Serial reads of a whole deployed recursive view over a graph of `edges`.
+#[derive(Debug, Clone, Serialize)]
+pub struct RecursiveParams {
+    pub edges: usize,
+    pub warmup: usize,
+    pub serial: usize,
 }
 
 /// Parameters of the engine suite: the cases the gate's fixtures leave out.
@@ -302,6 +311,11 @@ impl Profile {
             },
             // The policy's p50 ceiling needs `min_samples_p50` per round.
             shop_install: ShopParams { installs: 20 },
+            recursive_query: RecursiveParams {
+                edges: 100_000,
+                warmup: 3,
+                serial: 25,
+            },
             engine: EngineParams::standard(),
         }
     }
@@ -327,6 +341,8 @@ impl Profile {
         profile.delta_keyed.writes /= 4;
         profile.interference.delta.writes /= 5;
         profile.shop_install.installs /= 4;
+        profile.recursive_query.warmup = 1;
+        profile.recursive_query.serial /= 5;
         let engine = &mut profile.engine;
         for query in [&mut engine.rule_query, &mut engine.unbound_query] {
             query.warmup = 1;

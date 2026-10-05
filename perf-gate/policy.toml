@@ -51,6 +51,9 @@ required = [
     "delta_keyed.delta_us.p99",
     "delta_keyed.ack_us.p99",
     "delta_keyed.writes_per_server_cpu_sec",
+    # Whole deployed recursive view over 100K edges (25 samples per round:
+    # p50 only).
+    "recursive_query.latency_us.p50",
 ]
 
 # Largest allowed cost increase of the candidate over the baseline.

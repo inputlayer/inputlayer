@@ -89,6 +89,7 @@ other benchmark there should hold it too (`flock`), and `--wait-lock
 | `delta_first` | 40 fresh agents, one after another, on the `delta_single` graph: each subscribes and the writer inserts a probe at once, then another after the agent has been quiet for 100 ms | `first_delta_us` (first write after subscribing, send to delta), `warm_delta_us` (the later write), `subscribe_us` |
 | `delta_keyed` | 300 agents, agent `k` subscribed to `?r1(H_k, Y)` of the deployed rule `r1(X, Y) <- edge(X, Y), label(X, "hot")` over 100K edges (four-node chains, every hundredth head `H` labelled hot); an external writer, open loop, every 20 ms, 120 writes, write `w` adding one row to agent `w mod 300` | `delta_us` (scheduled write to delta at its agent), `ack_us`, `subscribe_us`, `writes_per_server_cpu_sec` (writes per second of server CPU over the write phase) |
 | `interference` | 1 probe agent while another connection loops a long join (`?two_hop(X, Z), edge(Z, X)`) and a slow consumer stops reading with large results pending; a write every 30 ms, 120 writes | `delta_us`, `ack_us`, `long_request_us` |
+| `recursive_query` | `?hot_reach(X, Y)` of the deployed rules `path` (the right-recursive transitive closure) and `hot_reach(X, Y) <- label(X, "hot"), path(X, Y)` over 100K edges (the `delta_keyed` graph): 25 serial | `latency_us` |
 
 Each fixture also records `server_peak_rss_kb`.
 
@@ -116,6 +117,12 @@ many times the server CPU long before the deltas arrive late (issue #378:
 66 times at 1M edges and 1,000 keys), which `writes_per_server_cpu_sec`
 shows on an idle host too.
 
+`recursive_query` is the unbound recursive read of the views benchmark: the
+whole closure (200K rows) is evaluated for an answer of 1,002 rows, so its
+latency is the engine's recursion. The runaway-query guards once cost it 20%
+(issue #384); a read this size takes about a quarter of a second, so a round
+has enough samples for p50 only.
+
 The `quick` profile is for developing the gate. It has too few samples for
 p99 and therefore never passes.
 
@@ -126,7 +133,7 @@ durable inserts and write-to-delta latency. The engine suite measures what
 they leave out, with the same harness, servers and correctness checks. Its
 fixtures are not in the policy's `required` set: they are measured and
 reported, not gated. `--fixtures engine` runs them, `--fixtures all` runs
-both groups, and the default stays the gate's nine.
+both groups, and the default stays the gate's eleven.
 
 | Fixture | Workload (profile `standard`) | Series / rates / gauges |
 |---|---|---|

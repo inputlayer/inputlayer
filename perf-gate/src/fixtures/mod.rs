@@ -8,6 +8,7 @@ mod insert;
 mod interference;
 mod keyed;
 mod query;
+mod recursive;
 mod shop;
 
 use std::collections::BTreeMap;
@@ -47,6 +48,8 @@ pub enum Fixture {
     /// The scenario suite's shop pack installed into a fresh graph; held to
     /// an absolute ceiling (`policy.toml`), not to the baseline.
     ShopInstall,
+    /// Whole deployed recursive view over 100K edges (`?hot_reach(X, Y)`).
+    RecursiveQuery,
     // The engine suite (not gated; see `engine`).
     /// Warm bound non-recursive rule (`?two_hop(1, Z)`).
     RuleQuery,
@@ -72,7 +75,7 @@ pub enum Fixture {
 
 impl Fixture {
     /// Every fixture, by name.
-    pub const ALL: [Fixture; 20] = [
+    pub const ALL: [Fixture; 21] = [
         Fixture::CheapQuery,
         Fixture::BoundQuery,
         Fixture::InsertSingle,
@@ -83,6 +86,7 @@ impl Fixture {
         Fixture::DeltaKeyed,
         Fixture::Interference,
         Fixture::ShopInstall,
+        Fixture::RecursiveQuery,
         Fixture::RuleQuery,
         Fixture::UnboundQuery,
         Fixture::Writes,
@@ -96,7 +100,7 @@ impl Fixture {
     ];
 
     /// The gate's fixtures: the default of `run`, and what the policy judges.
-    pub const GATE: [Fixture; 10] = [
+    pub const GATE: [Fixture; 11] = [
         Fixture::CheapQuery,
         Fixture::BoundQuery,
         Fixture::InsertSingle,
@@ -107,6 +111,7 @@ impl Fixture {
         Fixture::DeltaKeyed,
         Fixture::Interference,
         Fixture::ShopInstall,
+        Fixture::RecursiveQuery,
     ];
 
     pub fn name(self) -> &'static str {
@@ -121,6 +126,7 @@ impl Fixture {
             Fixture::DeltaKeyed => "delta_keyed",
             Fixture::Interference => "interference",
             Fixture::ShopInstall => "shop_install",
+            Fixture::RecursiveQuery => "recursive_query",
             Fixture::RuleQuery => "rule_query",
             Fixture::UnboundQuery => "unbound_query",
             Fixture::Writes => "writes",
@@ -180,6 +186,7 @@ impl Fixture {
             Fixture::DeltaKeyed => keyed::run(server, &profile.delta_keyed).await,
             Fixture::Interference => interference::run(server, &profile.interference).await,
             Fixture::ShopInstall => shop::install(server, &profile.shop_install).await,
+            Fixture::RecursiveQuery => recursive::run(server, &profile.recursive_query).await,
             Fixture::RuleQuery => engine::rule_query(server, &engine.rule_query).await,
             Fixture::UnboundQuery => engine::unbound_query(server, &engine.unbound_query).await,
             Fixture::Writes => engine::writes(server, &engine.writes).await,
@@ -247,6 +254,31 @@ async fn load(client: &mut Client, graph: &Graph, rules: &[&str]) -> Result<()> 
         client.execute(rule).await.context("define rule")?;
     }
     Ok(())
+}
+
+/// The `i`-th hot chain head of [`load_hot_chains`]: the head of every
+/// hundredth chain.
+fn hot_head(i: u64) -> u64 {
+    4 * 100 * i
+}
+
+/// Load `chains` chains of four nodes into `edge` and label every hundredth
+/// chain head hot (`label(H, "hot")`); returns the number of hot heads.
+async fn load_hot_chains(client: &mut Client, chains: u64) -> Result<u64> {
+    for program in Graph::chains(chains).insert_programs("edge") {
+        client.execute(&program).await.context("load edges")?;
+    }
+    let hot = chains.div_ceil(100);
+    let labels: Vec<String> = (0..hot)
+        .map(|i| format!("({}, \"hot\")", hot_head(i)))
+        .collect();
+    for chunk in labels.chunks(5_000) {
+        client
+            .execute(&format!("+label[{}]", chunk.join(", ")))
+            .await
+            .context("load labels")?;
+    }
+    Ok(hot)
 }
 
 /// Fail unless a reply carried exactly `expected` rows.

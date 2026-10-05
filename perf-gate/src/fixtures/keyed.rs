@@ -21,9 +21,8 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, ensure, Context, Result};
 use tokio::task::JoinHandle;
 
-use super::{create_kg, elapsed_us, expect_rows, Measurement};
+use super::{create_kg, elapsed_us, expect_rows, hot_head, load_hot_chains, Measurement};
 use crate::client::{Client, Frame, Stamped};
-use crate::dataset::Graph;
 use crate::profile::KeyedParams;
 use crate::server::RunningServer;
 
@@ -41,11 +40,6 @@ struct Keys {
 }
 
 impl Keys {
-    /// The `i`-th hot chain head: the head of every hundredth chain.
-    fn hot_head(i: u64) -> u64 {
-        4 * 100 * i
-    }
-
     /// Hot chain heads in the graph.
     fn hot(self) -> u64 {
         self.chains.div_ceil(100)
@@ -67,7 +61,7 @@ impl Keys {
     }
 
     fn program(self, write: usize) -> String {
-        let head = Self::hot_head(self.key_of_write(write) as u64);
+        let head = hot_head(self.key_of_write(write) as u64);
         format!("+edge({head}, {})", self.fresh(write))
     }
 }
@@ -85,25 +79,14 @@ pub async fn run(server: &RunningServer, params: &KeyedParams) -> Result<Measure
         keys.hot()
     );
     let mut writer = create_kg(server).await?;
-    for program in Graph::chains(keys.chains).insert_programs("edge") {
-        writer.execute(&program).await.context("load edges")?;
-    }
-    let labels: Vec<String> = (0..keys.hot())
-        .map(|i| format!("({}, \"hot\")", Keys::hot_head(i)))
-        .collect();
-    for chunk in labels.chunks(5_000) {
-        writer
-            .execute(&format!("+label[{}]", chunk.join(", ")))
-            .await
-            .context("load labels")?;
-    }
+    load_hot_chains(&mut writer, keys.chains).await?;
     writer.execute(RULE).await.context("define rule")?;
 
     let mut subscribe_us = Vec::with_capacity(params.keys);
     let mut agents = Vec::with_capacity(params.keys);
     for key in 0..params.keys {
         let mut agent = server.client(super::KG).await?;
-        let head = Keys::hot_head(key as u64);
+        let head = hot_head(key as u64);
         let (sent, reply) = agent
             .execute(&format!(".subscribe k{key} ?r1({head}, Y)"))
             .await?;
@@ -177,7 +160,7 @@ async fn collect(
     key: usize,
     expected: Vec<usize>,
 ) -> Result<Vec<(usize, Instant)>> {
-    let head = Keys::hot_head(key as u64);
+    let head = hot_head(key as u64);
     let mut arrivals = Vec::with_capacity(expected.len());
     while arrivals.len() < expected.len() {
         let Stamped { at, frame } = agent.next_push().await?;

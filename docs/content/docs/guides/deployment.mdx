@@ -737,8 +737,10 @@ Three limits keep the server inside that memory and refuse work with
 The query limits hold while a query computes, not only between its steps:
 the evaluator checks them every few thousand rows a join forms, so even a
 join pairing millions of rows in one step is stopped a few hundred KB past
-its limit. After a query that held a lot of memory, the server returns what
-it freed to the operating system.
+its limit. After queries that held a lot of memory, the server returns what
+they freed to the operating system once no such query has finished for a
+second: a stream of large reads keeps reusing its pages instead of paying to
+return them and fault them back in on every read.
 
 `max_query_cost` (default 100,000,000) refuses with `validation`, before it
 runs, a query whose plan joins relations on no shared variable into a cross
