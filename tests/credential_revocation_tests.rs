@@ -58,7 +58,7 @@ async fn start_server_with(configure: impl FnOnce(&mut Config)) -> Server {
     config.http.gui.enabled = false;
     configure(&mut config);
     let handler = Arc::new(Handler::from_config(config).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     handler.get_storage().create_knowledge_graph(KG).unwrap();
     handler
         .handle_user_create("bob", BOB_PASSWORD, "editor")
@@ -135,7 +135,7 @@ async fn failed_replacement_leaves_credentials_intact_over_ws() {
                 )
                 .unwrap();
             let argument = if operation == "password" {
-                "new-pw"
+                "new-password"
             } else {
                 "admin"
             };
@@ -176,7 +176,7 @@ async fn failed_replacement_leaves_credentials_intact_over_ws() {
                     Err(error) => panic!("restart failed: {error}"),
                 }
             };
-            handler.bootstrap_auth();
+            handler.bootstrap_auth().unwrap();
             let app = create_router(Arc::clone(&handler), &handler.config().http);
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let addr = listener.local_addr().unwrap();
@@ -354,7 +354,7 @@ async fn password_change_ends_sessions_on_the_old_password_only() {
 
     server
         .handler
-        .handle_user_password("bob", "rotated")
+        .handle_user_password("bob", "rotated-password")
         .unwrap();
 
     assert_revoked(&old_password.drain().await);
@@ -362,7 +362,7 @@ async fn password_change_ends_sessions_on_the_old_password_only() {
     other_user.assert_live().await;
     let (_, reply) = Client::try_connect(&server, KG, Login::Password("bob", BOB_PASSWORD)).await;
     assert_eq!(reply["type"], "auth_error", "{reply}");
-    Client::connect(&server, Login::Password("bob", "rotated"))
+    Client::connect(&server, Login::Password("bob", "rotated-password"))
         .await
         .assert_live()
         .await;
@@ -381,10 +381,10 @@ async fn revoking_your_own_credential_withholds_the_reply() {
 
     let mut client = Client::connect(&server, Login::Password("admin", ADMIN_PASSWORD)).await;
     client
-        .send(json!({"type": "execute", "program": ".user password admin changed-pw"}))
+        .send(json!({"type": "execute", "program": ".user password admin changed-password"}))
         .await;
     assert_revoked(&client.drain().await);
-    Client::connect(&server, Login::Password("admin", "changed-pw")).await;
+    Client::connect(&server, Login::Password("admin", "changed-password")).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -568,14 +568,22 @@ async fn revocation_fences_a_subscription_held_at_the_result_cap() {
 }
 
 /// A completed `.why` proof must still pass the credential fence before output.
-/// Use the current-thread runtime so the thread-local trace subscriber also
-/// observes the server task, and revoke synchronously at its output boundary.
+/// Use the current-thread runtime so the server task runs on the test's thread,
+/// and revoke synchronously at its output boundary. The trace subscriber is
+/// global and acts only on that thread: a thread-local one is the only
+/// dispatcher, so another test's thread reaching an event first caches it as
+/// disabled everywhere, and the hook would never run.
 #[tokio::test]
 async fn revocation_during_a_proof_withholds_it() {
+    use std::sync::Mutex;
+    use std::thread::ThreadId;
     use tracing::field::{Field, Visit};
     use tracing_subscriber::prelude::*;
 
-    struct RevokeBeforeOutput(Arc<Handler>);
+    /// The thread whose next execution end revokes the handler's `bob-why`.
+    static ARMED: Mutex<Option<(ThreadId, Arc<Handler>)>> = Mutex::new(None);
+
+    struct RevokeBeforeOutput;
 
     #[derive(Default)]
     struct ExecutionEnd {
@@ -605,10 +613,17 @@ async fn revocation_during_a_proof_withholds_it() {
         ) {
             let mut end = ExecutionEnd::default();
             event.record(&mut end);
-            if end.matched {
-                assert!(end.succeeded, "proof evaluation failed before the fence");
-                self.0.handle_apikey_revoke("bob-why").unwrap();
+            if !end.matched {
+                return;
             }
+            let mut armed = ARMED.lock().unwrap();
+            if !matches!(&*armed, Some((thread, _)) if *thread == std::thread::current().id()) {
+                return;
+            }
+            let (_, handler) = armed.take().unwrap();
+            drop(armed);
+            assert!(end.succeeded, "proof evaluation failed before the fence");
+            handler.handle_apikey_revoke("bob-why").unwrap();
         }
     }
 
@@ -628,9 +643,16 @@ async fn revocation_during_a_proof_withholds_it() {
     // The event runs after evaluation but before any response frame is enqueued.
     // Blocking there until revocation completes removes assumptions about proof
     // duration, scheduling, and the time needed to persist the credential change.
-    let subscriber =
-        tracing_subscriber::registry().with(RevokeBeforeOutput(Arc::clone(&server.handler)));
-    let _guard = tracing::subscriber::set_default(subscriber);
+    // Enable only the execution's events, so other tests' code stays untraced.
+    let execution = tracing_subscriber::filter::Targets::new().with_target(
+        "inputlayer::protocol::rest::handlers::ws::execute",
+        tracing::Level::INFO,
+    );
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry().with(RevokeBeforeOutput.with_filter(execution)),
+    )
+    .expect("no other global subscriber");
+    *ARMED.lock().unwrap() = Some((std::thread::current().id(), Arc::clone(&server.handler)));
     client
         .send(json!({"type": "execute", "program": proof}))
         .await;

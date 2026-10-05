@@ -346,6 +346,10 @@ pub struct ProgramCommit {
     /// The snapshot the program committed against: the KG as published just
     /// before its changes, on which its reads were validated to still hold.
     pub base: Arc<KnowledgeGraphSnapshot>,
+    /// Revision of the snapshot the commit published, the one standing
+    /// queries refresh at; when the program changed nothing, the revision of
+    /// the KG's current snapshot, which already holds its effect.
+    pub revision: u64,
 }
 
 /// Why a write program was not committed. In every case but
@@ -356,6 +360,9 @@ pub enum CommitError {
     /// The KG published a new snapshot after the program read it. Stage the
     /// program again against the current snapshot.
     Stale,
+    /// The request's [`Precondition`](super::Precondition) does not hold on
+    /// the KG's current state. Staging again cannot change that.
+    Precondition(super::PreconditionError),
     /// The request was stopped (deadline or cancel) before the commit began.
     Cancelled(Stop),
     /// Statement `statement` cannot apply to the KG's current state.
@@ -403,6 +410,7 @@ impl CommitError {
                     .to_string(),
             ),
             Self::Cancelled(stop) => StorageError::Other(stop.message().to_string()),
+            Self::Precondition(error) => StorageError::Other(error.to_string()),
         }
     }
 }

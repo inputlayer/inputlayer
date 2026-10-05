@@ -43,13 +43,15 @@
 //! an atom that reads, under the current rules, a recursive relation: the
 //! constant lets Magic Sets restrict the work, and the lifted query may
 //! compute the whole closure. Otherwise, once it has a view's own cost to
-//! compare with, a family probes: it evaluates a round no view waits for,
-//! under the server's probe permit rather than a compute permit, and starts
-//! sharing only when that round is fast enough. With too few compute permits
-//! for that, a family shares without a probe. It stops when rounds are
-//! slower on average, and probes (or decides) again after some commits,
-//! waiting longer after each failure. While sharing, a view evaluates its
-//! own query now and then to keep that cost current.
+//! compare with, a family probes: it evaluates the round of that revision,
+//! which no view waits for, under the server's probe permit rather than a
+//! compute permit, and starts sharing only when that round is fast enough.
+//! Views that then share at the probe's revision read the probe's round, so
+//! the lifted query is evaluated at most once per revision. With too few
+//! compute permits for that, a family shares without a probe. It stops when
+//! rounds are slower on average, and probes (or decides) again after some
+//! commits, waiting longer after each failure. While sharing, a view
+//! evaluates its own query now and then to keep that cost current.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -551,8 +553,12 @@ impl Family {
         }
     }
 
-    async fn outcome(&self, round: &Round) -> Result<Arc<Partitions>, String> {
-        round
+    /// The outcome of `round`, evaluating it, as a `probe` or for views
+    /// waiting on it, unless another caller did or is doing so. A round the
+    /// family does not share once judged, too slow or failed, is let go: no
+    /// view reads it, so its rows must not stay around until the next probe.
+    async fn outcome(&self, round: &Arc<Round>, probe: bool) -> Result<Arc<Partitions>, String> {
+        let outcome = round
             .outcome
             .get_or_init(|| async {
                 // An evaluation cancelled after taking the snapshot leaves
@@ -565,10 +571,14 @@ impl Family {
                         .get_snapshot_for(&self.knowledge_graph)
                         .map_err(|e| format!("Knowledge graph '{}': {e}", self.knowledge_graph))?,
                 };
-                self.evaluate(snapshot, false).await
+                self.evaluate(snapshot, probe).await
             })
             .await
-            .clone()
+            .clone();
+        if !self.sharing.load(Ordering::Relaxed) {
+            let _ = self.latest.compare_and_swap(&Some(Arc::clone(round)), None);
+        }
+        outcome
     }
 
     /// Evaluate a round at `snapshot`, as a `probe` or for views waiting on
@@ -583,7 +593,17 @@ impl Family {
             self.sharing.store(false, Ordering::Relaxed);
             return Err("a parameter binds a recursive relation".to_string());
         }
+        let judged = self.evaluate_and_judge(snapshot, probe).await;
+        // Counted once judged: whoever sees the count sees the verdict.
         self.metrics.record_shared_evaluation();
+        judged
+    }
+
+    async fn evaluate_and_judge(
+        &self,
+        snapshot: Arc<KnowledgeGraphSnapshot>,
+        probe: bool,
+    ) -> Result<Arc<Partitions>, String> {
         let rules = Arc::clone(snapshot.persistent_rules());
         let dependencies = Dependencies::for_query(&self.shape.goal, &snapshot.rules);
         let revision = snapshot.revision;
@@ -617,7 +637,9 @@ impl Family {
         if let Some(shared) = shared {
             let bindings = self.bindings.load(Ordering::Relaxed) as u64;
             let permits = self.handler.compute_permits() as u64;
-            if !keeps_sharing(shared, own, bindings, permits) {
+            let keeps = self.handler.shares_regardless_of_cost()
+                || keeps_sharing(shared, own, bindings, permits);
+            if !keeps {
                 debug!(
                     query = %self.shape.query,
                     shared_us = shared,
@@ -722,10 +744,11 @@ impl Family {
             && (stops == 0 || since_stop >= probe_after(bindings, stops))
     }
 
-    /// Evaluate a round at `snapshot` that no view waits for, at most one at
-    /// a time, under the server's probe permit: the guard judging it decides
-    /// whether views share. With too few compute permits to spare the CPU,
-    /// share without one.
+    /// Evaluate the round at `snapshot`, which no view waits for, at most one
+    /// probe at a time, under the server's probe permit: the guard judging
+    /// it decides whether views share, and views that then share at its
+    /// revision read it, while a round judged too slow is let go. With too
+    /// few compute permits to spare the CPU, share without one.
     fn probe(family: &Arc<Family>, snapshot: Arc<KnowledgeGraphSnapshot>) {
         if family.handler.compute_permits() < MIN_PERMITS_FOR_PROBES {
             family.start_sharing(snapshot.persistent_rules());
@@ -734,11 +757,12 @@ impl Family {
         if family.probing.swap(true, Ordering::Relaxed) {
             return;
         }
+        let round = family.round_for(snapshot);
         let family = Arc::clone(family);
         tokio::spawn(async move {
             #[cfg(test)]
             let gate = family.probe_gate.read().await;
-            let _ = family.evaluate(snapshot, true).await;
+            let _ = family.outcome(&round, true).await;
             #[cfg(test)]
             drop(gate);
             family.probing.store(false, Ordering::Relaxed);
@@ -837,7 +861,7 @@ impl MemberQuery {
             .is_some_and(|rules| Arc::ptr_eq(rules, snapshot.persistent_rules()));
         if validated && self.family.shares() && !self.family.takes_sample() {
             let round = self.family.round_for(snapshot);
-            if let Ok(partitions) = self.family.outcome(&round).await {
+            if let Ok(partitions) = self.family.outcome(&round, false).await {
                 if let Some(evaluated) = self.read(&partitions) {
                     return Ok(self.own.adopt(evaluated));
                 }

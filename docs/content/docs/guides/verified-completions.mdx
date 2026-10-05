@@ -23,8 +23,8 @@ services:
     volumes:
       - inputlayer-data:/var/lib/inputlayer/data
     environment:
-      INPUTLAYER_ADMIN_PASSWORD: ${INPUTLAYER_ADMIN_PASSWORD:-}
-      INPUTLAYER_BOOTSTRAP_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
+      INPUTLAYER_ADMIN_PASSWORD: ${INPUTLAYER_ADMIN_PASSWORD:?Set INPUTLAYER_ADMIN_PASSWORD (at least 12 characters)}
+      INPUTLAYER_BOOTSTRAP_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:?Set INPUTLAYER_BOOTSTRAP_API_KEY (at least 12 characters)}
       INPUTLAYER_HTTP__HOST: "0.0.0.0"
 
   gateway:
@@ -34,9 +34,9 @@ services:
       - "8081:8081"
     environment:
       GATEWAY_HOST: "0.0.0.0"
-      GATEWAY_API_KEY: ${GATEWAY_API_KEY:-}
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:?Set GATEWAY_API_KEY}
       INPUTLAYER_URL: "http://inputlayer:8080"
-      INPUTLAYER_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
+      INPUTLAYER_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:?Set INPUTLAYER_BOOTSTRAP_API_KEY (at least 12 characters)}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - gateway-cache:/var/lib/inputlayer
@@ -49,14 +49,14 @@ volumes:
 ```
 
 ```bash
-export INPUTLAYER_ADMIN_PASSWORD=change-me
+export INPUTLAYER_ADMIN_PASSWORD=$(openssl rand -hex 16)   # at least 12 characters
 export INPUTLAYER_BOOTSTRAP_API_KEY=$(openssl rand -hex 16)
 export GATEWAY_API_KEY=$(openssl rand -hex 16)
 export ANTHROPIC_API_KEY=sk-ant-...   # your model provider key
 docker compose up -d
 ```
 
-`GATEWAY_API_KEY` is what your applications present to the gateway - in the OpenAI SDK it is simply `api_key`. Left unset, the gateway runs open with a loud warning: acceptable on a private network, never on a public one.
+`GATEWAY_API_KEY` is what your applications present to the gateway - in the OpenAI SDK it is simply `api_key`. Compose refuses to start without these secrets. Run without `GATEWAY_API_KEY` outside Compose and the gateway runs open with a loud warning: acceptable on a private network, never on a public one.
 
 ### Choosing the model provider
 

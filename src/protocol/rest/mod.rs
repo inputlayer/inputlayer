@@ -604,7 +604,7 @@ mod tests {
         config.storage.data_dir = tmp.path().to_path_buf();
         config.http.gui.enabled = false;
         let handler = Arc::new(Handler::from_config(config).unwrap());
-        handler.bootstrap_auth();
+        handler.bootstrap_auth().unwrap();
         (handler, tmp)
     }
 

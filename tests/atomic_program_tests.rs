@@ -252,9 +252,25 @@ async fn failed_pack_installation_applies_nothing() {
     assert!(rows(&handler, "?pack_meta(N, V, D)").await.is_empty());
 
     registry(packs.path(), &format!("{MIGRATION}\n"));
-    run(&handler, ".ontology install mini")
+    let installed = run(&handler, ".ontology install mini")
         .await
-        .expect("install");
+        .expect("install")
+        .revision
+        .expect("install revision");
     assert_eq!(rows(&handler, "?adult(N)").await, ["[String(\"ann\")]"]);
     assert_eq!(rows(&handler, "?pack_meta(N, V, D)").await.len(), 1);
+    // A write that changes nothing names the current revision: the install's.
+    let current = run(&handler, "+person[(\"ann\", 30)]").await.unwrap();
+    assert_eq!(current.revision, Some(installed));
+
+    let removed = run(&handler, ".ontology remove mini")
+        .await
+        .expect("remove")
+        .revision
+        .expect("remove revision");
+    assert!(removed > installed);
+    let current = run(&handler, "-pack_meta(N, V, D) <- pack_meta(N, V, D)")
+        .await
+        .unwrap();
+    assert_eq!(current.revision, Some(removed));
 }

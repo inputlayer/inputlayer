@@ -199,6 +199,8 @@ pub struct Handler {
     /// Permits of standing-query sharing probes, apart from the compute
     /// permits so that a probe never takes one a query waits for.
     probe_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Whether standing-query families share whatever their rounds cost.
+    share_regardless_of_cost: bool,
     /// Memory held by the computations of every request in flight.
     query_memory: Arc<QueryMemoryPool>,
     /// Accumulated timing histogram buckets for Prometheus export.
@@ -235,39 +237,38 @@ mod index_commands {
         storage: &StorageEngine,
         kg: &str,
         opts: &IndexCreateOptions,
-    ) -> Result<String, ProgramError> {
-        let stats = storage
+    ) -> Result<(String, u64), ProgramError> {
+        let (stats, revision) = storage
             .create_index_in(kg, opts)
             .map_err(ProgramError::from)?;
-        Ok(format!(
+        let message = format!(
             "Index '{}' created on {}.{} ({} vectors).",
             stats.name, stats.relation, stats.column, stats.tuple_count
-        ))
+        );
+        Ok((message, revision))
     }
 
     pub(super) fn drop(
         storage: &StorageEngine,
         kg: &str,
         name: &str,
-    ) -> Result<String, ProgramError> {
-        storage
+    ) -> Result<(String, u64), ProgramError> {
+        let revision = storage
             .drop_index_in(kg, name)
             .map_err(ProgramError::from)?;
-        Ok(format!("Index '{name}' dropped."))
+        Ok((format!("Index '{name}' dropped."), revision))
     }
 
     pub(super) fn rebuild(
         storage: &StorageEngine,
         kg: &str,
         name: &str,
-    ) -> Result<String, ProgramError> {
-        let stats = storage
+    ) -> Result<(String, u64), ProgramError> {
+        let (stats, revision) = storage
             .rebuild_index_in(kg, name)
             .map_err(ProgramError::from)?;
-        Ok(format!(
-            "Index '{name}' rebuilt ({} vectors).",
-            stats.tuple_count
-        ))
+        let message = format!("Index '{name}' rebuilt ({} vectors).", stats.tuple_count);
+        Ok((message, revision))
     }
 
     pub(super) fn stats(
@@ -583,6 +584,10 @@ mod proof_snapshot_tests;
 mod pinned_proof_tests;
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod expect_revision_tests;
+
+#[cfg(test)]
 mod revocation_tests;
 
 #[cfg(test)]
@@ -862,6 +867,7 @@ impl ProofSnapshot {
             ),
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 
@@ -914,6 +920,7 @@ impl ProofSnapshot {
             timing_breakdown: proof_timing(timing_mode, start, query_us, "explanation", explain_us),
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 }
@@ -997,6 +1004,7 @@ impl Handler {
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
+            share_regardless_of_cost: false,
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
@@ -1013,6 +1021,7 @@ impl Handler {
     /// Create a new handler from configuration.
     pub fn from_config(mut config: Config) -> Result<Self, String> {
         config.validate()?;
+        crate::parser::set_max_nesting_depth(config.storage.performance.max_nesting_depth);
         let storage =
             StorageEngine::new(config).map_err(|e| format!("Failed to create storage: {e}"))?;
         let handler = Self::new(storage);
@@ -1047,6 +1056,7 @@ impl Handler {
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
+            share_regardless_of_cost: false,
             query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
@@ -1079,6 +1089,16 @@ impl Handler {
     /// `query_timeout_ms` from now, or the client's `timeout_ms` when that is
     /// sooner (no deadline when both are unset or the server's is 0).
     pub fn request_control(&self, timeout_ms: Option<u64>) -> Arc<RequestControl> {
+        self.request_control_expecting(timeout_ms, None)
+    }
+
+    /// [`Self::request_control`] for a request whose commit must meet
+    /// `precondition`, if any.
+    pub fn request_control_expecting(
+        &self,
+        timeout_ms: Option<u64>,
+        precondition: Option<crate::storage_engine::Precondition>,
+    ) -> Arc<RequestControl> {
         let server_ms = match self.config.storage.performance.query_timeout_ms {
             0 => None,
             ms => Some(ms),
@@ -1087,11 +1107,12 @@ impl Handler {
             (Some(client), Some(server)) => Some(client.min(server)),
             (client, server) => client.or(server),
         };
-        RequestControl::limited(
+        RequestControl::limited_expecting(
             // A deadline past what `Instant` can represent is no deadline.
             ms.and_then(|ms| Instant::now().checked_add(std::time::Duration::from_millis(ms))),
             self.config.storage.performance.max_query_memory_bytes,
             Some(Arc::clone(&self.query_memory)),
+            precondition,
         )
     }
 
@@ -1119,6 +1140,21 @@ impl Handler {
         self.query_semaphore = Arc::new(tokio::sync::Semaphore::new(permits));
         self.compute_permits = permits;
         self
+    }
+
+    /// This handler's standing-query families sharing whenever their views
+    /// outnumber the compute permits, whatever their rounds cost: they still
+    /// probe, and still stop sharing on a failed round. For tests and
+    /// benchmarks that need sharing to happen whatever the host's timing.
+    #[cfg(feature = "test-support")]
+    pub fn with_sharing_regardless_of_cost(mut self) -> Self {
+        self.share_regardless_of_cost = true;
+        self
+    }
+
+    /// Whether standing-query families share whatever their rounds cost.
+    pub(crate) fn shares_regardless_of_cost(&self) -> bool {
+        self.share_regardless_of_cost
     }
 
     /// Standing-query counters.
@@ -1286,9 +1322,11 @@ impl Handler {
     /// Bootstrap auth: create the `_internal` knowledge graph and an admin
     /// user if there is none, then load the credential registry from it.
     /// Called once on server startup; until then no credential authenticates.
-    pub fn bootstrap_auth(&self) {
-        self.seed_admin_credentials();
+    /// `Err` when a supplied secret bootstrap would store is too short.
+    pub fn bootstrap_auth(&self) -> Result<(), String> {
+        self.seed_admin_credentials()?;
         self.load_credentials();
+        Ok(())
     }
 
     /// Load every user and API key from `_internal` into the registry.
@@ -1308,11 +1346,19 @@ impl Handler {
     /// Insert the bootstrap admin user when `_internal` has no users, with an
     /// API key only if bootstrap has never issued one for this data directory.
     /// The key is saved to the credentials file and printed only once stored.
-    fn seed_admin_credentials(&self) {
+    /// `Err`, before anything is written, when a supplied secret it would
+    /// store is too short.
+    fn seed_admin_credentials(&self) -> Result<(), String> {
         use crate::auth;
 
-        let Some(issue_api_key) = self.bootstrap_needed() else {
-            return;
+        let bootstrap = self.bootstrap_needed();
+        // Supplied secrets are never written to disk; blank ones count as unset.
+        let (supplied_password, supplied_api_key) = auth::bootstrap_secrets(
+            self.config.http.auth.bootstrap_admin_password.as_deref(),
+            bootstrap,
+        )?;
+        let Some(issue_api_key) = bootstrap else {
+            return Ok(());
         };
 
         let credentials_path = self
@@ -1324,14 +1370,7 @@ impl Handler {
             .unwrap_or_else(|| self.config.storage.data_dir.join("credentials.toml"));
         let persisted = auth::PersistedCredentials::load(&credentials_path).unwrap_or_default();
 
-        // Precedence: env var / config > persisted file > generated. Supplied
-        // secrets are never written to disk.
-        let supplied_password = std::env::var("INPUTLAYER_ADMIN_PASSWORD")
-            .ok()
-            .or_else(|| self.config.http.auth.bootstrap_admin_password.clone());
-        let supplied_api_key = std::env::var("INPUTLAYER_BOOTSTRAP_API_KEY")
-            .ok()
-            .filter(|k| !k.is_empty());
+        // Precedence: env var / config > persisted file > generated.
         let mut to_persist = auth::PersistedCredentials::default();
         let resolve =
             |supplied: Option<String>, persisted: Option<String>, slot: &mut Option<String>| {
@@ -1360,7 +1399,7 @@ impl Handler {
             Ok(h) => h,
             Err(e) => {
                 eprintln!("ERROR: Failed to hash admin password: {e}");
-                return;
+                return Ok(());
             }
         };
 
@@ -1381,7 +1420,7 @@ impl Handler {
                     "ERROR: cannot save generated credentials to {}: {e}. Admin user not created.",
                     credentials_path.display()
                 );
-                return;
+                return Ok(());
             }
         } else if to_persist != auth::PersistedCredentials::default() {
             info!(
@@ -1401,7 +1440,7 @@ impl Handler {
             },
         ) {
             warn!(error = %e, "Failed to insert admin user");
-            return;
+            return Ok(());
         }
         info!("Auth bootstrap: admin user created");
 
@@ -1454,6 +1493,7 @@ impl Handler {
             eprintln!("Delete this file to generate new credentials on next boot.");
             eprintln!();
         }
+        Ok(())
     }
 
     /// Prepare `_internal` for bootstrap and backfill the record of an already
@@ -1655,6 +1695,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 
@@ -1669,6 +1710,7 @@ impl Handler {
         use std::str::FromStr;
 
         let role = auth::Role::from_str(role_str)?;
+        auth::check_password_strength(password)?;
         let password_hash = auth::hash_password(password)?;
 
         let _credential_writes = self.credential_writes.lock();
@@ -1815,6 +1857,7 @@ impl Handler {
         use crate::auth;
         use crate::value::Value;
 
+        auth::check_password_strength(new_password)?;
         let new_hash = auth::hash_password(new_password)?;
         let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
@@ -2249,6 +2292,7 @@ impl Handler {
         let storage = self.storage.read();
         storage
             .clear_relations_by_prefix_in(kg, prefix)
+            .map(|(cleared, _)| cleared)
             .map_err(ProgramError::from)
     }
 
@@ -2272,12 +2316,12 @@ impl Handler {
         kg: &str,
         opts: &IndexCreateOptions,
     ) -> Result<String, ProgramError> {
-        index_commands::create(&self.storage.read(), kg, opts)
+        index_commands::create(&self.storage.read(), kg, opts).map(|(message, _)| message)
     }
 
     /// Drop an index.
     pub fn drop_index(&self, kg: &str, name: &str) -> Result<String, ProgramError> {
-        index_commands::drop(&self.storage.read(), kg, name)
+        index_commands::drop(&self.storage.read(), kg, name).map(|(message, _)| message)
     }
 
     /// List all indexes of a knowledge graph.
@@ -2292,7 +2336,7 @@ impl Handler {
 
     /// Rebuild an index from base data, dropping tombstones.
     pub fn rebuild_index(&self, kg: &str, name: &str) -> Result<String, ProgramError> {
-        index_commands::rebuild(&self.storage.read(), kg, name)
+        index_commands::rebuild(&self.storage.read(), kg, name).map(|(message, _)| message)
     }
 
     /// Execute an IQL program and return results.
@@ -2492,6 +2536,9 @@ impl QueryJob {
         let mut session_rules_parsed: Vec<crate::ast::Rule> = Vec::new();
         let mut errors: Vec<StatementError> = Vec::new();
         let mut stmt_index: usize;
+        // The revision the program's last write to persistent state committed
+        // at, if it made one.
+        let mut revision = None;
         // Records a failure of the current statement and reports it as a
         // message row too.
         macro_rules! fail {
@@ -2525,7 +2572,13 @@ impl QueryJob {
                             #[cfg(test)]
                             test_hook::run(test_hook::Point::ProofSearch);
                             match snapshot.explain(proof, timing_mode) {
-                                Ok(qr) => return Ok(QueryResult { errors, ..qr }),
+                                Ok(qr) => {
+                                    return Ok(QueryResult {
+                                        errors,
+                                        revision,
+                                        ..qr
+                                    })
+                                }
                                 Err(e) => {
                                     storage = self.storage.read();
                                     fail!(
@@ -2660,9 +2713,10 @@ impl QueryJob {
                                     }
                                     MetaCommand::KgCreate(name) => {
                                         info!(kg = %name, "meta_kg_create_start");
-                                        match storage.create_knowledge_graph(&name) {
-                                            Ok(()) => {
+                                        match storage.create_knowledge_graph_at(&name) {
+                                            Ok(created) => {
                                                 info!(kg = %name, "meta_kg_create_ok");
+                                                revision = Some(created);
                                                 self.notify_kg_change(&name, "created");
                                                 messages.push(format!(
                                                     "Knowledge graph '{name}' created."
@@ -2813,7 +2867,8 @@ impl QueryJob {
 
                                     MetaCommand::RelDrop(name) => {
                                         match storage.drop_relation_in(kg, &name) {
-                                            Ok(()) => {
+                                            Ok(published) => {
+                                                revision = Some(published);
                                                 self.notify_schema_change(kg, &name, "dropped");
                                                 messages
                                                     .push(format!("Relation '{name}' dropped."));
@@ -2900,7 +2955,8 @@ impl QueryJob {
                                     // === Clear commands ===
                                     MetaCommand::ClearPrefix(prefix) => {
                                         match storage.clear_relations_by_prefix_in(kg, &prefix) {
-                                            Ok(cleared) => {
+                                            Ok((cleared, published)) => {
+                                                revision = Some(published);
                                                 if cleared.is_empty() {
                                                     messages.push(format!(
                                                         "No relations matching prefix '{prefix}'."
@@ -3047,7 +3103,8 @@ impl QueryJob {
                                     MetaCommand::IndexCreate(opts) => {
                                         info!(index = %opts.name, "meta_index_create_start");
                                         match index_commands::create(&storage, kg, &opts) {
-                                            Ok(msg) => {
+                                            Ok((msg, published)) => {
+                                                revision = Some(published);
                                                 info!(index = %opts.name, "meta_index_create_ok");
                                                 messages.push(msg);
                                             }
@@ -3075,7 +3132,8 @@ impl QueryJob {
                                     MetaCommand::IndexDrop(name) => {
                                         info!(index = %name, "meta_index_drop_start");
                                         match index_commands::drop(&storage, kg, &name) {
-                                            Ok(msg) => {
+                                            Ok((msg, published)) => {
+                                                revision = Some(published);
                                                 info!(index = %name, "meta_index_drop_ok");
                                                 messages.push(msg);
                                             }
@@ -3155,7 +3213,10 @@ impl QueryJob {
                                     }
                                     MetaCommand::IndexRebuild(name) => {
                                         match index_commands::rebuild(&storage, kg, &name) {
-                                            Ok(msg) => messages.push(msg),
+                                            Ok((msg, published)) => {
+                                                revision = Some(published);
+                                                messages.push(msg);
+                                            }
                                             Err(e) => fail!(
                                                 e.code
                                                     .filter(|code| matches!(
@@ -3264,9 +3325,10 @@ impl QueryJob {
         if !write_run.is_empty() {
             if errors.is_empty() {
                 match self.commit_write_run(&storage, &kg_name, &mut write_run, &mut messages) {
-                    Ok((base, counts)) => {
+                    Ok((base, counts, committed_at)) => {
                         committed = Some(base);
                         statement_counts = counts;
+                        revision = committed_at.or(revision);
                     }
                     Err(failure) => {
                         stmt_index = failure.index;
@@ -3326,6 +3388,7 @@ impl QueryJob {
                 errors,
                 statements: statement_counts,
                 execution_time_ms: start.elapsed().as_millis() as u64,
+                revision,
                 ..Handler::messages_result(messages)
             });
         }
@@ -3346,6 +3409,7 @@ impl QueryJob {
                 errors,
                 statements: statement_counts,
                 execution_time_ms: start.elapsed().as_millis() as u64,
+                revision,
                 ..Handler::messages_result(messages)
             });
         }
@@ -3368,6 +3432,7 @@ impl QueryJob {
                             errors,
                             statements: statement_counts,
                             execution_time_ms: start.elapsed().as_millis() as u64,
+                            revision,
                             ..Handler::messages_result(messages)
                         });
                     }
@@ -3569,6 +3634,7 @@ impl QueryJob {
             timing_breakdown,
             errors,
             statements: statement_counts,
+            revision,
         })
     }
 }
@@ -3858,6 +3924,7 @@ impl Handler {
             timing_breakdown,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 
@@ -4138,6 +4205,18 @@ impl Handler {
         let statements = parse_program(&program).ok();
         let stmts = statements.as_deref().unwrap_or_default();
         self.authorize_program(effective_auth, current_kg, stmts)?;
+        if control.precondition().is_some()
+            && statements.is_some()
+            && !program_boundary::is_transactional(stmts)
+        {
+            return Err(ProgramError {
+                message: "expect_revision needs a program that writes persistent state \
+                          (facts, schemas or rules): it is checked when those writes commit. \
+                          Nothing ran."
+                    .to_string(),
+                code: Some(ErrorCode::InvalidRequest),
+            });
+        }
         if stmts.len() > 1
             && stmts.iter().any(|stmt| {
                 matches!(
@@ -4543,6 +4622,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         }
     }
 
@@ -4636,6 +4716,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         }
     }
 
@@ -4973,18 +5054,21 @@ impl Handler {
             .into());
         }
 
-        Ok(Self::messages_result(vec![
-            format!(
-                "installed {}@{} into {kg} ({statement_count} statements)",
-                name, entry.version
-            ),
-            format!("digest {}", entry.digest),
-            format!(
-                "recorded {} rule(s), {} relation(s) in pack_item",
-                items.iter().filter(|(k, _)| k == "rule").count(),
-                items.iter().filter(|(k, _)| k == "relation").count()
-            ),
-        ]))
+        Ok(QueryResult {
+            revision: recorded.revision,
+            ..Self::messages_result(vec![
+                format!(
+                    "installed {}@{} into {kg} ({statement_count} statements)",
+                    name, entry.version
+                ),
+                format!("digest {}", entry.digest),
+                format!(
+                    "recorded {} rule(s), {} relation(s) in pack_item",
+                    items.iter().filter(|(k, _)| k == "rule").count(),
+                    items.iter().filter(|(k, _)| k == "relation").count()
+                ),
+            ])
+        })
     }
 
     /// `.ontology remove <name>`: drop the pack's recorded rules and
@@ -5052,6 +5136,7 @@ impl Handler {
         // Failed drops are caught by the read-back below. Surface every
         // sub-result row: drops that fail phrase their errors in many ways,
         // and silence here would misreport a partial removal.
+        let mut revision = None;
         for program in programs {
             let result = Box::pin(self.run_execute_program(
                 session_id,
@@ -5062,6 +5147,7 @@ impl Handler {
             ))
             .await?;
             Self::result_problem_rows(&result)?;
+            revision = result.revision.or(revision);
             for row in &result.rows {
                 if let Some(WireValue::String(s)) = row.values.first() {
                     messages.push(format!("  {s}"));
@@ -5119,7 +5205,10 @@ impl Handler {
                 retained.len()
             ));
         }
-        Ok(Self::messages_result(messages))
+        Ok(QueryResult {
+            revision: cleanup.revision.or(revision),
+            ..Self::messages_result(messages)
+        })
     }
 
     /// `.ontology upgrade <name[@version]>`: re-deploy the pack's rules at
@@ -5207,7 +5296,10 @@ impl Handler {
                 messages.push(s.clone());
             }
         }
-        Ok(Self::messages_result(messages))
+        Ok(QueryResult {
+            revision: install.revision,
+            ..Self::messages_result(messages)
+        })
     }
 
     /// Handle `.session` list command
@@ -5265,6 +5357,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 
@@ -5748,16 +5841,18 @@ mod tests {
         use crate::storage::persist::wal::WalFault;
         let (mut config, _temp) = make_test_config();
         config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-        config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+        config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
         let handler = Handler::from_config(config).unwrap();
-        handler.bootstrap_auth();
+        handler.bootstrap_auth().unwrap();
         handler
-            .handle_user_create("editor", "password123", "editor")
+            .handle_user_create("editor", "password-0123", "editor")
             .unwrap();
         handler
             .handle_kg_acl_grant("default", "editor", "editor")
             .unwrap();
-        let principal = handler.authenticate_user("editor", "password123").unwrap();
+        let principal = handler
+            .authenticate_user("editor", "password-0123")
+            .unwrap();
         let session = handler
             .create_session_with_auth("default", &principal)
             .unwrap();
@@ -5899,11 +5994,11 @@ mod tests {
         for with_key in [true, false] {
             let (mut config, _temp) = make_test_config();
             config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-            config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+            config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
             let handler = Handler::from_config(config.clone()).unwrap();
-            handler.bootstrap_auth();
+            handler.bootstrap_auth().unwrap();
             handler
-                .handle_user_create("bob", "password123", "viewer")
+                .handle_user_create("bob", "password-0123", "viewer")
                 .unwrap();
             handler
                 .storage
@@ -5934,12 +6029,12 @@ mod tests {
                 with_key
             );
             assert!(handler
-                .handle_user_create("bob", "password456", "viewer")
+                .handle_user_create("bob", "password-0456", "viewer")
                 .is_err());
 
             handler.handle_user_drop("bob").unwrap();
             handler
-                .handle_user_create("bob", "password456", "viewer")
+                .handle_user_create("bob", "password-0456", "viewer")
                 .unwrap();
             assert!(handler
                 .get_kg_role_for_user("private", "bob", &Role::Viewer)
@@ -5950,8 +6045,8 @@ mod tests {
             handler.shutdown();
             drop(handler);
             let reopened = Handler::from_config(config).unwrap();
-            reopened.bootstrap_auth();
-            assert!(reopened.authenticate_user("bob", "password456").is_ok());
+            reopened.bootstrap_auth().unwrap();
+            assert!(reopened.authenticate_user("bob", "password-0456").is_ok());
             assert!(reopened
                 .get_kg_role_for_user("private", "bob", &Role::Viewer)
                 .is_none());
@@ -5974,12 +6069,12 @@ mod tests {
         ] {
             let (mut config, _temp) = make_test_config();
             config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-            config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+            config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
             let handler = Handler::from_config(config).unwrap();
-            handler.bootstrap_auth();
+            handler.bootstrap_auth().unwrap();
             handler.storage.write().create_knowledge_graph("g").unwrap();
             handler
-                .handle_user_create("bob", "password123", "viewer")
+                .handle_user_create("bob", "password-0123", "viewer")
                 .unwrap();
             handler.handle_kg_acl_grant("g", "bob", "viewer").unwrap();
             for fault in faults {
@@ -6020,11 +6115,11 @@ mod tests {
 
         let (mut config, _temp) = make_test_config();
         config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-        config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+        config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
         let handler = Handler::from_config(config).unwrap();
-        handler.bootstrap_auth();
+        handler.bootstrap_auth().unwrap();
         handler
-            .handle_user_create("bob", "password123", "viewer")
+            .handle_user_create("bob", "password-0123", "viewer")
             .unwrap();
         handler.create_api_key("old-key", "bob", None).unwrap();
         handler
@@ -6047,9 +6142,9 @@ mod tests {
     async fn durability_admin_protocol_preserves_outcome_types() {
         use crate::storage::persist::wal::WalFault;
         for command in [
-            ".user create alice password123 viewer",
+            ".user create alice password-0123 viewer",
             ".user drop bob",
-            ".user password bob password456",
+            ".user password bob password-0456",
             ".user role bob editor",
             ".apikey create new-key",
             ".apikey revoke old-key",
@@ -6058,11 +6153,11 @@ mod tests {
         ] {
             let (mut config, _temp) = make_test_config();
             config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-            config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+            config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
             let handler = Handler::from_config(config).unwrap();
-            handler.bootstrap_auth();
+            handler.bootstrap_auth().unwrap();
             handler
-                .handle_user_create("bob", "password123", "viewer")
+                .handle_user_create("bob", "password-0123", "viewer")
                 .unwrap();
             handler.create_api_key("old-key", "bob", None).unwrap();
             handler
@@ -6107,15 +6202,15 @@ mod tests {
     #[tokio::test]
     async fn test_login_outcome_recorded_after_caller_gives_up() {
         let (mut config, _tmp) = make_test_config();
-        config.http.auth.bootstrap_admin_password = Some("pw".to_string());
+        config.http.auth.bootstrap_admin_password = Some("test-password".to_string());
         let handler = Arc::new(Handler::from_config(config).expect("handler creation failed"));
-        handler.bootstrap_auth();
+        handler.bootstrap_auth().unwrap();
         let peer = std::net::IpAddr::from([192, 0, 2, 1]);
         for _ in 0..4 {
             let attempt = handler.login_throttle.begin(peer, "admin").unwrap();
             handler.login_throttle.fail(&attempt);
         }
-        let login = handler.login("admin", "pw", peer);
+        let login = handler.login("admin", "test-password", peer);
         assert!(tokio::time::timeout(Duration::ZERO, login).await.is_err());
         // Wait for the abandoned login to settle.
         let _all = handler

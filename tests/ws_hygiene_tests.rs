@@ -44,7 +44,7 @@ async fn start_server() -> Server {
     config.http.gui.enabled = false;
     config.storage.performance.slow_query_log_ms = 1;
     let handler = Arc::new(Handler::from_config(config).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     handler.get_storage().create_knowledge_graph(KG).unwrap();
     let app = create_router(Arc::clone(&handler), &handler.config().http);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -158,7 +158,7 @@ async fn info_logs_carry_no_credentials_or_session_ids() {
     let session_id = auth["session_id"].as_str().unwrap().to_string();
 
     for program in [
-        ".user create bob bobs-pw-123 viewer",
+        ".user create bob bobs-pw-12345 viewer",
         ".user password bob bobs-new-pw-456",
         ".USER create carol carols-pw-789 viewer",
         ".User Password carol carols-new-pw-012",

@@ -38,7 +38,7 @@ fn attach<S: BuildHasher + Default>(
 ) -> (Attach, UnboundedReceiver<SubscriberId>) {
     let (doorbell, mailbox) = doorbell(id);
     (
-        registry.attach(key(query), doorbell, || Scripted::boxed(steps)),
+        registry.attach(key(query), doorbell, None, || Scripted::boxed(steps)),
         mailbox,
     )
 }
@@ -122,7 +122,10 @@ async fn distinct_queries_and_graphs_get_their_own_views() {
         query: "?a(X)".to_string(),
     };
     assert!(matches!(
-        registry.attach(other_graph, doorbell_3, || Scripted::boxed([ok(&[], "a")])),
+        registry.attach(other_graph, doorbell_3, None, || Scripted::boxed([ok(
+            &[],
+            "a"
+        )])),
         Attach::Waiting(Some(_))
     ));
     assert_eq!(registry.len(), 3);
@@ -420,4 +423,36 @@ async fn detaching_a_scheduled_view_unschedules_it() {
     assert!(registry.next_due().is_some());
     registry.detach(1);
     assert_eq!(registry.next_due(), None);
+}
+
+#[tokio::test]
+async fn a_view_older_than_the_graph_refreshes_for_a_new_subscriber_without_news() {
+    let mut registry = ViewRegistry::new(Duration::ZERO);
+    let (first, mut mailbox_1) = live(
+        &mut registry,
+        "?a(X)",
+        1,
+        vec![ok(&[1], "a"), ok(&[1], "a")],
+    )
+    .await;
+    assert_eq!(latest(&first).revision, 1);
+
+    // The graph moved on and what changed since revision 1 is unknown: the subscriber waits.
+    KnowledgeGraphSnapshot::empty();
+    let graph = KnowledgeGraphSnapshot::empty();
+    assert!(graph.changes().since() > 1);
+    let (doorbell_2, _mailbox_2) = doorbell(2);
+    let Attach::Waiting(Some(dispatch)) =
+        registry.attach(key("?a(X)"), doorbell_2, Some(&graph), || {
+            Scripted::boxed([])
+        })
+    else {
+        panic!("a view older than the subscriber's revision evaluates");
+    };
+    let mut completed = complete(&mut registry, dispatch).await;
+    let (subscriber, attachment) = completed.replies.remove(0);
+    assert_eq!(subscriber, 2);
+    let publication = attachment.unwrap().publication;
+    assert_eq!((publication.number, publication.revision), (1, 2));
+    assert!(!rang(&mut mailbox_1), "an unchanged result is no news");
 }
