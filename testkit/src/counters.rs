@@ -33,11 +33,7 @@ impl Counters {
     /// labelled samples are ignored.
     pub fn parse(text: &str) -> Self {
         let samples = samples(text);
-        let counter = |name: &str| {
-            samples
-                .get(&format!("inputlayer_{name}_total"))
-                .copied()
-        };
+        let counter = |name: &str| samples.get(&format!("inputlayer_{name}_total")).copied();
         Self {
             queries: counter("queries"),
             rule_evaluations: counter("rule_evaluations"),
