@@ -71,7 +71,7 @@ async fn run(handler: Arc<Handler>) {
     let handler = Arc::clone(&follower.handler);
     let status = handler.replication_status();
     let loaded = follower.position;
-    status.applied(loaded.stream_id, loaded.lsn, loaded.primary_revision);
+    status.resumed(loaded.stream_id, loaded.lsn, loaded.primary_revision);
     let mut backoff = MIN_BACKOFF;
     let mut resync_backoff = Duration::ZERO;
     loop {

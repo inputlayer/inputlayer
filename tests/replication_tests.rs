@@ -351,7 +351,7 @@ async fn status_of(engine: &Engine) -> Value {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_restarted_follower_resumes_from_its_saved_position() {
-    let primary = primary(None).await;
+    let mut primary = primary(None).await;
     let mut follower = follower(primary.http_url(), TOKEN, primary.api_key()).await;
     commit(&primary, "+edge(1, 2)").await;
     caught_up(&follower).await;
@@ -386,6 +386,17 @@ async fn a_restarted_follower_resumes_from_its_saved_position() {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+
+    // Restarted while the primary is down, it reports its saved position
+    // but no contact with the primary.
+    primary.stop().await.expect("kill primary");
+    follower.stop().await.expect("kill follower");
+    follower.restart().await.expect("restart follower");
+    let status = wait_status(&follower, "the saved position", |f| {
+        f["applied_lsn"] == head
+    })
+    .await;
+    assert!(status["follower"]["last_contact_ms"].is_null(), "{status}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

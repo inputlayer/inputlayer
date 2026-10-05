@@ -17,4 +17,5 @@ regexes = [
     '''^epson-202-black$''',
     '''^whsec_dGVzdC1vbmx5$''',
     '''^whsec_dGVzdC1zZWNyZXQtZm9yLXVuaXQtdGVzdHMtb25seQ==$''',
+    '''^0123456789abcdef-secret$''',
 ]

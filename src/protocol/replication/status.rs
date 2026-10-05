@@ -197,6 +197,12 @@ impl ReplicationStatus {
     }
 
     pub(super) fn applied(&self, stream_id: u64, lsn: u64, primary_revision: u64) {
+        self.resumed(stream_id, lsn, primary_revision);
+        self.inner.lock().follower.last_contact = Some(Instant::now());
+    }
+
+    /// Record a position without claiming contact with the primary.
+    pub(super) fn resumed(&self, stream_id: u64, lsn: u64, primary_revision: u64) {
         let mut inner = self.inner.lock();
         let side = &mut inner.follower;
         if side.stream_id != stream_id {
@@ -206,7 +212,6 @@ impl ReplicationStatus {
         side.applied_lsn = lsn;
         side.primary_head = side.primary_head.max(lsn);
         side.primary_revision = primary_revision;
-        side.last_contact = Some(Instant::now());
     }
 
     pub(super) fn resync_failed(&self) {
