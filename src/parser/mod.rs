@@ -30,7 +30,7 @@ pub const MAX_NESTING_DEPTH_CEILING: usize = 1024;
 /// per constant or repeated variable, and every pass over the plan recurses
 /// that deep, so this bound keeps them within an
 /// [`ENGINE_THREAD_STACK_BYTES`](crate::ENGINE_THREAD_STACK_BYTES) stack.
-pub const MAX_RULE_BODY_SIZE: usize = 512;
+pub const MAX_RULE_BODY_SIZE: usize = 4096;
 
 static MAX_NESTING_DEPTH: AtomicUsize = AtomicUsize::new(DEFAULT_MAX_NESTING_DEPTH);
 
@@ -143,8 +143,8 @@ pub fn parse_rule(line: &str) -> Result<Rule, String> {
         .sum();
     if body_size > MAX_RULE_BODY_SIZE {
         return Err(format!(
-            "Rule body is too large: {body_size} (predicates plus atom arguments), \
-             the limit is {MAX_RULE_BODY_SIZE}"
+            "Rule body is too large: {body_size} elements (body predicates plus \
+             body-atom arguments); the limit is {MAX_RULE_BODY_SIZE}"
         ));
     }
 

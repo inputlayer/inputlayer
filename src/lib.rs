@@ -259,9 +259,10 @@ pub use statement::{
 pub use parser::{parse_program, parse_rule};
 
 /// Stack size for threads that parse, plan and evaluate client programs. The
-/// parser's nesting and rule-body limits are sized so every recursive pass
-/// fits in it; Rust's 2 MiB default does not.
-pub const ENGINE_THREAD_STACK_BYTES: usize = 16 * 1024 * 1024;
+/// parser's nesting and rule-body limits were measured against it so every
+/// recursive pass fits, in debug as well as release builds; Rust's 2 MiB
+/// default does not. The stack is virtual memory, committed only as used.
+pub const ENGINE_THREAD_STACK_BYTES: usize = 64 * 1024 * 1024;
 
 // Re-export rule catalog
 pub use rule_catalog::{validate_rule, validate_rules_stratification, RuleCatalog, RuleDefinition};

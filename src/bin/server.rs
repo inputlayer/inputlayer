@@ -60,13 +60,13 @@ struct Cli {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Requests are parsed and evaluated on runtime threads, so they get the
-    // stack the parser's limits are sized for.
+    // Startup replay and requests are parsed and evaluated on runtime
+    // threads, so they get the stack the parser's limits are sized for.
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_stack_size(inputlayer::ENGINE_THREAD_STACK_BYTES)
         .build()?
-        .block_on(serve())
+        .block_on(async { tokio::spawn(serve()).await? })
 }
 
 async fn serve() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
