@@ -182,6 +182,21 @@ impl ChangeLog {
         next
     }
 
+    /// Whether the persistent rules or one of `relations` may have changed
+    /// after `revision`: they did, or `revision` predates [`Self::since`].
+    pub fn changed_after<'a>(
+        &self,
+        revision: u64,
+        mut relations: impl Iterator<Item = &'a str>,
+    ) -> bool {
+        if revision < self.since {
+            return true;
+        }
+        self.latest > revision
+            && (self.rules > revision
+                || relations.any(|name| self.relations.get(name).is_some_and(|&at| at > revision)))
+    }
+
     fn stamp_relation(&mut self, name: &str, revision: u64) {
         match self.relations.get_mut(name) {
             Some(at) => *at = revision,

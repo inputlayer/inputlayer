@@ -31,7 +31,7 @@ impl ConnectionSubscriptions {
         id: &str,
         view: Box<dyn StandingQuery>,
     ) -> Result<(Snapshot, u64), String> {
-        let opening = self.opening(key, id, 0, view);
+        let opening = self.opening(key, id, None, view);
         self.finish_subscribe(opening.run().await, |_| true)
     }
 }
@@ -149,6 +149,30 @@ async fn a_snapshot_at_the_current_revision_needs_no_second_evaluation() {
     let idle =
         tokio::time::timeout(Duration::from_millis(200), subscriptions.next_delivery()).await;
     assert!(idle.is_err(), "nothing to re-evaluate");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unrelated_write_lets_a_new_subscriber_join_at_the_current_revision() {
+    let (handler, _tmp) = handler();
+    write(&handler, "+p(1)").await;
+    let mut subscriptions = ConnectionSubscriptions::new(Arc::clone(&handler), None);
+    let (first, _) = subscriptions.subscribe(KG, "s1", "?p(X)").await.unwrap();
+    write(&handler, "+q(1)").await;
+    let current = handler.get_storage().get_snapshot_for(KG).unwrap().revision;
+    assert!(current > first.revision);
+
+    let (second, _) = subscriptions.subscribe(KG, "s2", "?p(X)").await.unwrap();
+    assert_eq!(second.revision, current);
+    assert_eq!(second.rows, [vec![json!(1)]]);
+    assert_eq!(handler.subscription_metrics().evaluations(), 1);
+
+    write(&handler, "+p(2)").await;
+    let (third, _) = subscriptions.subscribe(KG, "s3", "?p(X)").await.unwrap();
+    assert_eq!(
+        third.revision,
+        handler.get_storage().get_snapshot_for(KG).unwrap().revision
+    );
+    assert_eq!(third.rows.len(), 2);
 }
 
 /// What a fan-out run observed.

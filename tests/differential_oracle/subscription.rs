@@ -118,7 +118,7 @@ impl SubscriptionAdapter {
         let first = self.doorbell();
         let Attach::Waiting(Some(dispatch)) =
             self.registry
-                .attach(key.clone(), Arc::clone(&first), 0, || Box::new(fresh))
+                .attach(key.clone(), Arc::clone(&first), None, || Box::new(fresh))
         else {
             return Err(AdapterError::Failed(
                 "a new query did not get its own view".to_string(),
@@ -136,7 +136,7 @@ impl SubscriptionAdapter {
         let eager = Subscriber::new("eager", 1, KG, first, &attachment);
 
         let second = self.doorbell();
-        let Attach::Attached(shared) = self.registry.attach(key, Arc::clone(&second), 0, || {
+        let Attach::Attached(shared) = self.registry.attach(key, Arc::clone(&second), None, || {
             unreachable!("the view exists")
         }) else {
             return Err(AdapterError::Failed(

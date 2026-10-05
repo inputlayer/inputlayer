@@ -34,7 +34,7 @@ impl Fixture {
         let Attach::Waiting(Some(first)) =
             fixture
                 .registry
-                .attach(key(), Arc::clone(&bell), 0, || Scripted::boxed(steps))
+                .attach(key(), Arc::clone(&bell), None, || Scripted::boxed(steps))
         else {
             panic!("a new view evaluates");
         };
@@ -51,7 +51,7 @@ impl Fixture {
         self.mailboxes.push(mailbox);
         let Attach::Attached(attachment) =
             self.registry
-                .attach(key(), Arc::clone(&bell), 0, || Scripted::boxed([]))
+                .attach(key(), Arc::clone(&bell), None, || Scripted::boxed([]))
         else {
             panic!("joins the live view");
         };
@@ -101,7 +101,7 @@ async fn snapshot_lists_the_result_for_creator_and_joiner() {
     let (bell, _mailbox) = doorbell(9);
     let Attach::Attached(attachment) = fixture
         .registry
-        .attach(key(), bell, 0, || Scripted::boxed([]))
+        .attach(key(), bell, None, || Scripted::boxed([]))
     else {
         panic!("joins");
     };

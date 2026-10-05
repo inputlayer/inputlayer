@@ -38,7 +38,7 @@ fn attach<S: BuildHasher + Default>(
 ) -> (Attach, UnboundedReceiver<SubscriberId>) {
     let (doorbell, mailbox) = doorbell(id);
     (
-        registry.attach(key(query), doorbell, 0, || Scripted::boxed(steps)),
+        registry.attach(key(query), doorbell, None, || Scripted::boxed(steps)),
         mailbox,
     )
 }
@@ -122,7 +122,7 @@ async fn distinct_queries_and_graphs_get_their_own_views() {
         query: "?a(X)".to_string(),
     };
     assert!(matches!(
-        registry.attach(other_graph, doorbell_3, 0, || Scripted::boxed([ok(
+        registry.attach(other_graph, doorbell_3, None, || Scripted::boxed([ok(
             &[],
             "a"
         )])),
@@ -437,10 +437,15 @@ async fn a_view_older_than_the_graph_refreshes_for_a_new_subscriber_without_news
     .await;
     assert_eq!(latest(&first).revision, 1);
 
-    // The graph moved on outside the view: a subscriber at revision 2 waits.
+    // The graph moved on and what changed since revision 1 is unknown: the subscriber waits.
+    KnowledgeGraphSnapshot::empty();
+    let graph = KnowledgeGraphSnapshot::empty();
+    assert!(graph.changes().since() > 1);
     let (doorbell_2, _mailbox_2) = doorbell(2);
     let Attach::Waiting(Some(dispatch)) =
-        registry.attach(key("?a(X)"), doorbell_2, 2, || Scripted::boxed([]))
+        registry.attach(key("?a(X)"), doorbell_2, Some(&graph), || {
+            Scripted::boxed([])
+        })
     else {
         panic!("a view older than the subscriber's revision evaluates");
     };

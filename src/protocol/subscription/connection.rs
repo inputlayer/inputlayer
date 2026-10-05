@@ -28,6 +28,7 @@ use inputlayer_ws_protocol::SubscriptionPush;
 
 use crate::auth::Principal;
 use crate::protocol::Handler;
+use crate::storage_engine::KnowledgeGraphSnapshot;
 
 use super::publication::{Doorbell, SubscriberId};
 use super::views::{Attachment, ViewKey};
@@ -86,27 +87,25 @@ impl ConnectionSubscriptions {
         let view = ReevaluatingQuery::new(Arc::clone(&self.handler), knowledge_graph, query)?;
         self.handler
             .authorize_query(self.auth.as_ref(), knowledge_graph, view.goal())?;
-        // A view not refreshed since is still exact now, but must say so: a
-        // client may expect the revision its snapshot reports.
-        let revision = view
-            .current_snapshot()
-            .map_or(0, |snapshot| snapshot.revision);
+        // A view not refreshed since may still be exact now, but must say so:
+        // a client may expect the revision its snapshot reports.
+        let graph = view.current_snapshot().ok();
         let key = ViewKey {
             knowledge_graph: knowledge_graph.to_string(),
             query: query.trim().to_string(),
         };
         let share = self.handler.config().subscriptions.share_parameterized;
         let view = self.hub().standing_query(view, share);
-        Ok(self.opening(key, id, revision, view))
+        Ok(self.opening(key, id, graph, view))
     }
 
     /// An [`Opening`] attaching `id` to the view of `key`, created from `view`
-    /// if there is none, with a snapshot exact at `revision` or later.
+    /// if there is none, with a snapshot exact at `graph`'s revision or later.
     fn opening(
         &self,
         key: ViewKey,
         id: &str,
-        revision: u64,
+        graph: Option<Arc<KnowledgeGraphSnapshot>>,
         view: Box<dyn StandingQuery>,
     ) -> Opening {
         let hub = self.hub().clone();
@@ -114,7 +113,7 @@ impl ConnectionSubscriptions {
         Opening {
             id: id.to_string(),
             key,
-            revision,
+            graph,
             view,
             attached: Attached {
                 hub,
@@ -279,7 +278,7 @@ impl Drop for ConnectionSubscriptions {
 pub struct Opening {
     id: String,
     key: ViewKey,
-    revision: u64,
+    graph: Option<Arc<KnowledgeGraphSnapshot>>,
     view: Box<dyn StandingQuery>,
     attached: Attached,
 }
@@ -298,13 +297,13 @@ impl Opening {
         let Opening {
             id,
             key,
-            revision,
+            graph,
             view,
             attached,
         } = self;
         let attachment = attached
             .hub
-            .attach(key.clone(), Arc::clone(&attached.doorbell), revision, view)
+            .attach(key.clone(), Arc::clone(&attached.doorbell), graph, view)
             .await;
         Opened {
             id,
