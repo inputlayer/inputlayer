@@ -20,8 +20,7 @@
 //! Scale the random run with `INPUTLAYER_ORACLE_SEEDS=<n>` (default 12) and
 //! reproduce one seed with `INPUTLAYER_ORACLE_SEED=<seed>`. With
 //! `INPUTLAYER_ORACLE_VIEWS=maintained` every history also runs through the
-//! `maintained` adapter (and the soak's server runs in that mode); until V2
-//! (#309) adds the mode, every test fails saying it is not available.
+//! `maintained` adapter (and the soak's server runs in that mode).
 //!
 //! [`soak`] holds a real server under sustained concurrent writers, rule
 //! changes and many (fast, slow, stalled, grouped) subscribers to the same

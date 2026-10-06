@@ -367,8 +367,7 @@ test-budget:
 
 # Differential correctness oracle (part of unit-test; this runs it alone).
 # Scale random histories with INPUTLAYER_ORACLE_SEEDS=<n>.
-# INPUTLAYER_ORACLE_VIEWS=maintained adds the maintained adapter; until V2
-# (#309) adds the mode, every test fails saying it is not available.
+# INPUTLAYER_ORACLE_VIEWS=maintained adds the maintained adapter.
 oracle-test:
 	cargo test --all-features --test differential_oracle
 

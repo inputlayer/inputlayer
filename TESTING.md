@@ -106,14 +106,14 @@ make test-scenarios                                    # debug; also part of uni
 cargo test --all-features --test scenarios -- limits   # one module
 make e2e-reactive                                      # release, latency samples, ignored scenarios included
 make test-scenarios-modes                              # once per views mode (S16)
-INPUTLAYER_SCENARIO_VIEWS=maintained make test-scenarios   # refused until V2 (#309)
+INPUTLAYER_SCENARIO_VIEWS=maintained make test-scenarios   # engine.views = "maintained"
 ```
 
 The suite runs in about 20 s in debug on 4 cores. `make test-all` and `make ci-test-all` run it once, in release through `make e2e-reactive`: their debug unit stage runs every other workspace test without the scenarios binary.
 
 ### Harness
 
-- `EngineBuilder` starts an engine with a private data directory, generated config and free port. Settings a scenario may change: `views(Mode)` (`engine.views`; `Mode::from_env("INPUTLAYER_SCENARIO_VIEWS")` runs the suite once per mode, and `maintained` panics with "mode not available" until V2 defines the setting; `try_views` returns that as `Violation::Unavailable` for a scenario comparing the modes), `memory_limits(query_bytes, graph_bytes)`, `max_query_cost`, `nesting_limit`, `max_result_rows`, `ws_max_subscriptions`, `notification_buffer_size`, `ws_send_timeout_ms`, `max_connections`, `cpus` and `replication` (a primary or a follower of one). `Engine::stop`, `restart` and `crash_restart` drive the process.
+- `EngineBuilder` starts an engine with a private data directory, generated config and free port. Settings a scenario may change: `views(Mode)` (`engine.views`; `Mode::from_env("INPUTLAYER_SCENARIO_VIEWS")` runs the suite once per mode; `maintained` starts a view maintainer per knowledge graph, the default `recompute` starts none), `memory_limits(query_bytes, graph_bytes)`, `max_query_cost`, `nesting_limit`, `max_result_rows`, `ws_max_subscriptions`, `notification_buffer_size`, `ws_send_timeout_ms`, `max_connections`, `cpus` and `replication` (a primary or a follower of one). `Engine::stop`, `restart` and `crash_restart` drive the process.
 - `Engine::metrics()` reads `/metrics/prometheus` into `Counters` (`queries`, `rule_evaluations`, `view_reads`, `subscription_evaluations`, `view_maintenance_us`); a counter the engine does not export is `None`, and `Counters::require` turns it into `Violation::NotMeasurable`, so an assertion on it fails (or is an expected failure), never a skip.
 - `Engine::create_user`, `grant` and `create_api_key` (a key limited to a role on one knowledge graph and optionally to relations) with `WsClient::connect_with_key` give scenarios scoped agents besides the bootstrap admin key.
 - `WsClient::execute_expecting(program, revision, relations)` sends `expect_revision`; `execute_at(program, revision)` sends `at` (V13 #316). `QueryResult::revision` is the reply's revision: set for writes, `None` for queries until V9 (#315); `QueryResult::statements` holds a write's per-statement counts. `try_execute` and `try_execute_expecting` (with an `Expect` that can also pin `expect_epoch`) return the engine's `Refusal` with its structured `code` and, for an unparsable program, its parse errors, instead of a violation. `try_execute_at` does the same for a read `at` a revision, and `QueryResult::views_at` is a write acknowledgement's `views_at` (V14 #320).
@@ -148,7 +148,7 @@ The counter checks and S4's `revision` are asserted for the target contract, whi
 | S13 | Failover mid-scenario: a synchronous follower holds every acknowledged change and refuses writes after the primary dies | `failover::s13_failover_mid_scenario_keeps_every_acknowledged_change` | 3 | V18 #330, EN-12 part 3 #285 | follower half runs; promotion and the claim on the new primary XFAIL (#285) |
 | S14 | Limits refuse cleanly while 20 other agents keep receiving deltas: memory, nesting, `top_k` size, graph budget | `limits::s14_limits_refuse_cleanly_while_other_agents_continue` | readiness | V15 #321 | runs |
 | S15 | Multi-tenant isolation and scoped keys | `tenancy::s15_tenants_and_scoped_keys_are_isolated` | 1 (per tenant) | V10 #317 | runs |
-| S16 | Mode equivalence: identical rows, deltas and revisions in both views modes | `modes::s16_both_views_modes_give_identical_rows_deltas_and_revisions`, `make test-scenarios-modes` | all | V2 #309 through V20 #332 | recompute runs; the `maintained` comparison XFAIL (#309) |
+| S16 | Mode equivalence: identical rows, deltas and revisions in both views modes | `modes::s16_both_views_modes_give_identical_rows_deltas_and_revisions`, `make test-scenarios-modes` | all | V2 #309 through V20 #332 | runs |
 | S17 | Write burst, read-your-writes: 4 writers x 100 writes, a rule rebuild | `burst::s17_write_burst_reads_its_writes` | 3 | V12 #319, V14 #320 | reads run; `views_at` on the rebuild's acknowledgement XFAIL |
 | S18 | Docs describe what runs: the D1 claim list finds nothing outside an allow-list | not written yet (#338) | 9 | D1 #306, V20 #332 | not yet a test |
 
@@ -279,7 +279,7 @@ The run ends with `Specs finished in <seconds>s`, the specs tier of the [budgets
 | `subscription` | Standing queries assembled purely from pushed `inserted`/`retracted` deltas, through the real notification, dependency-filtering, coalescing and shared-view path a subscribed agent uses. Each query has two subscribers on one shared view, one taking every publication and one only the settled result; they must agree. |
 | `subscription[group]` | Every query in one subscription group, each member assembled from pushed group deltas. |
 | `spec` | Results recorded in `.iql.out` transcripts (corpus cases only). |
-| `maintained` | `recompute` on an engine whose persistent rules are incrementally maintained views (`engine.views = "maintained"`), when `INPUTLAYER_ORACLE_VIEWS=maintained`. Until V2 (#309) adds the mode, every test fails saying it is not available, never as a pass. |
+| `maintained` | `recompute` on an engine whose persistent rules are incrementally maintained views (`engine.views = "maintained"`), when `INPUTLAYER_ORACLE_VIEWS=maintained`. |
 
 Histories come from hand-written scenarios (duplicate supports, recursive edge removal, negation, aggregates, rule replacement, restart), seeded random generation, the `.iql.out` corpus of the derived-result categories, and the shop pack corpus (`shop.rs`): the scenario suite's shop pack with writes through each of its constructs and a restart, and the histories of scenario S9, which the scenario suite also feeds to the oracle (`oracle_check`). Results are compared as Z-sets, so a row reported twice or retracted without being present is a divergence of its own. A divergence is minimized (delta debugging) to a short reproducing script.
 

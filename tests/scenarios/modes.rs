@@ -14,27 +14,14 @@
 //! `related("i1", X)` and `offer("o-42", X)`, the cut, blocking and unblocking
 //! i4) runs on one engine per mode, and each run's snapshots, deltas,
 //! revisions and write replies must be identical.
-//!
-//! Expected failure (V2 #309): this engine has no `maintained` mode.
 
 use std::collections::BTreeSet;
 
-use inputlayer_testkit::{
-    Agent, Checked, EngineBuilder, Fixture, KnownDefect, Mode, Reproduction, Size, Violation,
-    WsClient,
-};
+use inputlayer_testkit::{Agent, Checked, EngineBuilder, Fixture, Mode, Size, Violation, WsClient};
 
 use crate::lifecycle::{KG, OFFERS};
 use crate::shop::{self, S9B};
 use crate::support::{committed, write_revision};
-
-/// The engine has no `maintained` mode (V2 #309).
-const NO_MAINTAINED_MODE: KnownDefect = KnownDefect {
-    plan_item: "#309",
-    summary: "engine.views = \"maintained\" is not available",
-    signature: |v| matches!(v, Violation::Unavailable(_)),
-    reproduction: Reproduction::Deterministic,
-};
 
 /// What a client saw of S9b in one mode.
 #[derive(Debug, PartialEq)]
@@ -45,10 +32,10 @@ struct Seen {
     writes: Vec<(u64, Vec<Option<(BTreeSet<String>, BTreeSet<String>, u64)>>)>,
 }
 
-/// Run S9b in `mode`; [`Violation::Unavailable`] when the engine lacks it.
+/// Run S9b in `mode`.
 async fn run(mode: Mode) -> Checked<Seen> {
     let engine = EngineBuilder::new(env!("CARGO_BIN_EXE_inputlayer-server"))
-        .try_views(mode)?
+        .views(mode)
         .start()
         .await
         .expect("start engine");
@@ -89,16 +76,12 @@ async fn s16_both_views_modes_give_identical_rows_deltas_and_revisions() -> Chec
             .all(|(_, d)| d.iter().any(Option::is_some)),
         "every S9b write changes a subscription: {recompute:?}"
     );
-    let maintained = run(Mode::Maintained).await;
-    NO_MAINTAINED_MODE.judge(maintained.and_then(|maintained| {
-        if maintained == recompute {
-            Ok(())
-        } else {
-            Err(Violation::WrongDelta {
-                subscription: "S9b in maintained mode".into(),
-                detail: format!("recompute saw {recompute:?}, maintained saw {maintained:?}"),
-            })
-        }
-    }));
+    let maintained = run(Mode::Maintained).await?;
+    if maintained != recompute {
+        return Err(Violation::WrongDelta {
+            subscription: "S9b in maintained mode".into(),
+            detail: format!("recompute saw {recompute:?}, maintained saw {maintained:?}"),
+        });
+    }
     Ok(())
 }

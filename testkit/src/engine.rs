@@ -32,7 +32,8 @@ pub enum Mode {
     /// Every read re-derives persistent rules from base facts (today's engine).
     #[default]
     Recompute,
-    /// Persistent rules are incrementally maintained views (V2 #309).
+    /// Each knowledge graph runs a view maintainer fed from the commit path
+    /// (V2 #309).
     Maintained,
 }
 
@@ -63,8 +64,8 @@ impl Mode {
 /// Engine settings a scenario may change; everything else is the shipped default.
 #[derive(Debug, Clone, Default)]
 pub struct EngineSettings {
-    /// `engine.views`. Until V2 (#309) defines the setting nothing is
-    /// written and only [`Mode::Recompute`] can run.
+    /// `engine.views`; written to the config only for [`Mode::Maintained`],
+    /// [`Mode::Recompute`] being the engine's default.
     pub views: Mode,
     /// `storage.performance.max_query_memory_bytes`; `None` keeps the default.
     pub max_query_memory_bytes: Option<u64>,
@@ -143,33 +144,11 @@ impl EngineBuilder {
         self
     }
 
-    /// Answer reads of persistent rules in `mode`.
-    ///
-    /// # Panics
-    /// For [`Mode::Maintained`] until V2 (#309) defines `engine.views`: the
-    /// engine cannot run that mode, so the scenario fails before starting one.
+    /// Run the engine with `engine.views` set to `mode`.
     #[must_use]
-    pub fn views(self, mode: Mode) -> Self {
-        match self.try_views(mode) {
-            Ok(builder) => builder,
-            Err(violation) => {
-                panic!("{violation}; unset INPUTLAYER_SCENARIO_VIEWS or set it to \"recompute\"")
-            }
-        }
-    }
-
-    /// [`Self::views`], or [`Violation::Unavailable`] when this engine cannot
-    /// run `mode` (`maintained` until V2 #309 defines `engine.views`), for a
-    /// scenario that compares the modes.
-    pub fn try_views(mut self, mode: Mode) -> Checked<Self> {
-        if mode != Mode::Recompute {
-            return Err(Violation::Unavailable(format!(
-                "engine.views = \"{}\": mode not available on this engine (V2 #309 adds it)",
-                mode.as_str()
-            )));
-        }
+    pub fn views(mut self, mode: Mode) -> Self {
         self.settings.views = mode;
-        Ok(self)
+        self
     }
 
     /// Refuse a query holding more than `query_bytes`
@@ -319,6 +298,16 @@ impl Engine {
     pub async fn metrics(&self) -> Result<Counters> {
         let body = http_get(self.port, "/metrics/prometheus", &self.api_key).await?;
         Ok(Counters::parse(&body))
+    }
+
+    /// How many knowledge graphs run a view maintainer, from the per-graph
+    /// `inputlayer_view_frontier_revision` samples on `/metrics/prometheus`.
+    pub async fn view_maintainers(&self) -> Result<usize> {
+        let body = http_get(self.port, "/metrics/prometheus", &self.api_key).await?;
+        Ok(body
+            .lines()
+            .filter(|line| line.starts_with("inputlayer_view_frontier_revision{"))
+            .count())
     }
 
     /// Create user `name` with server role `role` (`admin`, `editor` or `viewer`).
@@ -600,6 +589,11 @@ impl Engine {
             }
             config.insert("replication".into(), section.into());
         }
+        if self.settings.views == Mode::Maintained {
+            let mut engine = toml::Table::new();
+            engine.insert("views".into(), self.settings.views.as_str().into());
+            config.insert("engine".into(), engine.into());
+        }
         config.insert("storage".into(), storage.into());
         config.insert("http".into(), http.into());
         config.insert("logging".into(), logging.into());
@@ -709,14 +703,10 @@ mod tests {
     }
 
     #[test]
-    fn recompute_mode_is_accepted() {
-        let builder = EngineBuilder::new("inputlayer-server").views(Mode::Recompute);
-        assert_eq!(builder.settings.views, Mode::Recompute);
-    }
-
-    #[test]
-    #[should_panic(expected = "mode not available")]
-    fn maintained_mode_is_refused_until_the_engine_has_it() {
-        let _ = EngineBuilder::new("inputlayer-server").views(Mode::Maintained);
+    fn both_modes_are_accepted() {
+        for mode in [Mode::Recompute, Mode::Maintained] {
+            let builder = EngineBuilder::new("inputlayer-server").views(mode);
+            assert_eq!(builder.settings.views, mode);
+        }
     }
 }

@@ -43,7 +43,6 @@ use std::time::{Duration, Instant};
 use inputlayer_testkit::{EngineBuilder, Mode, WsClient};
 use serde_json::json;
 
-use crate::engine::VIEWS_ENV;
 use consumers::{ConsumerStats, Ctx};
 use verify::{Class, Histogram, Verdict, Verifier};
 use workload::WriterStats;
@@ -250,8 +249,7 @@ pub async fn run(server: &str, config: Config, views: Mode) -> Report {
         .max_connections(4096)
         .ws_max_preauth_per_ip(0)
         .ws_max_subscriptions(0)
-        .try_views(views)
-        .unwrap_or_else(|v| panic!("{v}; unset {VIEWS_ENV} or set it to \"recompute\""));
+        .views(views);
     if let Some(ms) = config.send_timeout_ms {
         builder = builder.ws_send_timeout_ms(ms);
     }

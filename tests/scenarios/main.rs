@@ -11,8 +11,7 @@
 //!
 //! `INPUTLAYER_SCENARIO_VIEWS` (`recompute`, the default, or `maintained`)
 //! selects how the engine answers reads of persistent rules, so CI can run the
-//! suite once per mode. Until V2 (#309) defines `engine.views`, `maintained`
-//! fails every scenario before an engine starts.
+//! suite once per mode.
 //!
 //! Modules: `reactive` (the agent subscription path), `stream` (the
 //! notification stream and snapshot handoff), `delivery` (results and deltas

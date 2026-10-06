@@ -5,7 +5,9 @@
 use std::collections::BTreeSet;
 use std::time::Instant;
 
-use inputlayer_testkit::{Checked, Counters, Fixture, Size, Violation, WsClient};
+use inputlayer_testkit::{
+    Checked, Counters, EngineBuilder, Fixture, Mode, Size, Violation, WsClient,
+};
 use serde_json::Value;
 
 use crate::engine;
@@ -91,6 +93,28 @@ async fn counters_scrape_the_running_engine() -> Checked<()> {
         1,
         "a read of a deployed rule evaluates it once: {delta:?}"
     );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn maintained_mode_starts_a_view_maintainer_and_recompute_does_not() -> Checked<()> {
+    for (mode, maintained) in [(Mode::Maintained, true), (Mode::Recompute, false)] {
+        let engine = EngineBuilder::new(env!("CARGO_BIN_EXE_inputlayer-server"))
+            .views(mode)
+            .start()
+            .await
+            .expect("start engine");
+        let mut writer = WsClient::connect(&engine, "default").await?;
+        writer.execute("+edge(1, 2)").await?;
+        // One per loaded knowledge graph.
+        let maintainers = engine.view_maintainers().await.expect("scrape metrics");
+        assert_eq!(
+            maintainers > 0,
+            maintained,
+            "engine.views = {:?}: {maintainers} view maintainers",
+            mode.as_str()
+        );
+    }
     Ok(())
 }
 

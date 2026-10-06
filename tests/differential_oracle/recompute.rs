@@ -5,7 +5,7 @@
 //! rules are incrementally maintained views (`engine.views = "maintained"`),
 //! so the reference, recompute and maintained answers are compared at every
 //! checkpoint. It joins the standard set when `INPUTLAYER_ORACLE_VIEWS` is
-//! `maintained`; until V2 (#309) adds the mode, opening it fails.
+//! `maintained`.
 
 use inputlayer_testkit::Mode;
 

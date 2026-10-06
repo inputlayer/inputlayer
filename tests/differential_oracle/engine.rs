@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use inputlayer::config::DurabilityMode;
+use inputlayer::config::{DurabilityMode, ViewsMode};
 use inputlayer::protocol::rest::handlers::wire_value_to_json;
 use inputlayer::protocol::wire::QueryResult;
 use inputlayer::protocol::Handler;
@@ -128,22 +128,16 @@ fn scratch_dir() -> std::io::Result<TempDir> {
 }
 
 /// The engine's config in `views` mode.
-///
-/// `maintained` fails until V2 (#309) adds `engine.views`; V2 sets it here.
-fn config(dir: &TempDir, views: Mode) -> Result<Config, AdapterError> {
-    if views != Mode::Recompute {
-        return Err(AdapterError::Failed(format!(
-            "engine.views = \"{}\": mode not available on this engine (V2 #309 adds it); \
-             unset {VIEWS_ENV} or set it to \"recompute\"",
-            views.as_str()
-        )));
-    }
+fn config(dir: &TempDir, views: Mode) -> Config {
     let mut config = Config::default();
     config.storage.data_dir = dir.path().join("data");
     config.storage.performance.num_threads = 2;
     config.storage.persist.durability_mode = DurabilityMode::Immediate;
     config.http.gui.enabled = false;
-    Ok(config)
+    if views == Mode::Maintained {
+        config.engine.views = ViewsMode::Maintained;
+    }
+    config
 }
 
 fn start(
@@ -153,7 +147,7 @@ fn start(
 ) -> Result<Arc<Handler>, AdapterError> {
     let _guard = runtime.enter();
     let handler =
-        Arc::new(Handler::from_config(config(dir, views)?).map_err(AdapterError::Failed)?);
+        Arc::new(Handler::from_config(config(dir, views)).map_err(AdapterError::Failed)?);
     {
         let storage = handler.get_storage();
         // Present after a restart; created on first open.
