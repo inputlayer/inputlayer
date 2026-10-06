@@ -59,8 +59,11 @@
 //! average, and probes (or decides) again after some commits, waiting longer
 //! after each failure, or as soon as it has twice the bindings it had when
 //! it stopped: a verdict reached while views were still subscribing must
-//! not hold for the many more that follow. While sharing, a view evaluates
-//! its own query now and then to keep that cost current.
+//! not hold for the many more that follow. Nor does it count as a failure:
+//! a family that stopped with more bindings than at its previous verdict
+//! probes again after one commit, and only a failure with no more bindings
+//! than that makes it wait longer. While sharing, a view evaluates its own
+//! query now and then to keep that cost current.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -512,10 +515,11 @@ pub struct Family {
     round_gate: tokio::sync::RwLock<()>,
     /// Own evaluations since sharing stopped.
     own_since_stop: AtomicU64,
-    /// Times sharing stopped since a round last kept it.
+    /// Times sharing stopped, with no more bindings than at the verdict
+    /// before, since a round last kept it.
     stops: AtomicU64,
-    /// Bindings when sharing last stopped.
-    stopped_at_bindings: AtomicU64,
+    /// Bindings at the last verdict (0: none yet).
+    judged_at_bindings: AtomicU64,
     /// Recent cost of a view's own evaluation, in microseconds (0: unknown).
     own_cost_us: AtomicU64,
     /// Recent cost of a round since sharing last stopped, in microseconds
@@ -610,7 +614,7 @@ impl Family {
         self.shared_cost_us.store(0, Ordering::Relaxed);
         self.own_since_stop.store(0, Ordering::Relaxed);
         self.stops.store(0, Ordering::Relaxed);
-        self.stopped_at_bindings.store(0, Ordering::Relaxed);
+        self.judged_at_bindings.store(0, Ordering::Relaxed);
         verdict
     }
 
@@ -739,6 +743,7 @@ impl Family {
                 );
                 self.stop_sharing(&rules);
             } else if self.start_sharing(&rules) {
+                self.judged_at_bindings.store(bindings, Ordering::Relaxed);
                 if self.stops.load(Ordering::Relaxed) != 0 {
                     self.stops.store(0, Ordering::Relaxed);
                 }
@@ -793,27 +798,28 @@ impl Family {
         judged
     }
 
-    /// Stop sharing on a verdict under `rules`, counting a failure, unless
-    /// the family no longer judges them.
+    /// Stop sharing on a verdict under `rules`, unless the family no longer
+    /// judges them. It counts as a failure only with no more bindings than
+    /// at the verdict before: a family still growing is not judged for good.
     fn stop_sharing(&self, rules: &Arc<PersistentRules>) {
         if !self.judges(rules) {
             return;
         }
         self.own_since_stop.store(0, Ordering::Relaxed);
         self.shared_cost_us.store(0, Ordering::Relaxed);
-        self.stops.fetch_add(1, Ordering::Relaxed);
-        self.stopped_at_bindings.store(
-            self.bindings.load(Ordering::Relaxed) as u64,
-            Ordering::Relaxed,
-        );
+        let bindings = self.bindings.load(Ordering::Relaxed) as u64;
+        if bindings <= self.judged_at_bindings.swap(bindings, Ordering::Relaxed) {
+            self.stops.fetch_add(1, Ordering::Relaxed);
+        }
         self.sharing.store(false, Ordering::Relaxed);
     }
 
     /// Note a view's own evaluation on `snapshot`, of `cost`. Whether to
     /// probe: no parameter binds recursion under `snapshot`'s rules, there
-    /// are more bindings than compute permits, and the family never stopped
-    /// sharing, enough own evaluations passed since it did, or it has twice
-    /// the bindings it had then.
+    /// are more bindings than compute permits, and the family was never
+    /// judged, has twice the bindings it had when it stopped sharing, or
+    /// enough own evaluations passed since it did: a commit's when that stop
+    /// counted no failure.
     fn record_own(&self, cost: Duration, snapshot: &KnowledgeGraphSnapshot) -> bool {
         let rules = snapshot.persistent_rules();
         if self.binds_recursion(snapshot) || !self.judges(rules) {
@@ -830,11 +836,15 @@ impl Family {
         let stops = self.stops.load(Ordering::Relaxed);
         let grown = bindings
             >= self
-                .stopped_at_bindings
+                .judged_at_bindings
                 .load(Ordering::Relaxed)
                 .saturating_mul(2);
-        self.outnumbers_permits()
-            && (stops == 0 || grown || since_stop >= probe_after(bindings, stops))
+        let wait = if stops == 0 {
+            bindings
+        } else {
+            probe_after(bindings, stops)
+        };
+        self.outnumbers_permits() && (grown || since_stop >= wait)
     }
 
     /// Evaluate the round of `snapshot`'s revision (the pending round, which
@@ -911,7 +921,7 @@ impl Families {
                         round_gate: tokio::sync::RwLock::default(),
                         own_since_stop: AtomicU64::new(0),
                         stops: AtomicU64::new(0),
-                        stopped_at_bindings: AtomicU64::new(0),
+                        judged_at_bindings: AtomicU64::new(0),
                         own_cost_us: AtomicU64::new(0),
                         shared_cost_us: AtomicU64::new(0),
                         rounds: AtomicU64::new(0),
