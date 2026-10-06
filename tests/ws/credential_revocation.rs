@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::harness::{config, serve};
+use crate::harness::{capture_logs, config, serve};
 use futures_util::{SinkExt, StreamExt};
 use inputlayer::auth::{CredentialEnded, INTERNAL_KG};
 use inputlayer::protocol::rest::create_router;
@@ -559,64 +559,10 @@ async fn revocation_fences_a_subscription_held_at_the_result_cap() {
 
 /// A completed `.why` proof must still pass the credential fence before output.
 /// Use the current-thread runtime so the server task runs on the test's thread,
-/// and revoke synchronously at its output boundary. The trace subscriber is
-/// global and acts only on that thread: a thread-local one is the only
-/// dispatcher, so another test's thread reaching an event first caches it as
-/// disabled everywhere, and the hook would never run.
+/// and revoke synchronously at its output boundary, from the capture of that
+/// thread's log lines.
 #[tokio::test]
 async fn revocation_during_a_proof_withholds_it() {
-    use std::sync::Mutex;
-    use std::thread::ThreadId;
-    use tracing::field::{Field, Visit};
-    use tracing_subscriber::prelude::*;
-
-    /// The thread whose next execution end revokes the handler's `bob-why`.
-    static ARMED: Mutex<Option<(ThreadId, Arc<Handler>)>> = Mutex::new(None);
-
-    struct RevokeBeforeOutput;
-
-    #[derive(Default)]
-    struct ExecutionEnd {
-        matched: bool,
-        succeeded: bool,
-    }
-
-    impl Visit for ExecutionEnd {
-        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-            if field.name() == "message" {
-                self.matched = format!("{value:?}") == "ws_execute_end";
-            }
-        }
-
-        fn record_bool(&mut self, field: &Field, value: bool) {
-            if field.name() == "ok" {
-                self.succeeded = value;
-            }
-        }
-    }
-
-    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for RevokeBeforeOutput {
-        fn on_event(
-            &self,
-            event: &tracing::Event<'_>,
-            _: tracing_subscriber::layer::Context<'_, S>,
-        ) {
-            let mut end = ExecutionEnd::default();
-            event.record(&mut end);
-            if !end.matched {
-                return;
-            }
-            let mut armed = ARMED.lock().unwrap();
-            if !matches!(&*armed, Some((thread, _)) if *thread == std::thread::current().id()) {
-                return;
-            }
-            let (_, handler) = armed.take().unwrap();
-            drop(armed);
-            assert!(end.succeeded, "proof evaluation failed before the fence");
-            handler.handle_apikey_revoke("bob-why").unwrap();
-        }
-    }
-
     let server = start_server().await;
     server.write("+edge[(1, 2)]").await;
     server.write("+path(X, Y) <- edge(X, Y)").await;
@@ -633,16 +579,20 @@ async fn revocation_during_a_proof_withholds_it() {
     // The event runs after evaluation but before any response frame is enqueued.
     // Blocking there until revocation completes removes assumptions about proof
     // duration, scheduling, and the time needed to persist the credential change.
-    // Enable only the execution's events, so other tests' code stays untraced.
-    let execution = tracing_subscriber::filter::Targets::new().with_target(
-        "inputlayer::protocol::rest::handlers::ws::execute",
-        tracing::Level::INFO,
-    );
-    tracing::subscriber::set_global_default(
-        tracing_subscriber::registry().with(RevokeBeforeOutput.with_filter(execution)),
-    )
-    .expect("no other global subscriber");
-    *ARMED.lock().unwrap() = Some((std::thread::current().id(), Arc::clone(&server.handler)));
+    let armed = std::cell::Cell::new(Some(Arc::clone(&server.handler)));
+    let _capture = capture_logs(move |line| {
+        if !line.contains("ws_execute_end") {
+            return;
+        }
+        let Some(handler) = armed.take() else {
+            return;
+        };
+        assert!(
+            line.contains("ok=true"),
+            "proof evaluation failed before the fence: {line}"
+        );
+        handler.handle_apikey_revoke("bob-why").unwrap();
+    });
     client
         .send(json!({"type": "execute", "program": proof}))
         .await;

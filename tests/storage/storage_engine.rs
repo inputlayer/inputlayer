@@ -8,6 +8,7 @@ use tempfile::TempDir;
 fn create_test_config(data_dir: std::path::PathBuf) -> Config {
     let mut config = Config::default();
     config.storage.data_dir = data_dir;
+    crate::harness::pool();
     config.storage.performance.num_threads = 2; // Use 2 threads for tests
     config
 }

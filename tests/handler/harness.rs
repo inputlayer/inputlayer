@@ -27,6 +27,14 @@ pub fn handler_at(dir: &Path) -> Handler {
     Handler::new(StorageEngine::new(config).expect("create storage engine"))
 }
 
+/// Size the process's thread pool as an engine of the default configuration
+/// would, before building an engine whose `num_threads` is its worker count:
+/// the first such engine would otherwise size the pool for every module.
+pub fn default_pool() {
+    static POOL: std::sync::Once = std::sync::Once::new();
+    POOL.call_once(|| StorageEngine::set_num_threads(0).expect("size the thread pool"));
+}
+
 /// Held by a test for as long as it relies on `INPUTLAYER_REGISTRY`: the
 /// variable is the process's, and every module shares this binary.
 pub async fn registry_env() -> tokio::sync::MutexGuard<'static, ()> {

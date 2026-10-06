@@ -15,6 +15,7 @@ use tempfile::TempDir;
 fn engine(dir: &Path) -> StorageEngine {
     let mut config = Config::default();
     config.storage.data_dir = dir.to_path_buf();
+    crate::harness::pool();
     config.storage.performance.num_threads = 1;
     StorageEngine::new(config).unwrap()
 }

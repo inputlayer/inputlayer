@@ -46,7 +46,8 @@ impl Drop for Server {
 }
 
 async fn start_server() -> Server {
-    let (config, tmp) = config(PASSWORD);
+    let (mut config, tmp) = config(PASSWORD);
+    config.storage.performance.num_threads = 4;
     let handler = Arc::new(Handler::from_config(config).unwrap());
     handler.bootstrap_auth().unwrap();
     handler.get_storage().create_knowledge_graph(KG).unwrap();

@@ -12,6 +12,7 @@ use tempfile::TempDir;
 const KG: &str = "default";
 
 fn handler(dir: &Path, durability_mode: DurabilityMode) -> Handler {
+    crate::harness::pool();
     let mut config = Config::default();
     config.storage.data_dir = dir.to_path_buf();
     config.storage.persist.durability_mode = durability_mode;

@@ -24,6 +24,7 @@ fn config(root: &Path) -> Config {
     let mut config = Config::default();
     config.storage.data_dir = root.join("data");
     config.storage.backup_dir = Some(root.join("backups"));
+    crate::harness::pool();
     config.storage.performance.num_threads = 2;
     config.storage.persist.durability_mode = DurabilityMode::Batched;
     config.storage.persist.buffer_size = 16;

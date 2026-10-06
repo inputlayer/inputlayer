@@ -6,6 +6,7 @@ use inputlayer::{Config, OptimizationConfig};
 use tempfile::TempDir;
 
 fn handler(magic: bool, workers: usize) -> (Handler, TempDir) {
+    crate::harness::default_pool();
     let temp = TempDir::new().expect("temp dir");
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();

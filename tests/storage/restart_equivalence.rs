@@ -17,6 +17,7 @@ const KG: &str = "default";
 fn config(dir: &Path, buffer_size: usize) -> Config {
     let mut config = Config::default();
     config.storage.data_dir = dir.to_path_buf();
+    crate::harness::pool();
     config.storage.performance.num_threads = 2;
     config.storage.persist.durability_mode = DurabilityMode::Immediate;
     config.storage.persist.buffer_size = buffer_size;

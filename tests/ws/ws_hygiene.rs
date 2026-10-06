@@ -3,11 +3,10 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::harness::{config, serve};
+use crate::harness::{capture_logs, config, serve};
 use futures_util::{SinkExt, StreamExt};
 use inputlayer::protocol::Handler;
 use serde_json::{json, Value};
@@ -68,34 +67,6 @@ async fn recv(ws: &mut WebSocketStream<MaybeTlsStream<TcpStream>>) -> Value {
     }
 }
 
-#[derive(Clone, Default)]
-struct LogBuffer(Arc<Mutex<Vec<u8>>>);
-
-impl LogBuffer {
-    fn contents(&self) -> String {
-        String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
-    }
-}
-
-impl Write for LogBuffer {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuffer {
-    type Writer = Self;
-
-    fn make_writer(&'a self) -> Self::Writer {
-        self.clone()
-    }
-}
-
 #[tokio::test]
 async fn session_scoped_ws_route_is_gone() {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -124,17 +95,13 @@ async fn session_scoped_ws_route_is_gone() {
     assert!(server.handler.session_manager().has_session(&session_id));
 }
 
-/// Runs on the current-thread runtime, so the thread-local subscriber also
-/// captures the server task's events.
+/// Runs on the current-thread runtime, so the capture of this thread's log
+/// lines also holds the server task's events.
 #[tokio::test]
 async fn info_logs_carry_no_credentials_or_session_ids() {
-    let logs = LogBuffer::default();
-    let subscriber = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_ansi(false)
-        .with_writer(logs.clone())
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let logs = Arc::new(Mutex::new(String::new()));
+    let captured = Arc::clone(&logs);
+    let _capture = capture_logs(move |line| captured.lock().unwrap().push_str(line));
 
     let server = start_server().await;
     let url = format!("ws://{}/ws?kg={KG}", server.addr);
@@ -164,7 +131,7 @@ async fn info_logs_carry_no_credentials_or_session_ids() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    let out = logs.contents();
+    let out = logs.lock().unwrap().clone();
     assert!(out.contains("ws_execute_start"), "{out}");
     assert!(out.contains(".user create <redacted>"), "{out}");
     assert!(out.contains(".user password <redacted>"), "{out}");
