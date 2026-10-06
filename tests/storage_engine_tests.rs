@@ -1,4 +1,5 @@
-//! Storage engine integration tests: multi-KG ops, persistence, concurrency.
+//! Storage engine integration tests: multi-KG ops, persistence, concurrency,
+//! IQL rules and queries.
 
 use inputlayer::{statement::parse_rule_definition, Config, RuleCatalog, StorageEngine};
 use tempfile::TempDir;
