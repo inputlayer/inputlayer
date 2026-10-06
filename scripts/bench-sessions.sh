@@ -52,20 +52,7 @@ cp target/release/inputlayer-server "$RUN_DIR/inputlayer-server"
 
 if [ -n "$BASELINE_REV" ]; then
     BASELINE_SHA=$(git rev-parse --verify "${BASELINE_REV}^{commit}")
-    TOOLCHAIN_KEY=$(rustc -V | sha256sum | cut -c1-12)
-    GATE_OUT=$ROOT/target/perf-gate
-    BASELINE_BIN=$GATE_OUT/servers/$BASELINE_SHA-$TOOLCHAIN_KEY/inputlayer-server
-    if [ ! -x "$BASELINE_BIN" ]; then
-        echo "=== Build baseline server $BASELINE_SHA ==="
-        SRC=$GATE_OUT/src/$BASELINE_SHA
-        rm -rf "$SRC" && mkdir -p "$SRC"
-        git archive --format=tar "$BASELINE_SHA" | tar -x -C "$SRC"
-        if [ -f Cargo.lock ]; then cp Cargo.lock "$SRC/"; fi
-        CARGO_TARGET_DIR=$GATE_OUT/build cargo build --release --all-features \
-            --manifest-path "$SRC/Cargo.toml" --bin inputlayer-server
-        mkdir -p "$(dirname "$BASELINE_BIN")"
-        cp "$GATE_OUT/build/release/inputlayer-server" "$BASELINE_BIN"
-    fi
+    BASELINE_BIN=$(scripts/perf-gate-baseline.sh "$BASELINE_SHA")
     ARGS+=(--compare "$BASELINE_BIN" --compare-label "$BASELINE_SHA")
 fi
 

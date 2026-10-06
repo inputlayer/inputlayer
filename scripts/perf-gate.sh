@@ -48,27 +48,15 @@ if [ -z "$BASELINE_REV" ]; then
 fi
 BASELINE_SHA=$(git rev-parse --verify "${BASELINE_REV}^{commit}")
 RUSTC=$(rustc -V)
-TOOLCHAIN_KEY=$(printf '%s' "$RUSTC" | sha256sum | cut -c1-12)
 
 echo "=== Build perf-gate ==="
 cargo build --release --quiet --manifest-path perf-gate/Cargo.toml --target-dir target
 GATE=$ROOT/target/release/perf-gate
 
 # Server binaries are built exactly like the release image: release profile,
-# all features. Baselines are cached per commit and toolchain.
-BASELINE_BIN=$OUT/servers/$BASELINE_SHA-$TOOLCHAIN_KEY/inputlayer-server
-if [ ! -x "$BASELINE_BIN" ]; then
-    echo "=== Build baseline server $BASELINE_SHA ==="
-    SRC=$OUT/src/$BASELINE_SHA
-    rm -rf "$SRC" && mkdir -p "$SRC"
-    git archive --format=tar "$BASELINE_SHA" | tar -x -C "$SRC"
-    # Same dependency versions as the candidate where the manifests allow.
-    if [ -f Cargo.lock ]; then cp Cargo.lock "$SRC/"; fi
-    CARGO_TARGET_DIR=$OUT/build cargo build --release --all-features \
-        --manifest-path "$SRC/Cargo.toml" --bin inputlayer-server
-    mkdir -p "$(dirname "$BASELINE_BIN")"
-    cp "$OUT/build/release/inputlayer-server" "$BASELINE_BIN"
-fi
+# all features. Baselines are cached per commit and toolchain, each built
+# from its own sources alone (scripts/perf-gate-baseline.sh).
+BASELINE_BIN=$(scripts/perf-gate-baseline.sh "$BASELINE_SHA")
 
 if [ "$AA" = 1 ]; then
     CANDIDATE_BIN=$BASELINE_BIN
