@@ -85,7 +85,7 @@ make soak-remote                                           # Sustained soak on t
 
 ### Tier 3: Snapshot Tests (E2E)
 
-~995 IQL scripts in `examples/iql/` organized across 33 categories. Each `.iql` file has a corresponding `.iql.out` file with expected output. The test runner starts a server, executes each script via the client binary, and compares actual output against the snapshot.
+~1,150 IQL scripts in `examples/iql/` organized across 36 categories. Each `.iql` file has a corresponding `.iql.out` file with expected output. The test runner starts a server, executes each script via the client binary, and compares actual output against the snapshot.
 
 ```bash
 make e2e-test                              # Run all (parallel, 4 jobs)
