@@ -2,16 +2,24 @@
 """Generate scripts/affected-map.toml: which spec categories exercise which
 leaf src/ modules.
 
-A category's statement types are read from its specs, the files they .load
-and their recorded transcripts (.iql.out), which include the plan output of
-every `.debug` statement. A module is listed only when a statement type
-reaches it and nothing else does; run_snapshot_tests.sh --affected runs the
-whole corpus for any other change under src/, so a module missing here costs
-time rather than coverage.
+The map is derived from the statement types found in spec text, with a fixed
+statement-type -> module table (STATEMENT_TYPES below). A category's statement
+types are matched in its specs, the files they .load and their recorded
+transcripts (.iql.out). A module is listed only when a statement type reaches
+it and nothing else does; run_snapshot_tests.sh --affected runs the whole
+corpus for any other change under src/, so a module missing here costs time
+rather than coverage.
+
+The map is not derived from `.debug` plan output, because:
+  - recorded plan output exists for only 7 specs, all in 33_meta;
+  - a plan is a trace of parsed rules and IR operators (Scan, Join, Map, ...)
+    and names no src/ module;
+  - .why and .why_not are meta commands that never produce a plan, so
+    src/provenance cannot be seen in one at all.
+A plan-derived map is a possible follow-up.
 
 Usage:
-  ./scripts/gen-affected-map.py           # Rewrite scripts/affected-map.toml
-  ./scripts/gen-affected-map.py --debug   # Also print each category's statement types
+  ./scripts/gen-affected-map.py   # Rewrite scripts/affected-map.toml
 """
 
 import re
@@ -69,13 +77,10 @@ def statement_types(text):
     ]
 
 
-def generate(debug):
+def generate():
     modules = {}
     for category in sorted(p for p in EXAMPLES_DIR.iterdir() if p.is_dir()):
-        types = statement_types(category_text(category))
-        if debug:
-            print(f"{category.name}: {' '.join(types) or '-'}", file=sys.stderr)
-        for name in types:
+        for name in statement_types(category_text(category)):
             for module in STATEMENT_TYPES[name][1]:
                 modules.setdefault(module, []).append(category.name)
     lines = [
@@ -92,11 +97,9 @@ def generate(debug):
 
 
 def main():
-    args = set(sys.argv[1:])
-    unknown = args - {"--debug"}
-    if unknown:
-        sys.exit(f"Unknown option: {' '.join(sorted(unknown))}")
-    MAP_FILE.write_text(generate("--debug" in args))
+    if sys.argv[1:]:
+        sys.exit(f"Unknown option: {' '.join(sys.argv[1:])}")
+    MAP_FILE.write_text(generate())
 
 
 if __name__ == "__main__":
