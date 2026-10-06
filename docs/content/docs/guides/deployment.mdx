@@ -739,8 +739,11 @@ the evaluator checks them every few thousand rows a join forms, so even a
 join pairing millions of rows in one step is stopped a few hundred KB past
 its limit. After queries that held a lot of memory, the server returns what
 they freed to the operating system once no such query has finished for a
-second: a stream of large reads keeps reusing its pages instead of paying to
-return them and fault them back in on every read.
+second, and at the latest five seconds after the first of them: a stream of
+large reads keeps reusing its pages instead of paying to return them and
+fault them back in on every read. Freed memory can stay resident for those
+few seconds; the query and server memory limits count what queries hold and
+apply as before.
 
 `max_query_cost` (default 100,000,000) refuses with `validation`, before it
 runs, a query whose plan joins relations on no shared variable into a cross
