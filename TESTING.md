@@ -132,22 +132,25 @@ Criterion benches in `benches/` are diagnostic only.
 
 ## Nightly
 
-`.github/workflows/nightly.yml` runs once a night on `main` what is too long
-for the PR gate and for every push to `main`. Every job writes its results to
-the job summary, and a failed night opens one tracking issue (label
-`nightly-failure`) or comments on the open one.
+`.github/workflows/nightly.yml` runs on `main` what is too long for the PR
+gate and for every push to `main`. It is meant to run once a night; while
+[CI is paused](CONTRIBUTING#ci-is-paused-temporary) its schedule is commented out and it is started
+by hand. Every job writes its results to the job summary, and a failed run on
+`main` opens one tracking issue (label `nightly-failure`) or comments on the
+open one.
 
 | Job | What runs |
 |-----|-----------|
-| Tests at nightly scale | `INPUTLAYER_ORACLE_SEEDS=300 INPUTLAYER_SOAK=1 make test-release`: every workspace test in release, the oracle at 300 seeds, and the tests that run only with `INPUTLAYER_SOAK=1`. Then the quarantined scenarios (`--ignored`) and the HNSW recall tests with their recall printed: recall@10 on 3,000 vectors, after incremental inserts, and against brute force at 1,000, 10,000 and 50,000 vectors. The summary lists the open `XFAIL`s and every test marked `#[ignore]`. |
+| Tests at nightly scale | `INPUTLAYER_ORACLE_SEEDS=300 INPUTLAYER_SOAK=1 make test-release`: every workspace test in release, the oracle at 300 seeds, and the tests that run only with `INPUTLAYER_SOAK=1`. Then the quarantined scenarios (`--ignored`) and the HNSW recall tests with their recall printed: recall@10 on 3,000 vectors, after incremental inserts, and against brute force at 1,000, 10,000 and 50,000 vectors. The summary lists the open `XFAIL`s and the tests marked `#[ignore]` (the four existing ones, tracked); the job fails if there are more. |
 | Fuzz | Every `cargo fuzz` target for 10 minutes. The harness (parser and WS frames) is #301's; until it lands the job reports `XFAIL #301`. |
-| Benchmark host | `scripts/nightly-bench.sh`, behind the host's lock: the [concurrency soak](#concurrency-soak) for 10 minutes with 200 consumers, then the [performance gate](#performance-gate), whose report lands in the summary. It needs a self-hosted runner that can reach the host, named by the repository variable `NIGHTLY_BENCH_RUNNER`; without it the job is skipped and the report says so. |
-| Coverage | `make coverage`, on Sundays or when a manual run asks for it. |
+| Benchmark host | `scripts/nightly-bench.sh`, behind the host's lock: the [concurrency soak](#concurrency-soak) for 10 minutes with 200 consumers, then the [performance gate](#performance-gate), whose report lands in the summary. It needs a self-hosted runner that can reach the host, named by the repository variable `NIGHTLY_BENCH_RUNNER`; without it the job is skipped and the report marks the soak and the gate `XFAIL (bench runner not registered: NIGHTLY_BENCH_RUNNER unset)`, an expected failure that opens no tracking issue. |
+| Coverage | `make coverage`, on Sundays or when a manual run asks for it; otherwise the report shows `not due (Sundays only)`. |
 
 A test too long for the PR gate is gated on `INPUTLAYER_SOAK=1` and returns at
 once without it, not marked `#[ignore]`. A manual run
 (`gh workflow run nightly.yml --ref main`, `-f coverage=true` to add coverage)
-does the same as the nightly one.
+does the same as the scheduled one, except that coverage runs only when asked
+for.
 
 ## Scenario Suite (E2E)
 

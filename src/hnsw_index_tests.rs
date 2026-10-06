@@ -124,6 +124,9 @@ fn test_hnsw_recall_holds_after_incremental_inserts() {
         found += got.iter().filter(|(id, _)| truth.contains(id)).count();
     }
     let recall = found as f64 / 500.0;
+    println!(
+        "hnsw recall@10 (n=3000 after incremental inserts, dim=32, ef_search=64): {recall:.4}"
+    );
     assert!(recall >= 0.95, "recall {recall} < 0.95");
 }
 

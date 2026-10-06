@@ -372,7 +372,7 @@ CI runs in four tiers: a PR gate that stays under ten minutes, a run on every pu
 
 **Main** (`.github/workflows/main.yml`) runs on every push to `main`: every snapshot spec, the differential oracle at 50 seeds (`INPUTLAYER_ORACLE_SEEDS=50 make oracle-test`), the JS and Python SDK live suites (`make js-test-live`, `make python-sdk-live`, `make python-test-live`) and the reactive agent path in release with its latency samples (`make e2e-reactive`). A failure there names the merge that caused it.
 
-**Nightly** (`.github/workflows/nightly.yml`) runs once a night on `main`: every test in release at nightly scale (`INPUTLAYER_ORACLE_SEEDS=300 INPUTLAYER_SOAK=1 make test-release`), quarantined scenarios, the HNSW recall tests, every `cargo fuzz` target for 10 minutes, the concurrency soak and the performance gate on the benchmark host behind its lock (`scripts/nightly-bench.sh`), and coverage on Sundays. Results land in the job summary, and a failed night opens or updates one tracking issue labeled `nightly-failure`. See [TESTING.md](TESTING.md#nightly).
+**Nightly** (`.github/workflows/nightly.yml`) is meant to run once a night on `main` and is started by hand while [CI is paused](#ci-is-paused-temporary): every test in release at nightly scale (`INPUTLAYER_ORACLE_SEEDS=300 INPUTLAYER_SOAK=1 make test-release`), quarantined scenarios, the HNSW recall tests, every `cargo fuzz` target for 10 minutes, the concurrency soak and the performance gate on the benchmark host behind its lock (`scripts/nightly-bench.sh`), and coverage on Sundays or when a manual run asks for it. Results land in the job summary, and a failed run on `main` opens or updates one tracking issue labeled `nightly-failure`. See [TESTING.md](TESTING.md#nightly).
 
 **Full suite** (`.github/workflows/full-suite.yml`) runs on release commits or a manual run on `main`: the release build with all tests, snapshot specs and the reactive agent path (`make e2e-reactive`), Python and JS SDK tests, the Python live-server integration, coverage, MSRV, `make doc-check`, the website build, the performance gate tool's own checks (`make perf-gate-check`), the performance gate itself (approved baseline vs the checkpoint commit on one dedicated 32-vCPU runner, FAIL fails the checkpoint; INCONCLUSIVE is retried once with more rounds, then reported as a warning; see [perf-gate/README.md](perf-gate/README.md#at-release-checkpoints-ci)) and the Verified Completions gate (`make vc-gate`). Docker image builds (`docker.yml`) run on release commits only.
 
@@ -383,7 +383,7 @@ The triggers are:
 | PR targeting `main`, labeled `release` | Full suite and Docker build when the label is added, then again on every push while it stays. On PR updates, the PR gate still runs format and clippy when its path filter matches, and leaves the tests to the full suite. Removing the label restores the PR gate's tests on the next push, unless the branch is covered by the row below. |
 | Push to a `release/**` branch (`make release VERSION=x.y.z`) | Full suite and Docker build. A PR from that branch in this repository is covered by the branch push, so it does not run the suite or Docker build a second time. |
 | Push to `main` | `main.yml`, as described above. |
-| Every night, or a manual run (`gh workflow run nightly.yml --ref main`, `-f coverage=true` to add coverage) | `nightly.yml`, as described above. |
+| Manual run (`gh workflow run nightly.yml --ref main`, `-f coverage=true` to add coverage); every night once the pause ends | `nightly.yml`, as described above. |
 | Push of a `v*` tag | The Release workflow runs the full suite once, including SDK tests and the website build. Only after it passes do the crates.io, PyPI and npm publishing jobs and website deployment run. Deployment reuses the website artifact from the full suite. Docker builds and pushes images in its own workflow. |
 | Manual run (Actions tab, or `gh workflow run full-suite.yml --ref main`) | Full suite on `main` only; dispatches on other refs skip all jobs. With `-f perf_gate_only=true`, only the performance gate runs, on any ref. No Docker build or publishing. Publishing workflows cannot be dispatched manually. |
 
@@ -454,3 +454,5 @@ tests, scenarios, snapshot specs, the SDK suites; see TESTING.md for the
 commands) and list in the PR description which checks you ran and their result.
 Every workflow can still be started by hand from the Actions tab
 (`workflow_dispatch`). Release branches and `v*` tags still build and publish.
+The nightly (`nightly.yml`) is started by hand too until the pause ends: its
+schedule is commented out.

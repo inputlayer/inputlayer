@@ -1,7 +1,8 @@
 name: Nightly
 
-# Once a night on main: the runs too long for the PR gate (ci.yml) and for
-# every push to main (main.yml).
+# The runs too long for the PR gate (ci.yml) and for every push to main
+# (main.yml). Meant to run once a night on main; started by hand while CI is
+# paused (CONTRIBUTING, "CI is paused").
 #   - the whole test suite in release at nightly scale: the differential
 #     oracle at 300 seeds, everything gated by INPUTLAYER_SOAK=1 (the HNSW
 #     recall against brute force at three sizes), and quarantined scenarios
@@ -10,14 +11,14 @@ name: Nightly
 #     (10 minutes, 200 consumers, slow ones included) and the performance
 #     gate (scripts/nightly-bench.sh)
 #   - coverage, on Sundays or when a manual run asks for it
-# Every job writes its results to the job summary. A failed night opens one
-# tracking issue (label nightly-failure) or comments on the open one; a
-# manual run files one only on main. TESTING.md and CONTRIBUTING describe
-# the policy.
+# Every job writes its results to the job summary. A failed run on main opens
+# one tracking issue (label nightly-failure) or comments on the open one.
+# TESTING.md and CONTRIBUTING describe the policy.
 
 on:
-  schedule:
-    - cron: '17 2 * * *'
+  # CI is paused: started by hand until the pause ends, then uncomment.
+  # schedule:
+  #   - cron: '17 2 * * *'
   workflow_dispatch:
     inputs:
       coverage:
@@ -45,6 +46,8 @@ jobs:
       INPUTLAYER_ORACLE_SEEDS: 300
       INPUTLAYER_SOAK: 1
       INPUTLAYER_XFAIL_LOG: ${{ github.workspace }}/target/xfail.log
+      # The tests marked #[ignore] today; the job fails on one more.
+      MAX_IGNORED: 4
     steps:
       - uses: actions/checkout@v4
 
@@ -83,6 +86,7 @@ jobs:
         if: always()
         shell: bash
         run: |
+          ignored=$(git grep -n -E '#\[ignore|ignore = "' -- '*.rs' ':!vendor' || true)
           {
             echo "## Tests at nightly scale"
             echo
@@ -95,7 +99,7 @@ jobs:
             echo "### HNSW recall"
             echo
             echo '```'
-            grep -h '^hnsw recall' "$RUNNER_TEMP/recall.log" 2> /dev/null || echo "no recall line: the recall tests did not run"
+            grep -oh 'hnsw recall.*' "$RUNNER_TEMP/recall.log" 2> /dev/null || echo "no recall line: the recall tests did not run"
             echo '```'
             echo
             echo "### Expected failures"
@@ -104,12 +108,17 @@ jobs:
             make --no-print-directory xfail-list XFAIL_LOG="$INPUTLAYER_XFAIL_LOG"
             echo '```'
             echo
-            echo "### Tests marked #[ignore]"
+            echo "### Tests marked #[ignore] (existing, tracked)"
             echo
             echo '```'
-            git grep -n -E '#\[ignore|ignore = "' -- '*.rs' ':!vendor' || echo "none"
+            echo "${ignored:-none}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          count=$(printf '%s' "$ignored" | grep -c . || true)
+          if [ "$count" -gt "$MAX_IGNORED" ]; then
+            echo "::error title=New #[ignore]::$count tests are marked #[ignore], more than the $MAX_IGNORED tracked. Gate a long test on INPUTLAYER_SOAK=1 instead."
+            exit 1
+          fi
 
   # Every cargo-fuzz target for FUZZ_SECS seconds. The harness is #301's: until it
   # lands there is nothing to run, which the summary reports as an expected
@@ -187,7 +196,8 @@ jobs:
   # benchmark at a time behind its lock (perf-gate/README.md). The host is on
   # a private network, so this job needs a self-hosted runner that can ssh to
   # it: the repository variable NIGHTLY_BENCH_RUNNER names that runner's
-  # label. Without it the job is skipped and the report says so.
+  # label. Without it the job is skipped and the report marks the soak and the
+# gate as an expected failure.
   bench:
     name: Benchmark host (soak, performance gate)
     if: vars.NIGHTLY_BENCH_RUNNER != ''
@@ -215,6 +225,8 @@ jobs:
     name: Coverage (weekly)
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
+    outputs:
+      due: ${{ steps.due.outputs.run }}
     steps:
       - name: Sunday, or asked for
         id: due
@@ -275,6 +287,7 @@ jobs:
       FUZZ_HARNESS: ${{ needs.fuzz.outputs.harness }}
       BENCH: ${{ needs.bench.result }}
       COVERAGE: ${{ needs.coverage.result }}
+      COVERAGE_DUE: ${{ needs.coverage.outputs.due }}
       FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
@@ -284,7 +297,10 @@ jobs:
             FUZZ="XFAIL #301 (no fuzz harness yet)"
           fi
           if [ "$BENCH" = skipped ]; then
-            BENCH="skipped (no runner: repository variable NIGHTLY_BENCH_RUNNER is unset)"
+            BENCH="XFAIL (bench runner not registered: NIGHTLY_BENCH_RUNNER unset)"
+          fi
+          if [ "$COVERAGE" = success ] && [ "$COVERAGE_DUE" != true ]; then
+            COVERAGE="not due (Sundays only)"
           fi
           {
             echo "## Nightly, ${GITHUB_SHA:0:8}"
@@ -293,14 +309,16 @@ jobs:
             echo "|---|---|"
             echo "| Tests at nightly scale | $TESTS |"
             echo "| Fuzz | $FUZZ |"
-            echo "| Benchmark host (soak, performance gate) | $BENCH |"
+            echo "| Concurrency soak (benchmark host) | $BENCH |"
+            echo "| Performance gate (benchmark host) | $BENCH |"
             echo "| Coverage (weekly) | $COVERAGE |"
             echo
             echo "Run: $RUN_URL"
           } | tee report.md >> "$GITHUB_STEP_SUMMARY"
 
       # One issue for a failing nightly: opened by the first failed night,
-      # commented on by each later one until someone closes it.
+      # commented on by each later one until someone closes it. An XFAIL is
+      # an expected failure: it shows in the report and opens no issue.
       - name: Open or update the tracking issue
         if: env.FAILED == 'true' && github.ref == 'refs/heads/main'
         env:
