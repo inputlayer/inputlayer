@@ -86,7 +86,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          ignored=$(git grep -n -E '#\[ignore|ignore = "' -- '*.rs' ':!vendor' || true)
+          ignored=$(git grep -n -E '#\[ignore|(,|^)[[:space:]]*ignore[[:space:]]*([])=,]|$)' -- '*.rs' ':!vendor' || true)
           {
             echo "## Tests at nightly scale"
             echo
