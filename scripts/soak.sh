@@ -16,10 +16,10 @@
 # the nesting ceiling sweep of tests/nesting_depth_tests.rs. Its outcome is
 # the last line of summary.md.
 #
-# Exit status: 0 when the soak passed, 1 when it failed, 3 on a setup error.
-# result.json and summary.md land in target/soak/runs/<utc-time>/;
-# target/soak/latest points there. The sustained run belongs on the
-# benchmark host: make soak-remote.
+# Exit status: 0 when the soak and the sweep passed, 1 when either failed,
+# 3 on a setup error. result.json and summary.md land in
+# target/soak/runs/<utc-time>/; target/soak/latest points there. The
+# sustained run belongs on the benchmark host: make soak-remote.
 set -euo pipefail
 
 ROOT=$(git rev-parse --show-toplevel)
