@@ -229,8 +229,9 @@ fn configured_nesting_limit_is_enforced() {
 }
 
 /// The highest configurable limit still fits every pass over the term: terms
-/// at the ceiling parse and evaluate end to end. About 20 s of a debug run,
-/// so it runs with the soak (`INPUTLAYER_SOAK=1`, set by `scripts/soak.sh`).
+/// at the ceiling parse and evaluate end to end. About 20 s of the PR gate,
+/// in release as in debug, so it runs with the soak (`INPUTLAYER_SOAK=1`,
+/// set by `scripts/soak.sh`).
 #[test]
 fn terms_at_the_nesting_ceiling_evaluate() {
     if !soak_enabled() {
