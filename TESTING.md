@@ -83,6 +83,13 @@ make soak SOAK_ARGS="--secs 120 --set FAST=50"             # Sustained profile, 
 make soak-remote                                           # Sustained soak on the benchmark host
 ```
 
+`scripts/soak.sh` then runs the storage concurrency loops (`tests/soak/storage.rs`: 100 readers and writers, sustained load, starvation, rapid lock cycles, bursts) at ten times the size they had on the PR gate; `--set STORAGE_SCALE=N` picks another factor, and their outcome is in `summary.md`. The loops return at once unless `INPUTLAYER_SOAK=1`, so on a PR run (`cargo test`) the `soak` binary passes without running them. The invariants they repeat (readers and writers do not block each other, a write is visible to later reads, errors do not corrupt state, queries across knowledge graphs do not deadlock) stay on the PR gate in `tests/storage_concurrency.rs`.
+
+```bash
+INPUTLAYER_SOAK=1 cargo test --release --all-features --test soak                               # The loops alone
+INPUTLAYER_SOAK=1 INPUTLAYER_SOAK_STORAGE_SCALE=1 cargo test --all-features --test soak         # At their PR-gate size
+```
+
 ### Tier 3: Snapshot Tests (E2E)
 
 ~1,150 IQL scripts in `examples/iql/` organized across 36 categories. Each `.iql` file has a corresponding `.iql.out` file with expected output. The test runner starts a server, executes each script via the client binary, and compares actual output against the snapshot.

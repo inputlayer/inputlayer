@@ -1,4 +1,9 @@
-//! Lock contention and concurrent KG stress tests.
+//! Storage engine concurrency loops: many readers and writers, sustained
+//! load, starvation and rapid lock cycles. The invariants they repeat at size
+//! are on the PR gate in `tests/storage_concurrency.rs`.
+//!
+//! Each loop runs `INPUTLAYER_SOAK_STORAGE_SCALE` times (default 10) the
+//! iterations it ran on the PR gate, with the same number of threads.
 
 use inputlayer::{Config, StorageEngine};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -8,6 +13,24 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 // Test Helpers
+/// The factor on every loop's iterations, or `None` outside the soak.
+fn soak_scale() -> Option<usize> {
+    if std::env::var("INPUTLAYER_SOAK").as_deref() != Ok("1") {
+        eprintln!("skipped: set INPUTLAYER_SOAK=1 to run the storage concurrency loops");
+        return None;
+    }
+    Some(match std::env::var("INPUTLAYER_SOAK_STORAGE_SCALE") {
+        Ok(raw) => raw
+            .parse()
+            .ok()
+            .filter(|scale| *scale > 0)
+            .unwrap_or_else(|| {
+                panic!("INPUTLAYER_SOAK_STORAGE_SCALE={raw} is not a positive integer")
+            }),
+        Err(_) => 10,
+    })
+}
+
 fn create_test_storage() -> (StorageEngine, TempDir) {
     let temp = TempDir::new().expect("create temp dir");
     let mut config = Config::default();
@@ -22,9 +45,97 @@ fn create_shared_storage() -> (Arc<RwLock<StorageEngine>>, TempDir) {
     (Arc::new(RwLock::new(storage)), temp)
 }
 
+// High Contention Stress Tests
+#[test]
+fn test_high_contention_many_readers() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
+    let (storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("contention_test").unwrap();
+
+    // Insert substantial data
+    let edges: Vec<(i32, i32)> = (0..100).map(|i| (i, i + 1)).collect();
+    storage
+        .insert_into("contention_test", "edge", edges)
+        .unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 20;
+    let queries_per_thread = 50 * scale;
+    let mut handles = vec![];
+
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            for query_num in 0..queries_per_thread {
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                let results = storage_guard
+                    .execute_query_on("contention_test", "result(X,Y) <- edge(X,Y)")
+                    .unwrap_or_else(|_| panic!("Thread {thread_id} query {query_num} failed"));
+                assert_eq!(results.len(), 100);
+            }
+            thread_id
+        });
+        handles.push(handle);
+    }
+
+    // All threads should complete
+    let mut completed = 0;
+    for handle in handles {
+        handle.join().expect("Thread panicked under contention");
+        completed += 1;
+    }
+    assert_eq!(completed, num_threads);
+}
+
+// Stress Test: Sustained Load
+#[test]
+fn test_sustained_concurrent_load() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
+    let (storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("sustained_test").unwrap();
+
+    // Insert data
+    let data: Vec<(i32, i32)> = (0..50).map(|i| (i, i * 2)).collect();
+    storage
+        .insert_into("sustained_test", "values", data)
+        .unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 8;
+    let iterations = 100 * scale;
+    let mut handles = vec![];
+
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            for iter in 0..iterations {
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                let results = storage_guard
+                    .execute_query_on("sustained_test", "result(X,Y) <- values(X,Y)")
+                    .unwrap_or_else(|_| panic!("Thread {thread_id} iteration {iter} failed"));
+                assert_eq!(results.len(), 50);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread failed under sustained load");
+    }
+}
+
 // Lock Contention Tests
 #[test]
 fn test_100_concurrent_readers_during_write() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
     let (storage, _temp) = create_test_storage();
     storage.create_knowledge_graph("reader_stress").unwrap();
 
@@ -47,7 +158,7 @@ fn test_100_concurrent_readers_during_write() {
         let barrier_clone = Arc::clone(&barrier);
         let handle = thread::spawn(move || {
             barrier_clone.wait(); // Synchronize start
-            for _ in 0..10 {
+            for _ in 0..10 * scale {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
                     .execute_query_on("reader_stress", "result(X,Y) <- data(X,Y)")
@@ -67,8 +178,8 @@ fn test_100_concurrent_readers_during_write() {
         let barrier_clone = Arc::clone(&barrier);
         let handle = thread::spawn(move || {
             barrier_clone.wait(); // Synchronize start
-            for i in 0..20 {
-                let tuple_id = (writer_id * 10000 + i) as i32;
+            for i in 0..20 * scale {
+                let tuple_id = (writer_id * 1_000_000 + i) as i32;
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 storage_guard
                     .insert_into("reader_stress", "new_data", vec![(tuple_id, tuple_id)])
@@ -83,12 +194,21 @@ fn test_100_concurrent_readers_during_write() {
         handle.join().expect("Thread panicked");
     }
 
-    assert_eq!(reads_completed.load(Ordering::SeqCst), num_readers * 10);
-    assert_eq!(writes_completed.load(Ordering::SeqCst), num_writers * 20);
+    assert_eq!(
+        reads_completed.load(Ordering::SeqCst),
+        num_readers * 10 * scale
+    );
+    assert_eq!(
+        writes_completed.load(Ordering::SeqCst),
+        num_writers * 20 * scale
+    );
 }
 
 #[test]
 fn test_lock_contention_no_starvation() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
     // Test that writers don't starve readers and vice versa
     // Note: With RwLock and simple operations, some imbalance is expected
     let (storage, _temp) = create_test_storage();
@@ -98,7 +218,7 @@ fn test_lock_contention_no_starvation() {
         .unwrap();
 
     let storage = Arc::new(RwLock::new(storage));
-    let test_duration = Duration::from_secs(1);
+    let test_duration = Duration::from_secs(scale as u64);
     let start = Instant::now();
     let reader_ops = Arc::new(AtomicUsize::new(0));
     let writer_ops = Arc::new(AtomicUsize::new(0));
@@ -129,7 +249,7 @@ fn test_lock_contention_no_starvation() {
         let handle = thread::spawn(move || {
             let mut i = 0i32;
             while running_clone.load(Ordering::Relaxed) {
-                let tuple_id = writer_id * 100000 + i;
+                let tuple_id = writer_id * 100_000_000 + i;
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let _ = storage_guard.insert_into(
                     "starvation_test",
@@ -177,6 +297,9 @@ fn test_lock_contention_no_starvation() {
 
 #[test]
 fn test_rapid_lock_acquire_release_cycles() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
     let (storage, _temp) = create_test_storage();
     storage.create_knowledge_graph("rapid_lock").unwrap();
     storage
@@ -185,7 +308,7 @@ fn test_rapid_lock_acquire_release_cycles() {
 
     let storage = Arc::new(RwLock::new(storage));
     let num_threads = 20;
-    let cycles_per_thread = 500;
+    let cycles_per_thread = 500 * scale;
     let completed_cycles = Arc::new(AtomicUsize::new(0));
     let mut handles = vec![];
 
@@ -217,9 +340,12 @@ fn test_rapid_lock_acquire_release_cycles() {
 // Concurrent KG Operations
 #[test]
 fn test_concurrent_kg_create_delete() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
     let (storage, _temp) = create_shared_storage();
     let num_threads = 20;
-    let operations_per_thread = 10;
+    let operations_per_thread = 10 * scale as i32;
     let mut handles = vec![];
 
     // Threads create and delete KGs rapidly
@@ -269,6 +395,9 @@ fn test_concurrent_kg_create_delete() {
 
 #[test]
 fn test_concurrent_kg_switch_under_load() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
     let (storage, _temp) = create_test_storage();
 
     // Create multiple KGs with different data
@@ -281,7 +410,7 @@ fn test_concurrent_kg_switch_under_load() {
 
     let storage = Arc::new(RwLock::new(storage));
     let num_threads = 10;
-    let switches_per_thread = 50;
+    let switches_per_thread = 50 * scale;
     let successful_queries = Arc::new(AtomicUsize::new(0));
     let mut handles = vec![];
 
@@ -325,96 +454,10 @@ fn test_concurrent_kg_switch_under_load() {
 }
 
 #[test]
-fn test_concurrent_rule_modification() {
-    let (storage, _temp) = create_test_storage();
-    storage.create_knowledge_graph("rule_mod").unwrap();
-    storage
-        .insert_into("rule_mod", "edge", vec![(1, 2), (2, 3), (3, 4)])
-        .unwrap();
-
-    let storage = Arc::new(RwLock::new(storage));
-    let num_threads = 10;
-    let mut handles = vec![];
-
-    // Threads add and query rules concurrently
-    for thread_id in 0..num_threads {
-        let storage_clone = Arc::clone(&storage);
-        let handle = thread::spawn(move || {
-            for i in 0..10 {
-                // Query (uses implicit rule)
-                {
-                    let storage_guard = storage_clone.write().expect("Lock failed");
-                    let results = storage_guard
-                        .execute_query_on("rule_mod", "result(X,Y) <- edge(X,Y)")
-                        .expect("Query failed");
-                    assert_eq!(results.len(), 3);
-                }
-
-                // Try to drop non-existent rules (should not error)
-                {
-                    let storage_guard = storage_clone.write().expect("Lock failed");
-                    let rule_name = format!("test_rule_{thread_id}_{i}");
-                    let _ = storage_guard.drop_rule_in("rule_mod", &rule_name);
-                }
-            }
-        });
-        handles.push(handle);
-    }
-
-    for handle in handles {
-        handle.join().expect("Thread panicked");
-    }
-}
-
-// Parallel Query Stress Tests
-#[test]
-fn test_concurrent_recursive_queries() {
-    let (storage, _temp) = create_test_storage();
-    storage.create_knowledge_graph("recursive_stress").unwrap();
-
-    // Create graph for transitive closure
-    let edges: Vec<(i32, i32)> = (0..20).map(|i| (i, i + 1)).collect();
-    storage
-        .insert_into("recursive_stress", "edge", edges)
-        .unwrap();
-
-    let storage = Arc::new(RwLock::new(storage));
-    let num_threads = 8;
-    let queries_per_thread = 20;
-    let successful_queries = Arc::new(AtomicUsize::new(0));
-    let mut handles = vec![];
-
-    for _ in 0..num_threads {
-        let storage_clone = Arc::clone(&storage);
-        let counter = Arc::clone(&successful_queries);
-        let handle = thread::spawn(move || {
-            for _ in 0..queries_per_thread {
-                let storage_guard = storage_clone.write().expect("Lock failed");
-                // Simple query (not actually recursive, but exercises query path)
-                let results = storage_guard
-                    .execute_query_on("recursive_stress", "result(X,Y) <- edge(X,Y)")
-                    .expect("Query failed");
-                assert_eq!(results.len(), 20);
-                counter.fetch_add(1, Ordering::Relaxed);
-            }
-        });
-        handles.push(handle);
-    }
-
-    for handle in handles {
-        handle
-            .join()
-            .expect("Thread panicked during recursive queries");
-    }
-
-    assert_eq!(
-        successful_queries.load(Ordering::SeqCst),
-        num_threads * queries_per_thread
-    );
-}
-
-#[test]
 fn test_parallel_queries_with_different_complexities() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
     let (storage, _temp) = create_test_storage();
     storage.create_knowledge_graph("complexity_test").unwrap();
 
@@ -438,7 +481,7 @@ fn test_parallel_queries_with_different_complexities() {
         let storage_clone = Arc::clone(&storage);
         let counter = Arc::clone(&successful_queries);
         let handle = thread::spawn(move || {
-            for i in 0..30 {
+            for i in 0..30 * scale {
                 let storage_guard = storage_clone.write().expect("Lock failed");
 
                 // Alternate between different query types
@@ -476,12 +519,18 @@ fn test_parallel_queries_with_different_complexities() {
     }
 
     // All queries should have completed successfully
-    assert_eq!(successful_queries.load(Ordering::SeqCst), num_threads * 30);
+    assert_eq!(
+        successful_queries.load(Ordering::SeqCst),
+        num_threads * 30 * scale
+    );
 }
 
 // Thread Pool Behavior Tests
 #[test]
 fn test_many_short_lived_operations() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
     let (storage, _temp) = create_test_storage();
     storage.create_knowledge_graph("short_ops").unwrap();
     storage
@@ -490,7 +539,7 @@ fn test_many_short_lived_operations() {
 
     let storage = Arc::new(RwLock::new(storage));
     let num_threads = 50;
-    let ops_per_thread = 100;
+    let ops_per_thread = 100 * scale;
     let completed = Arc::new(AtomicUsize::new(0));
     let mut handles = vec![];
 
@@ -522,6 +571,9 @@ fn test_many_short_lived_operations() {
 
 #[test]
 fn test_burst_traffic_pattern() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
     let (storage, _temp) = create_test_storage();
     storage.create_knowledge_graph("burst_test").unwrap();
     storage
@@ -529,7 +581,7 @@ fn test_burst_traffic_pattern() {
         .unwrap();
 
     let storage = Arc::new(RwLock::new(storage));
-    let num_bursts = 5;
+    let num_bursts = 5 * scale;
     let threads_per_burst = 20;
     let ops_per_thread = 10;
 
@@ -564,12 +616,15 @@ fn test_burst_traffic_pattern() {
 // Data Integrity Under Concurrency
 #[test]
 fn test_data_integrity_under_heavy_concurrent_writes() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
     let (storage, _temp) = create_test_storage();
     storage.create_knowledge_graph("integrity_test").unwrap();
 
     let storage = Arc::new(RwLock::new(storage));
     let num_threads = 20;
-    let writes_per_thread = 50;
+    let writes_per_thread = 50 * scale;
     let mut handles = vec![];
 
     // Each thread writes unique tuples
@@ -577,7 +632,7 @@ fn test_data_integrity_under_heavy_concurrent_writes() {
         let storage_clone = Arc::clone(&storage);
         let handle = thread::spawn(move || {
             for i in 0..writes_per_thread {
-                let key = thread_id * 1000 + i;
+                let key = thread_id * 1_000_000 + i;
                 let value = key * 2; // Deterministic value
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 storage_guard
@@ -619,6 +674,9 @@ fn test_data_integrity_under_heavy_concurrent_writes() {
 
 #[test]
 fn test_no_data_loss_during_concurrent_operations() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
     let (storage, _temp) = create_test_storage();
     storage.create_knowledge_graph("no_loss_test").unwrap();
 
@@ -636,7 +694,7 @@ fn test_no_data_loss_during_concurrent_operations() {
     for thread_id in 0..num_threads {
         let storage_clone = Arc::clone(&storage);
         let handle = thread::spawn(move || {
-            for i in 0..30 {
+            for i in 0..30 * scale as i32 {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 if thread_id % 2 == 0 {
                     // Reader - verify initial data is intact
@@ -651,7 +709,7 @@ fn test_no_data_loss_during_concurrent_operations() {
                     );
                 } else {
                     // Writer - add to different relation
-                    let tuple_id = thread_id * 1000 + i;
+                    let tuple_id = thread_id * 1_000_000 + i;
                     storage_guard
                         .insert_into("no_loss_test", "new_data", vec![(tuple_id, tuple_id)])
                         .expect("Insert failed");
@@ -676,6 +734,9 @@ fn test_no_data_loss_during_concurrent_operations() {
 // Edge Cases
 #[test]
 fn test_concurrent_empty_query_results() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
     let (storage, _temp) = create_test_storage();
     storage.create_knowledge_graph("empty_results").unwrap();
     // Don't insert any data
@@ -687,7 +748,7 @@ fn test_concurrent_empty_query_results() {
     for _ in 0..num_threads {
         let storage_clone = Arc::clone(&storage);
         let handle = thread::spawn(move || {
-            for _ in 0..50 {
+            for _ in 0..50 * scale {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
                     .execute_query_on("empty_results", "result(X,Y) <- data(X,Y)")
@@ -706,6 +767,9 @@ fn test_concurrent_empty_query_results() {
 
 #[test]
 fn test_concurrent_single_tuple_contention() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
     let (storage, _temp) = create_test_storage();
     storage.create_knowledge_graph("single_tuple").unwrap();
     storage
@@ -714,7 +778,7 @@ fn test_concurrent_single_tuple_contention() {
 
     let storage = Arc::new(RwLock::new(storage));
     let num_threads = 50;
-    let queries_per_thread = 100;
+    let queries_per_thread = 100 * scale;
     let correct_results = Arc::new(AtomicUsize::new(0));
     let mut handles = vec![];
 
@@ -744,4 +808,425 @@ fn test_concurrent_single_tuple_contention() {
         correct_results.load(Ordering::SeqCst),
         num_threads * queries_per_thread
     );
+}
+
+#[test]
+fn test_high_volume_concurrent_inserts() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("high_volume").unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 8;
+    let inserts_per_thread = 100 * scale;
+    let total_inserts = Arc::new(AtomicUsize::new(0));
+    let mut handles = vec![];
+
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let counter = Arc::clone(&total_inserts);
+        let handle = thread::spawn(move || {
+            for i in 0..inserts_per_thread {
+                let tuple_id = (thread_id * 1_000_000 + i) as i32;
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                storage_guard
+                    .insert_into("high_volume", "data", vec![(tuple_id, tuple_id * 2)])
+                    .expect("Insert failed");
+                counter.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+
+    assert_eq!(
+        total_inserts.load(Ordering::SeqCst),
+        num_threads * inserts_per_thread
+    );
+
+    // Verify data integrity
+    let storage_guard = storage.write().expect("Lock failed");
+    let results = storage_guard
+        .execute_query_on("high_volume", "result(X,Y) <- data(X,Y)")
+        .expect("Query failed");
+    assert_eq!(results.len(), num_threads * inserts_per_thread);
+}
+
+#[test]
+fn test_insert_throughput_under_read_load() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("throughput_test").unwrap();
+
+    // Pre-populate with some data
+    for i in 0..100 {
+        storage
+            .insert_into("throughput_test", "initial", vec![(i, i * 10)])
+            .unwrap();
+    }
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_writers = 4;
+    let num_readers = 8;
+    let ops_per_thread = 50 * scale;
+    let write_count = Arc::new(AtomicUsize::new(0));
+    let read_count = Arc::new(AtomicUsize::new(0));
+    let mut handles = vec![];
+
+    // Spawn writers
+    for thread_id in 0..num_writers {
+        let storage_clone = Arc::clone(&storage);
+        let counter = Arc::clone(&write_count);
+        let handle = thread::spawn(move || {
+            for i in 0..ops_per_thread {
+                let tuple_id = (thread_id * 1_000_000 + i) as i32;
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                storage_guard
+                    .insert_into("throughput_test", "new_data", vec![(tuple_id, tuple_id)])
+                    .expect("Insert failed");
+                counter.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        handles.push(handle);
+    }
+
+    // Spawn readers
+    for _ in 0..num_readers {
+        let storage_clone = Arc::clone(&storage);
+        let counter = Arc::clone(&read_count);
+        let handle = thread::spawn(move || {
+            for _ in 0..ops_per_thread {
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                let _ = storage_guard
+                    .execute_query_on("throughput_test", "result(X,Y) <- initial(X,Y)")
+                    .expect("Query failed");
+                counter.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+
+    assert_eq!(
+        write_count.load(Ordering::SeqCst),
+        num_writers * ops_per_thread
+    );
+    assert_eq!(
+        read_count.load(Ordering::SeqCst),
+        num_readers * ops_per_thread
+    );
+}
+
+// Stress Tests
+#[test]
+fn test_100_concurrent_writers_same_kg() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("stress_same").unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 100;
+    let writes_per_thread = 5 * scale;
+    let success_count = Arc::new(AtomicUsize::new(0));
+    let mut handles = vec![];
+
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let counter = Arc::clone(&success_count);
+        let handle = thread::spawn(move || {
+            for i in 0..writes_per_thread {
+                let tuple_id = (thread_id * 1_000_000 + i) as i32;
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                if storage_guard
+                    .insert_into("stress_same", "data", vec![(tuple_id, tuple_id)])
+                    .is_ok()
+                {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked under stress");
+    }
+
+    assert_eq!(
+        success_count.load(Ordering::SeqCst),
+        num_threads * writes_per_thread
+    );
+
+    // Verify data
+    let storage_guard = storage.write().expect("Lock failed");
+    let results = storage_guard
+        .execute_query_on("stress_same", "result(X,Y) <- data(X,Y)")
+        .expect("Query failed");
+    assert_eq!(results.len(), num_threads * writes_per_thread);
+}
+
+#[test]
+fn test_100_concurrent_writers_10_kgs() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
+    let (storage, _temp) = create_test_storage();
+
+    // Create 10 KGs
+    for i in 0..10 {
+        storage
+            .create_knowledge_graph(&format!("stress_kg_{i}"))
+            .unwrap();
+    }
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 100;
+    let writes_per_thread = 5 * scale;
+    let success_count = Arc::new(AtomicUsize::new(0));
+    let mut handles = vec![];
+
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let counter = Arc::clone(&success_count);
+        let handle = thread::spawn(move || {
+            let kg_name = format!("stress_kg_{}", thread_id % 10);
+            for i in 0..writes_per_thread {
+                let tuple_id = (thread_id * 1_000_000 + i) as i32;
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                if storage_guard
+                    .insert_into(&kg_name, "data", vec![(tuple_id, tuple_id)])
+                    .is_ok()
+                {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked under stress");
+    }
+
+    assert_eq!(
+        success_count.load(Ordering::SeqCst),
+        num_threads * writes_per_thread
+    );
+
+    // Verify each KG has correct data
+    let storage_guard = storage.write().expect("Lock failed");
+    let mut total = 0;
+    for i in 0..10 {
+        let kg_name = format!("stress_kg_{i}");
+        let results = storage_guard
+            .execute_query_on(&kg_name, "result(X,Y) <- data(X,Y)")
+            .expect("Query failed");
+        // Each KG should have tuples from 10 threads (100/10)
+        assert_eq!(results.len(), 10 * writes_per_thread);
+        total += results.len();
+    }
+    assert_eq!(total, num_threads * writes_per_thread);
+}
+
+#[test]
+fn test_sustained_write_load_1000_ops() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("sustained_write").unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 10;
+    let ops_per_thread = 100 * scale;
+    let total_ops = Arc::new(AtomicUsize::new(0));
+    let mut handles = vec![];
+
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let counter = Arc::clone(&total_ops);
+        let handle = thread::spawn(move || {
+            for i in 0..ops_per_thread {
+                let tuple_id = (thread_id * 1_000_000 + i) as i32;
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                storage_guard
+                    .insert_into("sustained_write", "data", vec![(tuple_id, tuple_id)])
+                    .expect("Insert failed");
+                counter.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread failed under sustained load");
+    }
+
+    assert_eq!(
+        total_ops.load(Ordering::SeqCst),
+        num_threads * ops_per_thread
+    );
+
+    // Verify all data
+    let storage_guard = storage.write().expect("Lock failed");
+    let results = storage_guard
+        .execute_query_on("sustained_write", "result(X,Y) <- data(X,Y)")
+        .expect("Query failed");
+    assert_eq!(results.len(), num_threads * ops_per_thread);
+}
+
+#[test]
+fn test_concurrent_rule_modification() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("rule_mod").unwrap();
+    storage
+        .insert_into("rule_mod", "edge", vec![(1, 2), (2, 3), (3, 4)])
+        .unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 10;
+    let mut handles = vec![];
+
+    // Threads add and query rules concurrently
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            for i in 0..10 * scale {
+                // Query (uses implicit rule)
+                {
+                    let storage_guard = storage_clone.write().expect("Lock failed");
+                    let results = storage_guard
+                        .execute_query_on("rule_mod", "result(X,Y) <- edge(X,Y)")
+                        .expect("Query failed");
+                    assert_eq!(results.len(), 3);
+                }
+
+                // Try to drop non-existent rules (should not error)
+                {
+                    let storage_guard = storage_clone.write().expect("Lock failed");
+                    let rule_name = format!("test_rule_{thread_id}_{i}");
+                    let _ = storage_guard.drop_rule_in("rule_mod", &rule_name);
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+}
+
+// Concurrent Query Tests
+#[test]
+fn test_concurrent_recursive_queries() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("recursive_stress").unwrap();
+
+    // Create graph for transitive closure
+    let edges: Vec<(i32, i32)> = (0..20).map(|i| (i, i + 1)).collect();
+    storage
+        .insert_into("recursive_stress", "edge", edges)
+        .unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 8;
+    let queries_per_thread = 20 * scale;
+    let successful_queries = Arc::new(AtomicUsize::new(0));
+    let mut handles = vec![];
+
+    for _ in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let counter = Arc::clone(&successful_queries);
+        let handle = thread::spawn(move || {
+            for _ in 0..queries_per_thread {
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                // Simple query (not actually recursive, but exercises query path)
+                let results = storage_guard
+                    .execute_query_on("recursive_stress", "result(X,Y) <- edge(X,Y)")
+                    .expect("Query failed");
+                assert_eq!(results.len(), 20);
+                counter.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle
+            .join()
+            .expect("Thread panicked during recursive queries");
+    }
+
+    assert_eq!(
+        successful_queries.load(Ordering::SeqCst),
+        num_threads * queries_per_thread
+    );
+}
+
+#[test]
+fn test_read_write_interleaving() {
+    let Some(scale) = soak_scale() else {
+        return;
+    };
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("interleave").unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 10;
+    let ops_per_thread = 40 * scale;
+    let mut handles = vec![];
+
+    // Each thread alternates between reads and writes
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            for i in 0..ops_per_thread {
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                if i % 2 == 0 {
+                    // Write
+                    let tuple_id = (thread_id * 1_000_000 + i) as i32;
+                    storage_guard
+                        .insert_into("interleave", "data", vec![(tuple_id, tuple_id)])
+                        .expect("Insert failed");
+                } else {
+                    // Read
+                    let _ = storage_guard
+                        .execute_query_on("interleave", "result(X,Y) <- data(X,Y)")
+                        .expect("Query failed");
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+
+    // Verify writes succeeded
+    let storage_guard = storage.write().expect("Lock failed");
+    let results = storage_guard
+        .execute_query_on("interleave", "result(X,Y) <- data(X,Y)")
+        .expect("Query failed");
+    // Each thread does ops_per_thread / 2 writes
+    assert_eq!(results.len(), num_threads * (ops_per_thread / 2));
 }

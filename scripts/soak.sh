@@ -12,6 +12,10 @@
 #   --server-cpus LIST pin the engine with taskset -c LIST
 #   --client-cpus LIST pin the soak's clients and verifier with taskset -c LIST
 #
+# The soak also runs the storage concurrency loops of tests/soak/storage.rs at
+# ten times their old PR-gate size (--set STORAGE_SCALE=N for another factor).
+# Their outcome is in summary.md.
+#
 # Exit status: 0 when the soak passed, 1 when it failed, 3 on a setup error.
 # result.json and summary.md land in target/soak/runs/<utc-time>/;
 # target/soak/latest points there. The sustained run belongs on the
@@ -33,7 +37,7 @@ while [ $# -gt 0 ]; do
         --set) SETS+=("$2"); shift 2 ;;
         --server-cpus) SERVER_CPUS=$2; shift 2 ;;
         --client-cpus) CLIENT_CPUS=$2; shift 2 ;;
-        -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
         *) echo "soak: unknown option $1" >&2; exit 3 ;;
     esac
 done
@@ -110,6 +114,16 @@ env "${ENVS[@]}" INPUTLAYER_SOAK_REPORT_DIR="$RUN_DIR" \
     "${PIN[@]}" "$BIN" concurrent_soak_agrees_with_reference --exact --nocapture --test-threads 1 \
     || STATUS=$?
 ln -sfn "$RUN_DIR" "$OUT/latest"
+echo "=== Storage concurrency loops ==="
+LOOPS=0
+env "${ENVS[@]}" INPUTLAYER_SOAK=1 \
+    cargo test --release --all-features --test soak -- --nocapture || LOOPS=$?
+if [ "$LOOPS" -eq 0 ]; then
+    printf '\nStorage concurrency loops: passed\n' >> "$RUN_DIR/summary.md"
+else
+    printf '\nStorage concurrency loops: FAILED (exit status %s)\n' "$LOOPS" >> "$RUN_DIR/summary.md"
+    STATUS=$LOOPS
+fi
 echo ""
 echo "Results: $RUN_DIR (exit status $STATUS)"
 if [ "$STATUS" -ne 0 ]; then exit 1; fi
