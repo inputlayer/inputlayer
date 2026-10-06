@@ -6,11 +6,11 @@
 #
 # Usage: scripts/perf-gate-baseline.sh COMMIT
 #
-# Every baseline is built in a target directory of its own, removed once the
-# binary is cached. Baselines must never share one: cargo names a workspace
-# crate's artifacts by its path inside the workspace, not by where the
-# workspace is, and rebuilds one only when a source file is newer than the
-# last build. `git archive` gives every file the commit's time, which is
+# Every baseline is built in a target directory of its own, removed when the
+# build ends, built or not. Baselines must never share one: cargo names a
+# workspace crate's artifacts by its path inside the workspace, not by where
+# the workspace is, and rebuilds one only when a source file is newer than
+# the last build. `git archive` gives every file the commit's time, which is
 # older than any build already in the directory, so a second baseline would
 # link the first one's crates (or the whole first server), or fail to
 # compile against them.
@@ -35,15 +35,13 @@ if [ ! -x "$BIN" ]; then
     echo "=== Build baseline server $SHA ===" >&2
     WORK=$OUT/baseline-build/$KEY
     rm -rf "$WORK" && mkdir -p "$WORK/src"
+    trap 'rm -rf "$WORK"' EXIT
     git archive --format=tar "$SHA" | tar -x -C "$WORK/src"
     # Same dependency versions as the candidate where the manifests allow.
     if [ -f Cargo.lock ]; then cp Cargo.lock "$WORK/src/"; fi
     CARGO_TARGET_DIR=$WORK/target cargo build --release --all-features \
         --manifest-path "$WORK/src/Cargo.toml" --bin inputlayer-server >&2
     mkdir -p "$(dirname "$BIN")"
-    # Renamed into place: an interrupted copy is never taken for a cached binary.
-    cp "$WORK/target/release/inputlayer-server" "$BIN.tmp"
-    mv "$BIN.tmp" "$BIN"
-    rm -rf "$WORK"
+    cp "$WORK/target/release/inputlayer-server" "$BIN"
 fi
 echo "$BIN"
