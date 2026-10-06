@@ -114,6 +114,10 @@ env "${ENVS[@]}" INPUTLAYER_SOAK_REPORT_DIR="$RUN_DIR" \
     "${PIN[@]}" "$BIN" concurrent_soak_agrees_with_reference --exact --nocapture --test-threads 1 \
     || STATUS=$?
 ln -sfn "$RUN_DIR" "$OUT/latest"
+if [ ! -s "$RUN_DIR/summary.md" ]; then
+    printf 'Soak: FAILED, it wrote no summary (exit status %s)\n' "$STATUS" > "$RUN_DIR/summary.md"
+    if [ "$STATUS" -eq 0 ]; then STATUS=1; fi
+fi
 echo "=== Nesting ceiling sweep ==="
 SWEEP=0
 cargo test --release --all-features --test nesting_depth_tests \
