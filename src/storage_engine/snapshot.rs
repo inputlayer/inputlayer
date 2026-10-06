@@ -45,7 +45,7 @@ pub struct KnowledgeGraphSnapshot {
     /// so each publish has a higher revision than the one before, even across
     /// a drop and re-create of the same name. A restarted engine continues
     /// above every revision its earlier runs issued (see
-    /// [`super::revisions`]); the stream epoch
+    /// `storage_engine::revisions`); the stream epoch
     /// ([`crate::protocol::notification_log::NotificationLog::epoch`]) tells
     /// runs apart.
     pub revision: u64,
