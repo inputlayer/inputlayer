@@ -134,11 +134,13 @@ enum Command {
         change: BaseChange,
     },
     /// Scans read the arrangement at revision `at`, or at the frontier.
+    #[cfg(test)]
     ScanTuples {
         relation: String,
         at: Option<u64>,
         reply: channel::Sender<BaseRows>,
     },
+    #[cfg(test)]
     ScanKeys {
         relation: String,
         key: Option<Value>,
@@ -314,7 +316,8 @@ impl ViewMaintainer {
 
     /// The by-tuple arrangement of `relation` at the frontier; `None` when
     /// the maintainer is unavailable.
-    pub fn scan_tuples(&self, relation: &str) -> Option<BaseRows> {
+    #[cfg(test)]
+    pub(crate) fn scan_tuples(&self, relation: &str) -> Option<BaseRows> {
         self.ask(|reply| Command::ScanTuples {
             relation: relation.to_string(),
             at: None,
@@ -325,7 +328,8 @@ impl ViewMaintainer {
     /// The by-key arrangement of `relation` at the frontier: the tuples
     /// under `key`, or under every key. `None` when the maintainer is
     /// unavailable.
-    pub fn scan_keys(&self, relation: &str, key: Option<Value>) -> Option<BaseRows> {
+    #[cfg(test)]
+    pub(crate) fn scan_keys(&self, relation: &str, key: Option<Value>) -> Option<BaseRows> {
         self.ask(|reply| Command::ScanKeys {
             relation: relation.to_string(),
             key,
@@ -334,6 +338,7 @@ impl ViewMaintainer {
         })
     }
 
+    #[cfg(test)]
     fn ask<R>(&self, command: impl FnOnce(channel::Sender<R>) -> Command) -> Option<R> {
         let (reply, answer) = channel::bounded(1);
         self.commands.send(command(reply)).ok()?;
@@ -667,6 +672,7 @@ impl Dataflows<'_> {
         total
     }
 
+    #[cfg(test)]
     fn scan_tuples(&mut self, relation: &str, at: u64) -> Vec<(Tuple, isize)> {
         let mut rows = Vec::new();
         if let Some(base) = self.bases.get_mut(relation) {
@@ -687,6 +693,7 @@ impl Dataflows<'_> {
         rows
     }
 
+    #[cfg(test)]
     fn scan_keys(&mut self, relation: &str, key: Option<&Value>, at: u64) -> Vec<(Tuple, isize)> {
         let mut rows = Vec::new();
         if let Some(base) = self.bases.get_mut(relation) {
@@ -816,6 +823,7 @@ fn worker_loop(
                     dataflows.settle(last);
                     publish(&mut dataflows, last, started);
                 }
+                #[cfg(test)]
                 Command::ScanTuples {
                     relation,
                     at,
@@ -827,6 +835,7 @@ fn worker_loop(
                         rows: dataflows.scan_tuples(&relation, revision),
                     });
                 }
+                #[cfg(test)]
                 Command::ScanKeys {
                     relation,
                     key,
