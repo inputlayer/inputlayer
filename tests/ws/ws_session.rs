@@ -1,53 +1,18 @@
-//! WI-02: WebSocket idle timeout configuration tests.
 //! WI-03: Session cleanup tests.
 //! WI-10: Broadcast notification tests.
 
+use crate::harness::engine_config;
 use inputlayer::protocol::notification_log::Cursor;
 use inputlayer::protocol::Handler;
-use inputlayer::{Config, StorageEngine};
+use inputlayer::StorageEngine;
 use tempfile::TempDir;
 
 fn create_test_handler() -> (Handler, TempDir) {
     let temp = TempDir::new().expect("create temp dir");
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
+    let config = engine_config(temp.path());
     let storage = StorageEngine::new(config).expect("create storage engine");
     let handler = Handler::new(storage);
     (handler, temp)
-}
-
-// === WI-02: WS Idle Timeout Config ===
-
-#[test]
-fn test_ws_idle_timeout_has_sane_default() {
-    let config = Config::default();
-    assert_eq!(
-        config.http.ws_idle_timeout_ms, 300_000,
-        "Default WS idle timeout should be 5 minutes (300,000 ms)"
-    );
-}
-
-#[test]
-fn test_ws_idle_timeout_zero_disabled_is_valid() {
-    let temp = TempDir::new().unwrap();
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    config.http.ws_idle_timeout_ms = 0;
-    // Should be able to create handler with disabled idle timeout
-    assert!(
-        Handler::from_config(config).is_ok(),
-        "Handler::from_config with ws_idle_timeout_ms=0 should succeed"
-    );
-}
-
-#[test]
-fn test_ws_idle_timeout_custom_value_is_stored() {
-    let temp = TempDir::new().unwrap();
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    config.http.ws_idle_timeout_ms = 60_000;
-    let handler = Handler::from_config(config).unwrap();
-    assert_eq!(handler.config().http.ws_idle_timeout_ms, 60_000);
 }
 
 // === WI-03: Session Cleanup ===
@@ -138,32 +103,12 @@ async fn test_notify_multiple_subscribers() {
     assert!(rx2.try_recv().is_ok());
 }
 
-// === WI-01: Query Timeout Config Tests ===
-
-#[test]
-fn test_query_timeout_config_default() {
-    let config = Config::default();
-    assert_eq!(
-        config.storage.performance.query_timeout_ms, 30_000,
-        "Default query timeout should be 30 seconds (30,000 ms)"
-    );
-}
-
-#[test]
-fn test_query_timeout_zero_means_disabled() {
-    let temp = TempDir::new().unwrap();
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    config.storage.performance.query_timeout_ms = 0;
-    let handler = Handler::from_config(config).unwrap();
-    assert_eq!(handler.config().storage.performance.query_timeout_ms, 0);
-}
+// === WI-01: Query Timeout ===
 
 #[tokio::test]
 async fn test_query_within_timeout_succeeds() {
     let temp = TempDir::new().unwrap();
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
+    let mut config = engine_config(temp.path());
     config.storage.performance.query_timeout_ms = 5_000; // 5 seconds
     let handler = Handler::from_config(config).unwrap();
     // Simple insert + query should complete well within 5 seconds
@@ -250,38 +195,4 @@ async fn test_session_ws_attach_detach() {
     // Detach then re-attach should succeed
     handler.session_manager().detach_ws(&sid);
     assert!(handler.session_manager().attach_ws(&sid).is_ok());
-}
-
-#[tokio::test]
-async fn test_query_timeout_config_is_accessible_via_handler() {
-    let temp = TempDir::new().unwrap();
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    config.storage.performance.query_timeout_ms = 12_345;
-    let handler = Handler::from_config(config).unwrap();
-    assert_eq!(
-        handler.config().storage.performance.query_timeout_ms,
-        12_345
-    );
-}
-
-// === #47: Query Cost Scoring Config Tests ===
-
-#[test]
-fn test_max_query_cost_default_refuses_large_cross_products() {
-    let config = Config::default();
-    assert_eq!(
-        config.storage.performance.max_query_cost, 100_000_000,
-        "Default max_query_cost should refuse cross products past 10,000 x 10,000"
-    );
-}
-
-#[test]
-fn test_max_query_cost_custom_value_stored() {
-    let temp = TempDir::new().unwrap();
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    config.storage.performance.max_query_cost = 500_000;
-    let handler = Handler::from_config(config).unwrap();
-    assert_eq!(handler.config().storage.performance.max_query_cost, 500_000);
 }

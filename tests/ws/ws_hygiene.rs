@@ -7,10 +7,9 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::harness::{config, serve};
 use futures_util::{SinkExt, StreamExt};
-use inputlayer::protocol::rest::create_router;
 use inputlayer::protocol::Handler;
-use inputlayer::Config;
 use serde_json::{json, Value};
 use tempfile::TempDir;
 use tokio::net::TcpStream;
@@ -35,23 +34,12 @@ impl Drop for Server {
 }
 
 async fn start_server() -> Server {
-    let tmp = TempDir::new().unwrap();
-    let mut config = Config::default();
-    config.storage.data_dir = tmp.path().join("data");
-    config.http.auth.bootstrap_admin_password = Some(PASSWORD.to_string());
-    config.http.auth.credentials_file = Some(tmp.path().join("credentials.toml"));
-    config.http.rate_limit.ws_max_messages_per_sec = 0;
-    config.http.gui.enabled = false;
+    let (mut config, tmp) = config(PASSWORD);
     config.storage.performance.slow_query_log_ms = 1;
     let handler = Arc::new(Handler::from_config(config).unwrap());
     handler.bootstrap_auth().unwrap();
     handler.get_storage().create_knowledge_graph(KG).unwrap();
-    let app = create_router(Arc::clone(&handler), &handler.config().http);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let task = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
+    let (addr, task) = serve(&handler).await;
     Server {
         handler,
         addr,

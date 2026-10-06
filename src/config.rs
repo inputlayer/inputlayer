@@ -2013,6 +2013,24 @@ mod tests {
         assert_eq!(rl.notification_buffer_size, 4096);
     }
 
+    #[test]
+    fn test_query_timeout_config_default() {
+        let config = Config::default();
+        assert_eq!(
+            config.storage.performance.query_timeout_ms, 30_000,
+            "Default query timeout should be 30 seconds (30,000 ms)"
+        );
+    }
+
+    #[test]
+    fn test_max_query_cost_default_refuses_large_cross_products() {
+        let config = Config::default();
+        assert_eq!(
+            config.storage.performance.max_query_cost, 100_000_000,
+            "Default max_query_cost should refuse cross products past 10,000 x 10,000"
+        );
+    }
+
     /// Regression: the manual Config::default() impl sets max_result_rows = 100_000.
     #[test]
     fn test_config_default_max_result_rows() {

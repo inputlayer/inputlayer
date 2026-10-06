@@ -7,6 +7,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::harness::engine_config;
 use futures_util::{SinkExt, StreamExt};
 use inputlayer::protocol::rest::create_router;
 use inputlayer::protocol::Handler;
@@ -37,8 +38,7 @@ impl Drop for Server {
 
 fn handler(configure: impl FnOnce(&mut Config)) -> (Arc<Handler>, TempDir) {
     let tmp = TempDir::new().unwrap();
-    let mut config = Config::default();
-    config.storage.data_dir = tmp.path().join("data");
+    let mut config = engine_config(&tmp.path().join("data"));
     config.http.auth.bootstrap_admin_password = Some(PASSWORD.to_string());
     config.http.gui.enabled = false;
     // Several argon2 checks must fit in the auth window on a loaded machine.
@@ -346,8 +346,7 @@ fn persisted_credentials_are_reused_after_data_wipe() {
     let tmp = TempDir::new().unwrap();
     let creds_path = tmp.path().join("creds").join("credentials.toml");
     let boot = |data: &str| {
-        let mut config = Config::default();
-        config.storage.data_dir = tmp.path().join(data);
+        let mut config = engine_config(&tmp.path().join(data));
         config.http.auth.credentials_file = Some(creds_path.clone());
         let handler = Handler::from_config(config).unwrap();
         handler.bootstrap_auth().unwrap();
@@ -389,8 +388,7 @@ fn blank_configured_password_is_generated_and_saved() {
 #[test]
 fn short_configured_password_refuses_first_boot_bootstrap() {
     let tmp = TempDir::new().unwrap();
-    let mut config = Config::default();
-    config.storage.data_dir = tmp.path().join("data");
+    let mut config = engine_config(&tmp.path().join("data"));
     config.http.auth.bootstrap_admin_password = Some("eleven-char".to_string());
     let handler = Handler::from_config(config).unwrap();
     let err = handler.bootstrap_auth().unwrap_err();
@@ -405,8 +403,7 @@ fn short_configured_password_refuses_first_boot_bootstrap() {
 #[test]
 fn short_configured_password_is_ignored_once_admin_exists() {
     let tmp = TempDir::new().unwrap();
-    let mut config = Config::default();
-    config.storage.data_dir = tmp.path().join("data");
+    let mut config = engine_config(&tmp.path().join("data"));
     config.storage.persist.durability_mode = inputlayer::config::DurabilityMode::Immediate;
     config.http.auth.bootstrap_admin_password = Some(PASSWORD.to_string());
     let first = Handler::from_config(config.clone()).unwrap();
