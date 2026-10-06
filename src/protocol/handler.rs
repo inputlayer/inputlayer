@@ -8969,24 +8969,28 @@ mod tests {
         let (handler, _tmp) = make_test_handler();
         let handler = Arc::new(handler);
 
-        // Hold a write lock from another thread for 2 seconds
-        let h2 = Arc::clone(&handler);
-        let lock_thread = std::thread::spawn(move || {
-            let _guard = h2.get_storage_mut();
-            std::thread::sleep(Duration::from_secs(2));
-        });
-
-        // Give the thread time to acquire the write lock
-        std::thread::sleep(Duration::from_millis(50));
+        // Another thread holds the write lock from `locked` until `release`.
+        let locked = Arc::new(std::sync::Barrier::new(2));
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let lock_thread = {
+            let handler = Arc::clone(&handler);
+            let (locked, release) = (Arc::clone(&locked), Arc::clone(&release));
+            std::thread::spawn(move || {
+                let _guard = handler.get_storage_mut();
+                locked.wait();
+                release.wait();
+            })
+        };
+        locked.wait();
 
         // try_get_storage should fail quickly (10ms timeout)
-        let result = handler.try_get_storage(Duration::from_millis(10));
+        let blocked = handler.try_get_storage(Duration::from_millis(10)).is_none();
+        release.wait();
+        lock_thread.join().expect("thread join failed");
         assert!(
-            result.is_none(),
+            blocked,
             "try_get_storage should return None when write lock is held"
         );
-
-        lock_thread.join().expect("thread join failed");
     }
 
     /// P0-6 regression: Session IDs are unique UUIDs, not sequential integers.
