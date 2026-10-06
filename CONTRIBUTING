@@ -442,3 +442,12 @@ By contributing to InputLayer, you agree that your contributions will be license
 ---
 
 Thank you for contributing!
+
+## CI is paused (temporary)
+
+GitHub CI does not run on pull requests or on pushes to `main` for now. Before
+pushing a PR, run the checks locally (format and lint, unit and integration
+tests, scenarios, snapshot specs, the SDK suites; see TESTING.md for the
+commands) and list in the PR description which checks you ran and their result.
+Every workflow can still be started by hand from the Actions tab
+(`workflow_dispatch`). Release branches and `v*` tags still build and publish.

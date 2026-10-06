@@ -7,21 +7,6 @@ name: Quick starts
 # weekly run catches drift from changes outside the path filter.
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'README.md'
-      - 'Dockerfile'
-      - 'gui/**'
-      - 'packages/inputlayer-py/**'
-      - 'packages/inputlayer-js/**'
-      - 'packages/api-client/**'
-      - 'src/auth/**'
-      - 'src/config.rs'
-      - 'src/protocol/handler.rs'
-      - 'src/protocol/rest/**'
-      - 'scripts/check-quickstarts.sh'
-      - '.github/workflows/quickstart.yml'
   schedule:
     - cron: '17 5 * * 1'
   workflow_dispatch:

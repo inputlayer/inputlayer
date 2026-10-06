@@ -7,9 +7,6 @@ on:
   push:
     branches: ['release/**']
     tags: ['v*']
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, labeled]
 
 concurrency:
   group: docker-${{ github.event.pull_request.number || github.ref }}-${{ (github.event.action == 'labeled' && github.event.label.name != 'release') && github.run_id || 'run' }}

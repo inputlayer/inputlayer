@@ -17,9 +17,6 @@ name: Full suite
 on:
   push:
     branches: ['release/**']
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
     inputs:
       perf_gate_only:
