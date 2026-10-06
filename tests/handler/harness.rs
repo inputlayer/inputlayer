@@ -32,7 +32,10 @@ pub fn handler_at(dir: &Path) -> Handler {
 /// the first such engine would otherwise size the pool for every module.
 pub fn default_pool() {
     static POOL: std::sync::Once = std::sync::Once::new();
-    POOL.call_once(|| StorageEngine::set_num_threads(0).expect("size the thread pool"));
+    POOL.call_once(|| {
+        // Refused once something has started the pool; it keeps that size.
+        let _ = StorageEngine::set_num_threads(0);
+    });
 }
 
 /// Held by a test for as long as it relies on `INPUTLAYER_REGISTRY`: the

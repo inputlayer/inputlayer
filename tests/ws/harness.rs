@@ -20,7 +20,10 @@ use tracing_subscriber::prelude::*;
 /// pool is sized here once, so every module builds on this.
 pub fn engine_config(dir: &Path) -> Config {
     static POOL: Once = Once::new();
-    POOL.call_once(|| StorageEngine::set_num_threads(4).unwrap());
+    POOL.call_once(|| {
+        // Refused once something has started the pool; it keeps that size.
+        let _ = StorageEngine::set_num_threads(4);
+    });
     let mut config = Config::default();
     config.storage.data_dir = dir.to_path_buf();
     config

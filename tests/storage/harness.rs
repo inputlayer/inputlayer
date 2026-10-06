@@ -11,7 +11,10 @@ use std::path::{Path, PathBuf};
 /// otherwise size the pool for every module, from its own `num_threads`.
 pub fn pool() {
     static POOL: std::sync::Once = std::sync::Once::new();
-    POOL.call_once(|| StorageEngine::set_num_threads(2).expect("size the thread pool"));
+    POOL.call_once(|| {
+        // Refused once something has started the pool; it keeps that size.
+        let _ = StorageEngine::set_num_threads(2);
+    });
 }
 
 /// Commit `updates` to `shard`, one transaction per run of equal times.
