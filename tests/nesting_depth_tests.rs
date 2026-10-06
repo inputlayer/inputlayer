@@ -14,22 +14,38 @@ use inputlayer::protocol::{ErrorCode, Handler, ProgramError, QueryResult};
 use inputlayer::{Config, StorageEngine, ENGINE_THREAD_STACK_BYTES};
 use std::future::Future;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{PoisonError, RwLock};
 use tempfile::TempDir;
 
-/// The nesting limit is process-wide: tests that depend on it run one at a
-/// time.
-static LIMIT: Mutex<()> = Mutex::new(());
+/// The nesting limit is process-wide: tests that depend on the default hold
+/// this shared, a test that changes the limit holds it alone.
+static LIMIT: RwLock<()> = RwLock::new(());
 
-/// Run `test` on a runtime configured like the server's.
+/// Run `test` under the default nesting limit, on a runtime configured like
+/// the server's.
 fn on_engine_threads<F>(test: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    let _limit = LIMIT
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _limit = LIMIT.read().unwrap_or_else(PoisonError::into_inner);
+    run_on_engine_threads(test);
+}
+
+/// Run `test`, which changes the nesting limit, with no other test running;
+/// the default is restored when it ends.
+fn changing_the_limit<F>(test: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    let _limit = LIMIT.write().unwrap_or_else(PoisonError::into_inner);
     let _reset = ResetLimit;
+    run_on_engine_threads(test);
+}
+
+fn run_on_engine_threads<F>(test: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .thread_stack_size(ENGINE_THREAD_STACK_BYTES)
@@ -51,7 +67,16 @@ impl Drop for ResetLimit {
 fn open(dir: &Path) -> Handler {
     let mut config = Config::default();
     config.storage.data_dir = dir.to_path_buf();
+    // These tests are about input size, not time: a debug build on a busy
+    // machine takes most of the default 30 s deadline for the largest body.
+    config.storage.performance.query_timeout_ms = 300_000;
     Handler::new(StorageEngine::new(config).expect("create storage engine"))
+}
+
+/// Whether this run is the soak (`INPUTLAYER_SOAK=1`), which also runs the
+/// tests too slow for a PR.
+fn soak_enabled() -> bool {
+    std::env::var("INPUTLAYER_SOAK").is_ok_and(|value| value == "1")
 }
 
 fn handler() -> (Handler, TempDir) {
@@ -178,28 +203,16 @@ fn nesting_limit_is_inclusive() {
     });
 }
 
-/// The highest configurable limit still fits every pass over the term, and
-/// the configured limit is the one enforced.
+/// The configured limit is the one enforced, and it is clamped to
+/// `1..=MAX_NESTING_DEPTH_CEILING`.
 #[test]
-fn configured_nesting_limit_is_enforced_up_to_the_ceiling() {
-    on_engine_threads(async {
+fn configured_nesting_limit_is_enforced() {
+    changing_the_limit(async {
         let (handler, _tmp) = handler();
-        ok(&handler, "+r(-3)").await;
 
         set_max_nesting_depth(usize::MAX);
         assert_eq!(max_nesting_depth(), MAX_NESTING_DEPTH_CEILING);
-        let depth = MAX_NESTING_DEPTH_CEILING;
-        let sum = format!("Int64({})", depth - 3);
-        let cases = [
-            (calls(depth, "Y"), "Int64(3)"),
-            (parens(depth - 1, "Y+1"), "Int64(-2)"),
-            (sum_chain(depth, "Y"), sum.as_str()),
-        ];
-        for (i, (term, want)) in cases.iter().enumerate() {
-            ok(&handler, &format!("+c{i}(X) <- r(Y), X = {term}")).await;
-            assert_eq!(value(&handler, &format!("c{i}")).await, *want);
-        }
-        let program = format!("+r({})", calls(depth + 1, "1"));
+        let program = format!("+r({})", calls(MAX_NESTING_DEPTH_CEILING + 1, "1"));
         assert_too_deep(run(&handler, &program).await, &program);
 
         set_max_nesting_depth(4);
@@ -212,6 +225,37 @@ fn configured_nesting_limit_is_enforced_up_to_the_ceiling() {
 
         set_max_nesting_depth(0);
         assert_eq!(max_nesting_depth(), 1);
+    });
+}
+
+/// The highest configurable limit still fits every pass over the term: terms
+/// at the ceiling parse and evaluate end to end. About 20 s of a debug run,
+/// so it runs with the soak (`INPUTLAYER_SOAK=1`, set by `scripts/soak.sh`).
+#[test]
+fn terms_at_the_nesting_ceiling_evaluate() {
+    if !soak_enabled() {
+        eprintln!("skipped: the ceiling sweep runs with INPUTLAYER_SOAK=1");
+        return;
+    }
+    changing_the_limit(async {
+        let (handler, _tmp) = handler();
+        ok(&handler, "+r(-3)").await;
+
+        set_max_nesting_depth(usize::MAX);
+        let depth = max_nesting_depth();
+        assert_eq!(depth, MAX_NESTING_DEPTH_CEILING);
+        let sum = format!("Int64({})", depth - 3);
+        let cases = [
+            (calls(depth, "Y"), "Int64(3)"),
+            (parens(depth - 1, "Y+1"), "Int64(-2)"),
+            (sum_chain(depth, "Y"), sum.as_str()),
+        ];
+        for (i, (term, want)) in cases.iter().enumerate() {
+            ok(&handler, &format!("+c{i}(X) <- r(Y), X = {term}")).await;
+            assert_eq!(value(&handler, &format!("c{i}")).await, *want);
+        }
+        let program = format!("+r({})", calls(depth + 1, "1"));
+        assert_too_deep(run(&handler, &program).await, &program);
     });
 }
 
@@ -246,26 +290,66 @@ fn rules_at_the_limits_survive_a_restart() {
     });
 }
 
-/// Bodies at the size limit plan and evaluate end to end; one element more
-/// is refused, in every shape that deepens the plan.
+/// `r(Y)` and `count` comparisons.
+fn comparisons(count: usize) -> String {
+    format!("r(Y), {}", vec!["Y < 9"; count].join(", "))
+}
+
+/// `r(Y)` and `count` negated atoms.
+fn negations(count: usize) -> String {
+    format!("r(Y), {}", vec!["!q(Y)"; count].join(", "))
+}
+
+/// `s(1, 1, ..., Y)`, `count` constants wide.
+fn constants(count: usize) -> String {
+    format!("s({}Y)", "1, ".repeat(count))
+}
+
+/// An engine holding the facts the bodies above read.
+async fn handler_with_body_facts() -> (Handler, TempDir) {
+    let (handler, temp) = handler();
+    ok(&handler, "+r(-3)").await;
+    ok(&handler, "+q(7)").await;
+    ok(&handler, &format!("+s({}-3)", "1, ".repeat(510))).await;
+    (handler, temp)
+}
+
+/// A rule whose body is `body` plans and evaluates end to end.
+fn assert_body_evaluates(body: String) {
+    on_engine_threads(async move {
+        let (handler, _tmp) = handler_with_body_facts().await;
+        ok(&handler, &format!("+p(Y) <- {body}")).await;
+        assert_eq!(value(&handler, "p").await, "Int64(-3)");
+    });
+}
+
+// Bodies at the size limit plan and evaluate end to end, one test per shape
+// so they run side by side. Joins and wide atoms at the limit are too slow
+// to evaluate here.
+
 #[test]
-fn rule_body_size_limit_is_inclusive() {
+fn comparisons_at_the_body_size_limit_evaluate() {
+    assert_body_evaluates(comparisons(MAX_RULE_BODY_SIZE - 2));
+}
+
+#[test]
+fn negations_at_the_body_size_limit_evaluate() {
+    assert_body_evaluates(negations(MAX_RULE_BODY_SIZE / 2 - 1));
+}
+
+#[test]
+fn constants_at_the_body_size_limit_evaluate() {
+    assert_body_evaluates(constants(510));
+}
+
+/// One element past the body size limit is refused, in every shape that
+/// deepens the plan.
+#[test]
+fn bodies_past_the_size_limit_are_refused() {
     on_engine_threads(async {
-        let (handler, _tmp) = handler();
-        ok(&handler, "+r(-3)").await;
-        ok(&handler, "+q(7)").await;
-        ok(&handler, &format!("+s({}-3)", "1, ".repeat(510))).await;
+        let (handler, _tmp) = handler_with_body_facts().await;
         let n = MAX_RULE_BODY_SIZE;
         let joins = |atoms: usize| vec!["r(Y)"; atoms].join(", ");
-        let comparisons = |count: usize| format!("r(Y), {}", vec!["Y < 9"; count].join(", "));
-        let negations = |count: usize| format!("r(Y), {}", vec!["!q(Y)"; count].join(", "));
-        let constants = |count: usize| format!("s({}Y)", "1, ".repeat(count));
-        // Joins and wide atoms at the limit are too slow to evaluate here.
-        let at_limit = [comparisons(n - 2), negations(n / 2 - 1), constants(510)];
-        for (i, body) in at_limit.iter().enumerate() {
-            ok(&handler, &format!("+p{i}(Y) <- {body}")).await;
-            assert_eq!(value(&handler, &format!("p{i}")).await, "Int64(-3)");
-        }
         let past_limit = [
             comparisons(n - 1),
             format!("{}, Y < 9", negations(n / 2 - 1)),

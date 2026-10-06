@@ -12,6 +12,9 @@
 #   --server-cpus LIST pin the engine with taskset -c LIST
 #   --client-cpus LIST pin the soak's clients and verifier with taskset -c LIST
 #
+# The soak also runs the tests too slow for a PR (INPUTLAYER_SOAK=1): the
+# nesting ceiling sweep of tests/nesting_depth_tests.rs.
+#
 # Exit status: 0 when the soak passed, 1 when it failed, 3 on a setup error.
 # result.json and summary.md land in target/soak/runs/<utc-time>/;
 # target/soak/latest points there. The sustained run belongs on the
@@ -33,7 +36,7 @@ while [ $# -gt 0 ]; do
         --set) SETS+=("$2"); shift 2 ;;
         --server-cpus) SERVER_CPUS=$2; shift 2 ;;
         --client-cpus) CLIENT_CPUS=$2; shift 2 ;;
-        -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
         *) echo "soak: unknown option $1" >&2; exit 3 ;;
     esac
 done
@@ -110,6 +113,11 @@ env "${ENVS[@]}" INPUTLAYER_SOAK_REPORT_DIR="$RUN_DIR" \
     "${PIN[@]}" "$BIN" concurrent_soak_agrees_with_reference --exact --nocapture --test-threads 1 \
     || STATUS=$?
 ln -sfn "$RUN_DIR" "$OUT/latest"
+echo "=== Nesting ceiling sweep ==="
+SWEEP=0
+INPUTLAYER_SOAK=1 cargo test --release --all-features --test nesting_depth_tests \
+    terms_at_the_nesting_ceiling_evaluate -- --exact --nocapture || SWEEP=$?
+if [ "$SWEEP" -ne 0 ]; then STATUS=$SWEEP; fi
 echo ""
 echo "Results: $RUN_DIR (exit status $STATUS)"
 if [ "$STATUS" -ne 0 ]; then exit 1; fi

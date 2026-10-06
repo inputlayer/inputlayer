@@ -605,21 +605,49 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
     }
 
+    /// The storage write lock, held by another thread until this is dropped.
+    struct HeldWriteLock {
+        release: Option<std::sync::mpsc::Sender<()>>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Drop for HeldWriteLock {
+        fn drop(&mut self) {
+            // Closing the channel wakes the thread, also when the test fails.
+            drop(self.release.take());
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    /// Take the storage write lock on another thread; returns once it is held.
+    fn hold_storage_write_lock(handler: &Arc<Handler>) -> HeldWriteLock {
+        let locked = Arc::new(std::sync::Barrier::new(2));
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let thread = {
+            let handler = Arc::clone(handler);
+            let locked = Arc::clone(&locked);
+            std::thread::spawn(move || {
+                let _guard = handler.get_storage_mut();
+                locked.wait();
+                let _ = released.recv();
+            })
+        };
+        locked.wait();
+        HeldWriteLock {
+            release: Some(release),
+            thread: Some(thread),
+        }
+    }
+
     /// P2-13 regression: Health check returns degraded/503 when storage lock is contended.
     /// This verifies the health check doesn't hang when a write lock blocks readers.
     #[tokio::test]
     async fn test_health_returns_degraded_when_storage_locked() {
         let (handler, _tmp) = make_handler();
 
-        // Hold a write lock from another thread for 3 seconds
-        let h2 = Arc::clone(&handler);
-        let lock_thread = std::thread::spawn(move || {
-            let _guard = h2.get_storage_mut();
-            std::thread::sleep(std::time::Duration::from_secs(3));
-        });
-
-        // Give the thread time to acquire the write lock
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        let _held = hold_storage_write_lock(&handler);
 
         // Health check should return degraded (503), not hang
         let (status, Json(resp)) = health(Extension(handler)).await;
@@ -633,8 +661,6 @@ mod tests {
             data.status, "degraded",
             "Status should be 'degraded' when lock is contended"
         );
-
-        lock_thread.join().unwrap();
     }
 
     /// Regression: Readiness probe returns 503 when storage lock is contended.
@@ -643,15 +669,7 @@ mod tests {
     async fn test_readiness_returns_503_when_storage_locked() {
         let (handler, _tmp) = make_handler();
 
-        // Hold a write lock from another thread for 3 seconds
-        let h2 = Arc::clone(&handler);
-        let lock_thread = std::thread::spawn(move || {
-            let _guard = h2.get_storage_mut();
-            std::thread::sleep(std::time::Duration::from_secs(3));
-        });
-
-        // Give the thread time to acquire the write lock
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        let _held = hold_storage_write_lock(&handler);
 
         // Readiness should return 503 when lock is contended
         let status = readiness(Extension(handler)).await;
@@ -660,8 +678,6 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE,
             "Readiness should return 503 when storage lock is contended"
         );
-
-        lock_thread.join().unwrap();
     }
 
     #[tokio::test]
