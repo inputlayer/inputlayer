@@ -183,7 +183,7 @@ fn a_dropped_relation_is_rebuilt_empty() {
         },
     );
     assert_holds(&views, "edge", 3, &BTreeSet::new());
-    assert_eq!(views.stats().trace_rows, 0);
+    assert_eq!(views.progress().stats().trace_rows, 0);
     views.feed(4, delta("edge", vec![pair(5, 6)], vec![]));
     assert_holds(&views, "edge", 4, &[pair(5, 6)].into());
 }
@@ -206,7 +206,7 @@ fn feeding_never_waits_for_the_worker() {
     assert!(fed_in < Duration::from_secs(10), "feeding took {fed_in:?}");
 
     std::thread::sleep(Duration::from_millis(20));
-    let lagging = views.stats();
+    let lagging = views.progress().stats();
     assert_eq!(lagging.frontier, 1, "the worker is held");
     assert_eq!(lagging.pending_commits, commits as usize);
     assert!(lagging.frontier_lag >= Duration::from_millis(20));
@@ -215,7 +215,7 @@ fn feeding_never_waits_for_the_worker() {
     drop(release);
     let last = 1 + commits;
     assert!(views.wait_for(last, WAIT));
-    let current = views.stats();
+    let current = views.progress().stats();
     assert_eq!(current.frontier, last);
     assert_eq!(current.pending_commits, 0);
     assert_eq!(current.frontier_lag, Duration::ZERO);
@@ -227,13 +227,13 @@ fn feeding_never_waits_for_the_worker() {
 fn stats_meter_the_traces() {
     let views = ViewMaintainer::start("kg", 1, RelationMap::new());
     assert!(views.wait_for(1, WAIT));
-    assert_eq!(views.stats().trace_rows, 0);
-    assert_eq!(views.stats().trace_bytes, 0);
+    assert_eq!(views.progress().stats().trace_rows, 0);
+    assert_eq!(views.progress().stats().trace_bytes, 0);
 
     let tuples: Vec<Tuple> = (0..100).map(|i| pair(i, i)).collect();
     views.feed(2, delta("edge", tuples.clone(), vec![]));
     assert!(views.wait_for(2, WAIT));
-    let full = views.stats();
+    let full = views.progress().stats();
     // Each tuple once in each of the two arrangements.
     assert_eq!(full.trace_rows, 200);
     let data: usize = tuples.iter().map(Tuple::estimated_bytes).sum();
@@ -246,7 +246,7 @@ fn stats_meter_the_traces() {
     ]);
     views.feed(3, delta("wide", vec![wide], vec![]));
     assert!(views.wait_for(3, WAIT));
-    let with_wide = views.stats();
+    let with_wide = views.progress().stats();
     assert_eq!(with_wide.trace_rows, 202);
     assert!(with_wide.trace_bytes >= full.trace_bytes + 2 * 4096);
 }
@@ -268,8 +268,8 @@ fn traces_follow_the_live_relation_not_the_history() {
     assert_holds(&views, "churn", revision, &BTreeSet::new());
     // 40,000 updates went into the two traces.
     let deadline = Instant::now() + WAIT;
-    while views.stats().trace_rows > 4_000 {
-        assert!(Instant::now() < deadline, "{:?}", views.stats());
+    while views.progress().stats().trace_rows > 4_000 {
+        assert!(Instant::now() < deadline, "{:?}", views.progress().stats());
         std::thread::sleep(Duration::from_millis(10));
     }
 }
@@ -298,7 +298,7 @@ fn a_worker_panic_is_contained() {
             delta("edge", vec![pair(revision as i64, 0)], vec![]),
         );
     }
-    let stats = views.stats();
+    let stats = views.progress().stats();
     assert_eq!(stats.frontier, 2, "the frontier stays where it stopped");
     assert_eq!(stats.pending_commits, 0, "nothing queues for a dead worker");
     assert_eq!(stats.frontier_lag, Duration::ZERO);
@@ -322,7 +322,7 @@ fn dropping_the_maintainer_stops_its_worker() {
             delta("edge", vec![pair(revision as i64, 0)], vec![]),
         );
     }
-    let waiter = views.waiter();
+    let waiter = views.progress();
     drop(release);
     drop(views);
     // The drop joined the worker: only the waiter holds the state now.

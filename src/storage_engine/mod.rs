@@ -81,7 +81,7 @@ use crate::storage::{
     KnowledgeGraphsMetadata, RelationTombstone, StorageError, StorageResult,
 };
 use crate::value::{Relation, Tuple};
-use crate::view_maintainer::{BaseChange, BaseDelta, ViewMaintainer, ViewStats};
+use crate::view_maintainer::{BaseChange, BaseDelta, ViewMaintainer};
 use arc_swap::ArcSwap;
 use chrono::Utc;
 use dashmap::DashMap;
@@ -2320,12 +2320,6 @@ impl KnowledgeGraph {
                 self.store.relations().clone(),
             ));
         }
-    }
-
-    /// The view maintainer's progress, backlog and trace size; `None` when
-    /// the KG runs without one.
-    pub fn view_stats(&self) -> Option<ViewStats> {
-        self.views.as_ref().map(ViewMaintainer::stats)
     }
 
     /// Why this KG's maintained views cannot be used, if they cannot: its

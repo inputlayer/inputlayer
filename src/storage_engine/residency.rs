@@ -47,7 +47,7 @@ use crate::storage::persist::{
 };
 use crate::storage::{KnowledgeGraphMetadata, RelationTombstone, StorageError, StorageResult};
 use crate::value::Tuple;
-use crate::view_maintainer::ViewMaintainer;
+use crate::view_maintainer::{ViewMaintainer, ViewProgress, ViewStats};
 use arc_swap::ArcSwapOption;
 use parking_lot::lock_api::ArcRwLockWriteGuard;
 use parking_lot::{Mutex, RawRwLock, RwLock};
@@ -62,7 +62,7 @@ use tracing::{info, warn};
 /// A knowledge graph the engine knows: loaded, or dormant on disk.
 pub(super) struct KgSlot {
     /// The loaded graph; `None` while dormant.
-    graph: ArcSwapOption<RwLock<KnowledgeGraph>>,
+    graph: ArcSwapOption<Resident>,
     /// Serializes activation, unloading and removal.
     state: Mutex<SlotState>,
     /// Engine clock second of the last lookup, for unloading. Written without
@@ -73,6 +73,23 @@ pub(super) struct KgSlot {
     /// What listings report while the KG is dormant. Apart from `state`, so
     /// stats never wait for an activation.
     listing: Mutex<Listing>,
+}
+
+/// A loaded knowledge graph.
+struct Resident {
+    graph: Arc<RwLock<KnowledgeGraph>>,
+    /// Its view maintainer's progress, read without the graph's lock.
+    views: Option<ViewProgress>,
+}
+
+impl Resident {
+    fn new(graph: KnowledgeGraph) -> Self {
+        let views = graph.views.as_ref().map(ViewMaintainer::progress);
+        Resident {
+            graph: Arc::new(RwLock::new(graph)),
+            views,
+        }
+    }
 }
 
 /// A knowledge graph's entry in listings, kept while it is dormant.
@@ -162,7 +179,7 @@ impl KgSlot {
     /// A slot for a KG created now, already loaded.
     pub(super) fn loaded(graph: KnowledgeGraph, now: u64) -> Self {
         KgSlot {
-            graph: ArcSwapOption::from_pointee(RwLock::new(graph)),
+            graph: ArcSwapOption::from_pointee(Resident::new(graph)),
             state: Mutex::new(SlotState {
                 removed: false,
                 dormant: None,
@@ -189,7 +206,10 @@ impl KgSlot {
 
     /// The loaded graph, if any.
     pub(super) fn graph(&self) -> Option<Arc<RwLock<KnowledgeGraph>>> {
-        self.graph.load_full()
+        self.graph
+            .load()
+            .as_ref()
+            .map(|resident| Arc::clone(&resident.graph))
     }
 
     fn touch(&self, now: u64) {
@@ -204,7 +224,9 @@ impl KgSlot {
         let mut state = self.state.lock();
         state.removed = true;
         state.dormant = None;
-        self.graph.swap(None)
+        self.graph
+            .swap(None)
+            .map(|resident| Arc::clone(&resident.graph))
     }
 
     /// The KG's listing entry: from the graph when loaded, else as kept.
@@ -399,11 +421,12 @@ impl StorageEngine {
 
     /// The view maintainer of every loaded knowledge graph that runs one
     /// (`engine.views = "maintained"`): its frontier, backlog and trace size.
-    pub fn view_stats(&self) -> Vec<(String, crate::view_maintainer::ViewStats)> {
+    /// Read without any knowledge graph's lock.
+    pub fn view_stats(&self) -> Vec<(String, ViewStats)> {
         self.slots()
             .into_iter()
             .filter_map(|(name, slot)| {
-                let stats = slot.graph()?.read().view_stats()?;
+                let stats = slot.graph.load().as_ref()?.views.as_ref()?.stats();
                 Some((name, stats))
             })
             .collect()
@@ -412,15 +435,13 @@ impl StorageEngine {
     /// Wait until `kg`'s view maintainer holds everything through
     /// `revision`. Returns whether it did within `timeout`: false when the
     /// KG is not loaded, runs without a maintainer, or its maintainer failed.
-    ///
-    /// The maintainer is looked up under the KG's read lock and waited for
-    /// without it, so a waiter never holds up a writer.
-    pub fn wait_for_views(&self, kg: &str, revision: u64, timeout: Duration) -> bool {
-        let Some(graph) = self.slot(kg).ok().and_then(|slot| slot.graph()) else {
-            return false;
-        };
-        let waiter = graph.read().views.as_ref().map(ViewMaintainer::waiter);
-        waiter.is_some_and(|waiter| waiter.wait_for(revision, timeout))
+    #[cfg(test)]
+    pub(crate) fn wait_for_views(&self, kg: &str, revision: u64, timeout: Duration) -> bool {
+        let views = self
+            .slot(kg)
+            .ok()
+            .and_then(|slot| slot.graph.load().as_ref()?.views.clone());
+        views.is_some_and(|views| views.wait_for(revision, timeout))
     }
 
     /// Load dormant `kg` into `slot`, or return what another activation
@@ -449,8 +470,9 @@ impl StorageEngine {
         let created_at = slot.listing.lock().created_at.clone();
         let graph = self.load_graph(kg, dormant, created_at)?;
         let summary = graph.summary();
-        let graph = Arc::new(RwLock::new(graph));
-        slot.graph.store(Some(Arc::clone(&graph)));
+        let resident = Resident::new(graph);
+        let graph = Arc::clone(&resident.graph);
+        slot.graph.store(Some(Arc::new(resident)));
         state.dormant = None;
         let loaded = self.loaded.fetch_add(1, Ordering::AcqRel) + 1;
         self.residency_counts

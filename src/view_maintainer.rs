@@ -29,8 +29,8 @@
 //! unbounded and the commit path never waits for the worker. A worker slower
 //! than the writers shows as a frontier that lags the published revision,
 //! reported by [`ViewStats`]. The worker applies every queued commit before it
-//! steps, as one change at the last of their revisions, so a backlog costs
-//! one round of work, not one per commit.
+//! steps, each at its own revision, so a backlog costs one round of stepping,
+//! not one per commit.
 //!
 //! ## Failure
 //!
@@ -52,7 +52,7 @@ use differential_dataflow::operators::arrange::TraceAgent;
 use differential_dataflow::trace::cursor::Cursor;
 use differential_dataflow::trace::implementations::ord_neu::{OrdKeySpine, OrdValSpine};
 use differential_dataflow::trace::{BatchReader, TraceReader};
-use parking_lot::{Condvar, Mutex};
+use parking_lot::Mutex;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -133,13 +133,16 @@ enum Command {
         revision: u64,
         change: BaseChange,
     },
+    /// Scans read the arrangement at revision `at`, or at the frontier.
     ScanTuples {
         relation: String,
+        at: Option<u64>,
         reply: channel::Sender<BaseRows>,
     },
     ScanKeys {
         relation: String,
         key: Option<Value>,
+        at: Option<u64>,
         reply: channel::Sender<BaseRows>,
     },
     /// Wakes the worker so that it sees the stop flag.
@@ -148,6 +151,8 @@ enum Command {
     Panic,
     #[cfg(test)]
     Stall(channel::Receiver<()>),
+    #[cfg(test)]
+    KeepHistory(u64),
 }
 
 /// The rows of one arrangement at `revision`, each with its multiplicity.
@@ -168,8 +173,6 @@ struct Shared {
     failed: AtomicBool,
     failure: Mutex<Option<String>>,
     stop: AtomicBool,
-    /// Signalled when the frontier advances or the maintainer fails.
-    progress: (Mutex<()>, Condvar),
 }
 
 impl Shared {
@@ -178,12 +181,6 @@ impl Shared {
         *self.failure.lock() = Some(reason);
         self.failed.store(true, Ordering::Release);
         self.pending.lock().clear();
-        self.notify();
-    }
-
-    fn notify(&self) {
-        let _guard = self.progress.0.lock();
-        self.progress.1.notify_all();
     }
 
     /// Record that the arrangements hold everything through `revision`.
@@ -195,7 +192,14 @@ impl Shared {
             }
         }
         self.frontier.store(revision, Ordering::Release);
-        self.notify();
+    }
+
+    fn unavailable(&self) -> Option<String> {
+        if self.failed.load(Ordering::Acquire) {
+            self.failure.lock().clone()
+        } else {
+            None
+        }
     }
 }
 
@@ -227,7 +231,6 @@ impl ViewMaintainer {
             failed: AtomicBool::new(false),
             failure: Mutex::new(None),
             stop: AtomicBool::new(false),
-            progress: (Mutex::new(()), Condvar::new()),
         });
         let worker_shared = Arc::clone(&shared);
         let spawned = std::thread::Builder::new()
@@ -293,45 +296,20 @@ impl ViewMaintainer {
 
     /// Why the maintainer stopped, if it did.
     pub fn unavailable(&self) -> Option<String> {
-        if self.shared.failed.load(Ordering::Acquire) {
-            self.shared.failure.lock().clone()
-        } else {
-            None
-        }
+        self.shared.unavailable()
     }
 
-    /// The maintainer's progress, backlog and trace size.
-    pub fn stats(&self) -> ViewStats {
-        let unavailable = self.unavailable();
-        let (pending_commits, frontier_lag) = if unavailable.is_some() {
-            (0, Duration::ZERO)
-        } else {
-            let pending = self.shared.pending.lock();
-            let lag = pending
-                .front()
-                .map_or(Duration::ZERO, |(_, fed)| fed.elapsed());
-            (pending.len(), lag)
-        };
-        ViewStats {
-            frontier: self.frontier(),
-            pending_commits,
-            frontier_lag,
-            trace_rows: self.shared.trace_rows.load(Ordering::Relaxed),
-            trace_bytes: self.shared.trace_bytes.load(Ordering::Relaxed),
-            unavailable,
-        }
+    /// A handle that reads the maintainer's progress without borrowing it,
+    /// so without the knowledge graph's lock.
+    pub fn progress(&self) -> ViewProgress {
+        ViewProgress(Arc::clone(&self.shared))
     }
 
     /// Wait until the frontier reaches `revision`. Returns whether it did
     /// within `timeout`; false at once when the maintainer is unavailable.
-    pub fn wait_for(&self, revision: u64, timeout: Duration) -> bool {
-        self.waiter().wait_for(revision, timeout)
-    }
-
-    /// A handle that waits for the frontier without borrowing the
-    /// maintainer, so without the knowledge graph's lock.
-    pub fn waiter(&self) -> FrontierWaiter {
-        FrontierWaiter(Arc::clone(&self.shared))
+    #[cfg(test)]
+    pub(crate) fn wait_for(&self, revision: u64, timeout: Duration) -> bool {
+        self.progress().wait_for(revision, timeout)
     }
 
     /// The by-tuple arrangement of `relation` at the frontier; `None` when
@@ -339,6 +317,7 @@ impl ViewMaintainer {
     pub fn scan_tuples(&self, relation: &str) -> Option<BaseRows> {
         self.ask(|reply| Command::ScanTuples {
             relation: relation.to_string(),
+            at: None,
             reply,
         })
     }
@@ -350,6 +329,7 @@ impl ViewMaintainer {
         self.ask(|reply| Command::ScanKeys {
             relation: relation.to_string(),
             key,
+            at: None,
             reply,
         })
     }
@@ -374,32 +354,81 @@ impl ViewMaintainer {
         let _ = self.commands.send(Command::Stall(held));
         release
     }
+
+    /// Keep the traces' history from `revision` on, so that the scans below
+    /// can read the arrangements at any later revision the frontier passed.
+    #[cfg(test)]
+    pub(crate) fn keep_history_from(&self, revision: u64) {
+        let _ = self.commands.send(Command::KeepHistory(revision));
+    }
+
+    /// [`Self::scan_tuples`] at `revision`.
+    #[cfg(test)]
+    pub(crate) fn scan_tuples_at(&self, relation: &str, revision: u64) -> Option<BaseRows> {
+        self.ask(|reply| Command::ScanTuples {
+            relation: relation.to_string(),
+            at: Some(revision),
+            reply,
+        })
+    }
+
+    /// [`Self::scan_keys`] under every key at `revision`.
+    #[cfg(test)]
+    pub(crate) fn scan_keys_at(&self, relation: &str, revision: u64) -> Option<BaseRows> {
+        self.ask(|reply| Command::ScanKeys {
+            relation: relation.to_string(),
+            key: None,
+            at: Some(revision),
+            reply,
+        })
+    }
 }
 
-/// Waits for a maintainer's frontier; see [`ViewMaintainer::waiter`].
-pub struct FrontierWaiter(Arc<Shared>);
+/// Reads a maintainer's progress; see [`ViewMaintainer::progress`].
+#[derive(Clone)]
+pub struct ViewProgress(Arc<Shared>);
 
-impl FrontierWaiter {
-    /// See [`ViewMaintainer::wait_for`].
-    pub fn wait_for(&self, revision: u64, timeout: Duration) -> bool {
+impl ViewProgress {
+    /// The maintainer's progress, backlog and trace size.
+    pub fn stats(&self) -> ViewStats {
+        let shared = &self.0;
+        let unavailable = shared.unavailable();
+        let (pending_commits, frontier_lag) = if unavailable.is_some() {
+            (0, Duration::ZERO)
+        } else {
+            let pending = shared.pending.lock();
+            let lag = pending
+                .front()
+                .map_or(Duration::ZERO, |(_, fed)| fed.elapsed());
+            (pending.len(), lag)
+        };
+        ViewStats {
+            frontier: shared.frontier.load(Ordering::Acquire),
+            pending_commits,
+            frontier_lag,
+            trace_rows: shared.trace_rows.load(Ordering::Relaxed),
+            trace_bytes: shared.trace_bytes.load(Ordering::Relaxed),
+            unavailable,
+        }
+    }
+
+    /// See [`ViewMaintainer::wait_for`]; false at once when the maintainer
+    /// stopped.
+    #[cfg(test)]
+    pub(crate) fn wait_for(&self, revision: u64, timeout: Duration) -> bool {
         let shared = &self.0;
         let deadline = Instant::now() + timeout;
-        let mut guard = shared.progress.0.lock();
         loop {
             if shared.frontier.load(Ordering::Acquire) >= revision {
                 return true;
             }
-            if shared.failed.load(Ordering::Acquire) || shared.stop.load(Ordering::Acquire) {
+            if shared.failed.load(Ordering::Acquire)
+                || shared.stop.load(Ordering::Acquire)
+                || Instant::now() >= deadline
+            {
                 return false;
             }
-            if shared
-                .progress
-                .1
-                .wait_until(&mut guard, deadline)
-                .timed_out()
-            {
-                return shared.frontier.load(Ordering::Acquire) >= revision;
-            }
+            std::thread::sleep(Duration::from_millis(1));
         }
     }
 }
@@ -407,7 +436,6 @@ impl FrontierWaiter {
 impl Drop for ViewMaintainer {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::Release);
-        self.shared.notify();
         let _ = self.commands.send(Command::Stop);
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
@@ -539,6 +567,9 @@ struct Dataflows<'w> {
     bases: HashMap<String, Base>,
     /// The inputs' time: one past the last applied revision.
     time: u64,
+    /// The traces keep their history from this revision on.
+    #[cfg(test)]
+    history_from: u64,
 }
 
 impl Dataflows<'_> {
@@ -610,6 +641,8 @@ impl Dataflows<'_> {
         }
         // Reads are answered as of the frontier; nothing earlier is kept apart.
         let since = [next - 1];
+        #[cfg(test)]
+        let since = [since[0].min(self.history_from)];
         for base in self.bases.values_mut() {
             base.by_tuple
                 .set_logical_compaction(AntichainRef::new(&since));
@@ -634,13 +667,17 @@ impl Dataflows<'_> {
         total
     }
 
-    fn scan_tuples(&mut self, relation: &str) -> Vec<(Tuple, isize)> {
+    fn scan_tuples(&mut self, relation: &str, at: u64) -> Vec<(Tuple, isize)> {
         let mut rows = Vec::new();
         if let Some(base) = self.bases.get_mut(relation) {
             let (mut cursor, storage) = base.by_tuple.cursor();
             while cursor.key_valid(&storage) {
                 let mut count = 0;
-                cursor.map_times(&storage, |_, diff| count += *diff);
+                cursor.map_times(&storage, |time, diff| {
+                    if *time <= at {
+                        count += *diff;
+                    }
+                });
                 if count != 0 {
                     rows.push((cursor.key(&storage).clone(), count));
                 }
@@ -650,7 +687,7 @@ impl Dataflows<'_> {
         rows
     }
 
-    fn scan_keys(&mut self, relation: &str, key: Option<&Value>) -> Vec<(Tuple, isize)> {
+    fn scan_keys(&mut self, relation: &str, key: Option<&Value>, at: u64) -> Vec<(Tuple, isize)> {
         let mut rows = Vec::new();
         if let Some(base) = self.bases.get_mut(relation) {
             let (mut cursor, storage) = base.by_key.cursor();
@@ -663,7 +700,11 @@ impl Dataflows<'_> {
                 }
                 while cursor.val_valid(&storage) {
                     let mut count = 0;
-                    cursor.map_times(&storage, |_, diff| count += *diff);
+                    cursor.map_times(&storage, |time, diff| {
+                        if *time <= at {
+                            count += *diff;
+                        }
+                    });
                     if count != 0 {
                         rows.push((cursor.val(&storage).clone(), count));
                     }
@@ -691,6 +732,8 @@ fn worker_loop(
             worker,
             bases: HashMap::new(),
             time: revision,
+            #[cfg(test)]
+            history_from: u64::MAX,
         };
         let publish = |dataflows: &mut Dataflows, revision: u64, started: Instant| {
             let size = dataflows.meter();
@@ -750,20 +793,18 @@ fn worker_loop(
 
             match command {
                 Command::Commit { revision, change } => {
-                    // Every commit already queued joins this round, at the
-                    // round's last revision: only the frontier can be read,
-                    // so the revisions between are never seen, and changes
-                    // that cancel within the round never reach the traces.
+                    // Every commit already queued joins this round, each at
+                    // its own revision, and the round steps once.
                     let started = Instant::now();
                     let mut last = revision;
                     let mut buffered = change.updates();
-                    let mut round = vec![change];
+                    dataflows.apply(revision, change);
                     while buffered < SETTLE_UPDATES {
                         match queue.try_recv() {
                             Ok(Command::Commit { revision, change }) => {
                                 last = revision;
                                 buffered += change.updates();
-                                round.push(change);
+                                dataflows.apply(revision, change);
                             }
                             Ok(other) => {
                                 carried = Some(other);
@@ -772,26 +813,30 @@ fn worker_loop(
                             Err(_) => break,
                         }
                     }
-                    for change in round {
-                        dataflows.apply(last, change);
-                    }
                     dataflows.settle(last);
                     publish(&mut dataflows, last, started);
                 }
-                Command::ScanTuples { relation, reply } => {
+                Command::ScanTuples {
+                    relation,
+                    at,
+                    reply,
+                } => {
+                    let revision = at.unwrap_or_else(|| shared.frontier.load(Ordering::Acquire));
                     let _ = reply.send(BaseRows {
-                        revision: shared.frontier.load(Ordering::Acquire),
-                        rows: dataflows.scan_tuples(&relation),
+                        revision,
+                        rows: dataflows.scan_tuples(&relation, revision),
                     });
                 }
                 Command::ScanKeys {
                     relation,
                     key,
+                    at,
                     reply,
                 } => {
+                    let revision = at.unwrap_or_else(|| shared.frontier.load(Ordering::Acquire));
                     let _ = reply.send(BaseRows {
-                        revision: shared.frontier.load(Ordering::Acquire),
-                        rows: dataflows.scan_keys(&relation, key.as_ref()),
+                        revision,
+                        rows: dataflows.scan_keys(&relation, key.as_ref(), revision),
                     });
                 }
                 Command::Stop => return,
@@ -801,6 +846,8 @@ fn worker_loop(
                 Command::Stall(held) => {
                     let _ = held.recv();
                 }
+                #[cfg(test)]
+                Command::KeepHistory(revision) => dataflows.history_from = revision,
             }
         }
     });

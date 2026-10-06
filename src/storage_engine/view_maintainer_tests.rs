@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::config::{Config, ViewsMode};
-use crate::view_maintainer::BaseRows;
+use crate::view_maintainer::{BaseRows, ViewStats};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::collections::BTreeSet;
@@ -308,6 +308,135 @@ fn a_stalled_maintainer_does_not_block_commits() {
     assert_eq!(current.frontier_lag, Duration::ZERO);
 }
 
+/// The backlog path: commits queued behind a held worker are applied in one
+/// round, and each still enters the arrangements at its own revision. With
+/// the traces' history kept, both arrangements equal what the store held at
+/// every one of those revisions, not only at the last.
+#[test]
+fn a_backlog_reaches_the_arrangements_at_each_commits_revision() {
+    const RELATIONS: [&str; 3] = ["edge", "node", "tmp_a"];
+    for seed in 0..4 {
+        let temp = TempDir::new().unwrap();
+        let storage = open(temp.path());
+        storage.create_knowledge_graph("kg").unwrap();
+        storage
+            .insert_tuples_into("kg", "edge", vec![pair(0, 0), pair(1, 1)])
+            .unwrap();
+        let held_at = assert_views_equal_store(&storage, "kg", &RELATIONS);
+        let graph = storage.kg_handle("kg").unwrap();
+        let release = {
+            let db = graph.read();
+            let views = db.views.as_ref().unwrap();
+            views.keep_history_from(held_at);
+            views.stall()
+        };
+
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut rules = 0;
+        // The store at each revision published while the worker is held.
+        let mut history: Vec<(u64, Vec<BTreeSet<Tuple>>)> = Vec::new();
+        for _ in 0..60 {
+            let relation = RELATIONS[rng.gen_range(0..RELATIONS.len())];
+            let mut batch: Vec<Tuple> = (0..rng.gen_range(1..10))
+                .map(|_| pair(rng.gen_range(0..5), rng.gen_range(0..5)))
+                .collect();
+            match rng.gen_range(0..20) {
+                0..=9 => {
+                    let again: Vec<Tuple> = batch.iter().take(2).cloned().collect();
+                    batch.extend(again);
+                    storage.insert_tuples_into("kg", relation, batch).unwrap();
+                }
+                10..=16 => {
+                    storage.delete_tuples_from("kg", relation, batch).unwrap();
+                }
+                17 => {
+                    storage.clear_relations_by_prefix_in("kg", "tmp_").unwrap();
+                }
+                _ => {
+                    rules += 1;
+                    let rule = crate::statement::parse_rule_definition(&format!(
+                        "seen{rules}(X) <- source{rules}(X, Y)"
+                    ))
+                    .unwrap();
+                    storage.register_rule_in("kg", &rule).unwrap();
+                }
+            }
+            let db = graph.read();
+            let revision = db.snapshot.load().revision;
+            let stored = RELATIONS
+                .iter()
+                .map(|relation| {
+                    db.store
+                        .get(relation)
+                        .map(|tuples| tuples.iter().cloned().collect())
+                        .unwrap_or_default()
+                })
+                .collect();
+            // A write that changes nothing publishes no revision.
+            if history.last().map_or(held_at, |(last, _)| *last) < revision {
+                history.push((revision, stored));
+            }
+        }
+        assert!(
+            history.len() > 10,
+            "seed {seed}: {} revisions",
+            history.len()
+        );
+        let queued = stats(&storage, "kg");
+        assert_eq!(queued.frontier, held_at, "the worker is held");
+        assert!(queued.pending_commits >= history.len(), "{queued:?}");
+
+        drop(release);
+        let db = graph.read();
+        let views = db.views.as_ref().unwrap();
+        let last = db.snapshot.load().revision;
+        assert!(views.wait_for(last, WAIT), "frontier reaches {last}");
+        for (revision, stored) in &history {
+            for (relation, stored) in RELATIONS.iter().zip(stored) {
+                let by_tuple = views.scan_tuples_at(relation, *revision).unwrap();
+                assert_eq!(
+                    &set(by_tuple),
+                    stored,
+                    "seed {seed}: {relation} by tuple at revision {revision}"
+                );
+                let by_key = views.scan_keys_at(relation, *revision).unwrap();
+                assert_eq!(
+                    &set(by_key),
+                    stored,
+                    "seed {seed}: {relation} by key at revision {revision}"
+                );
+            }
+        }
+    }
+}
+
+/// The view maintainers' stats are read without the knowledge graphs' locks:
+/// a commit holding one does not hold up a metrics scrape.
+#[test]
+fn view_stats_do_not_wait_for_a_knowledge_graphs_lock() {
+    let temp = TempDir::new().unwrap();
+    let storage = open(temp.path());
+    storage.create_knowledge_graph("kg").unwrap();
+    storage
+        .insert_tuples_into("kg", "edge", vec![pair(1, 2)])
+        .unwrap();
+    let revision = assert_views_equal_store(&storage, "kg", &["edge"]);
+
+    let graph = storage.kg_handle("kg").unwrap();
+    let writing = graph.write();
+    let (done, read) = std::sync::mpsc::channel();
+    let frontier = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let _ = done.send(stats(&storage, "kg").frontier);
+        });
+        let frontier = read.recv_timeout(Duration::from_secs(10));
+        // Released whatever the outcome, so a waiting reader ends.
+        drop(writing);
+        frontier
+    });
+    assert_eq!(frontier, Ok(revision), "read while the KG is write-locked");
+}
+
 /// The default: no maintainer, whatever happens to the knowledge graphs.
 #[test]
 fn recompute_mode_runs_no_maintainer() {
@@ -321,7 +450,6 @@ fn recompute_mode_runs_no_maintainer() {
     assert!(maintained(&storage).is_empty());
     let graph = storage.kg_handle("kg").unwrap();
     assert!(graph.read().views.is_none());
-    assert_eq!(graph.read().view_stats(), None);
     assert_eq!(graph.read().views_unavailable(), None);
     let revision = graph.read().snapshot.load().revision;
     assert!(!storage.wait_for_views("kg", revision, Duration::from_millis(10)));
@@ -352,7 +480,7 @@ fn a_maintainer_starts_at_create_and_stops_at_drop() {
         .views
         .as_ref()
         .unwrap()
-        .waiter();
+        .progress();
     storage.drop_knowledge_graph("kg").unwrap();
     assert_eq!(maintained(&storage), before);
     // Released by the stop, long before the timeout.
@@ -392,7 +520,7 @@ fn a_maintainer_stops_at_unload_and_starts_at_load() {
         .views
         .as_ref()
         .unwrap()
-        .waiter();
+        .progress();
 
     assert_views_equal_store(&storage, "b", &["edge"]);
     assert!(!storage.is_knowledge_graph_loaded("a").unwrap());

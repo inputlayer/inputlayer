@@ -108,8 +108,8 @@ pub mod ast;
 pub mod hnsw_index; // HNSW vector index implementation
 pub mod index_manager; // Index manager for vector similarity search
 pub mod ir;
-pub mod session;
-pub mod view_maintainer; // Session manager for ephemeral triggers persistent
+pub mod session; // Session manager for ephemeral triggers persistent
+pub mod view_maintainer;
 
 // Re-export types from internal modules
 pub use crate::ast::builders::{fact, simple_rule, AtomBuilder, RuleBuilder};

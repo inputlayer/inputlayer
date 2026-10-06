@@ -97,7 +97,7 @@ pub struct KnowledgeGraph {
 
 - **Lifecycle**: started when a knowledge graph is created or loaded from disk (from the store, at the published revision), stopped when the graph is dropped or unloaded.
 - **Feed**: every published snapshot is fed under the graph's write lock, so in commit order, as the base-relation changes at that snapshot's revision (`apply_delta`, clear by prefix, relation drop; other publishes feed an empty change). The feed is an unbounded queue and never waits for the worker.
-- **Frontier**: the last revision the arrangements hold completely. The worker applies every queued snapshot as one change at the last of their revisions, advances the inputs and steps until the probes pass it. A slow worker shows as frontier lag (`inputlayer_view_frontier_lag_seconds`), never as a slow commit.
+- **Frontier**: the last revision the arrangements hold completely. The worker applies every queued snapshot at its own revision, then advances the inputs and steps until the probes pass the last of them. A slow worker shows as frontier lag (`inputlayer_view_frontier_lag_seconds`), never as a slow commit.
 - **Metering**: trace rows and estimated bytes, from `map_batches`, walking only batches that appeared since the last metering.
 - **Failure**: a worker panic is caught and marks the graph's views unavailable; the store stays authoritative, commits go on and are no longer fed, and a reload of the graph starts a fresh maintainer.
 
