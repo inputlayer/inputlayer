@@ -36,6 +36,8 @@ if [ ! -x "$BIN" ]; then
     WORK=$OUT/baseline-build/$KEY
     rm -rf "$WORK" && mkdir -p "$WORK/src"
     trap 'rm -rf "$WORK"' EXIT
+    # Killed: let cargo end first, or it writes to the directory being removed.
+    trap 'exit 143' TERM HUP
     git archive --format=tar "$SHA" | tar -x -C "$WORK/src"
     # Same dependency versions as the candidate where the manifests allow.
     if [ -f Cargo.lock ]; then cp Cargo.lock "$WORK/src/"; fi

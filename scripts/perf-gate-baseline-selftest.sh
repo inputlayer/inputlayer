@@ -10,6 +10,7 @@
 #   - a cached baseline is returned again without a rebuild
 #   - a commit that does not compile fails, and no build directory is left
 #     behind, built or not
+#   - a build killed with SIGTERM or SIGHUP leaves no build directory behind
 #
 # Usage: scripts/perf-gate-baseline-selftest.sh   (needs cargo; no network)
 set -euo pipefail
@@ -115,6 +116,33 @@ if [ -n "$(ls "$TMP/older-first/target/perf-gate/baseline-build")" ]; then
 else
     pass "no build directory is left behind, built or not"
 fi
+
+# A build that is killed: its build script is still running when the helper
+# gets the signal, and writes to the build directory afterwards.
+cat > "$TMP/older-first/build.rs" <<EOF
+fn main() {
+    std::fs::write("$TMP/build-script-started", "").unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    std::fs::create_dir_all(std::env::var("OUT_DIR").unwrap()).unwrap();
+    std::fs::write("$TMP/build-script-finished", "").unwrap();
+}
+EOF
+echo 'pub const ENGINE: &str = "engine-slow";' > "$TMP/older-first/src/lib.rs"
+git -C "$TMP/older-first" add .
+git -C "$TMP/older-first" commit --quiet -m "baseline slow"
+for signal in TERM HUP; do
+    rm -f "$TMP"/build-script-*
+    (cd "$TMP/older-first" && exec "$HELPER" HEAD > /dev/null 2> "$TMP/build.log") &
+    until [ -e "$TMP/build-script-started" ]; do sleep 0.1; done
+    kill -s "$signal" $!
+    wait $! || true
+    until [ -e "$TMP/build-script-finished" ]; do sleep 0.1; done
+    if [ -n "$(ls "$TMP/older-first/target/perf-gate/baseline-build")" ]; then
+        fail "a build killed with SIG$signal left its build directory behind"
+    else
+        pass "a build killed with SIG$signal leaves no build directory behind"
+    fi
+done
 
 if [ "$FAILURES" -gt 0 ]; then
     echo "perf-gate-baseline-selftest: $FAILURES failure(s)"
