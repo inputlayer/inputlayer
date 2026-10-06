@@ -1,17 +1,8 @@
 //! String literals with commas, operators, parens, quotes and escapes, end to end through `Handler`.
 
+use crate::harness::handler;
 use inputlayer::protocol::wire::WireValue;
 use inputlayer::protocol::Handler;
-use inputlayer::Config;
-use tempfile::TempDir;
-
-fn create_test_handler() -> (Handler, TempDir) {
-    let temp = TempDir::new().expect("temp dir");
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    let storage = inputlayer::StorageEngine::new(config).expect("storage engine");
-    (Handler::new(storage), temp)
-}
 
 async fn exec(handler: &Handler, program: &str) {
     handler
@@ -67,7 +58,7 @@ const TEXTS: &[&str] = &[
 
 #[tokio::test]
 async fn text_values_insert_query_delete_roundtrip() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     exec(&handler, "+said(u: int, m: string)").await;
 
     let tuples: Vec<String> = TEXTS
@@ -108,7 +99,7 @@ async fn text_values_insert_query_delete_roundtrip() {
 
 #[tokio::test]
 async fn single_insert_with_escaped_quote_before_comma() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     exec(&handler, r#"+note(7, "say \"hi\" now")"#).await;
     exec(&handler, r#"+note[(3, "a \"x, y\" b")]"#).await;
     assert_eq!(
@@ -123,7 +114,7 @@ async fn single_insert_with_escaped_quote_before_comma() {
 
 #[tokio::test]
 async fn newline_escape_is_stored_as_newline() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     exec(&handler, r#"+note(1, "line one\nline two")"#).await;
     assert_eq!(
         rows(&handler, "?note(1, M)").await,
@@ -133,7 +124,7 @@ async fn newline_escape_is_stored_as_newline() {
 
 #[tokio::test]
 async fn injection_payload_is_one_tuple() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     let payload = r#"c1:e"), (", 7, true, ""#;
     exec(
         &handler,
@@ -148,7 +139,7 @@ async fn injection_payload_is_one_tuple() {
 
 #[tokio::test]
 async fn persisted_rule_keeps_float_and_string_constants() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     exec(&handler, "+n[(1), (2)]").await;
     exec(&handler, r#"+r(X, 2.0, "a, \"b\"") <- n(X)"#).await;
     exec(&handler, "+w(X, Y) <- n(X), Y = X * 2.0").await;
@@ -168,7 +159,7 @@ async fn persisted_rule_keeps_float_and_string_constants() {
 
 #[tokio::test]
 async fn reserved_query_name_gives_name_error() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     let err = handler
         .query_program(None, "?__x(N)".to_string())
         .await
@@ -178,7 +169,7 @@ async fn reserved_query_name_gives_name_error() {
 
 #[tokio::test]
 async fn query_shorthand_accepts_underscore_and_space() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     exec(&handler, "+n[(1), (2)]").await;
     let sid = handler.create_session("default").expect("session");
     let run = |q: &str| handler.execute_program(Some(&sid), None, q.to_string(), None);

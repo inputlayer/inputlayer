@@ -6,16 +6,9 @@
 //! atoms over one relation with `_` at the same position joined on it:
 //! `w(A,B) <- user(A,_,_), user(B,_,_)` returned only the diagonal.
 
+use crate::harness::handler_at;
 use inputlayer::protocol::Handler;
-use inputlayer::Config;
-use std::path::Path;
 use tempfile::TempDir;
-
-fn open_handler(dir: &Path) -> Handler {
-    let mut config = Config::default();
-    config.storage.data_dir = dir.to_path_buf();
-    Handler::new(inputlayer::StorageEngine::new(config).expect("storage engine"))
-}
 
 async fn exec(handler: &Handler, program: &str) {
     handler
@@ -68,7 +61,7 @@ fn all_user_pairs() -> Vec<Vec<String>> {
 #[tokio::test]
 async fn persistent_rule_wildcards_do_not_join() {
     let temp = TempDir::new().unwrap();
-    let handler = open_handler(temp.path());
+    let handler = handler_at(temp.path());
     exec(&handler, USERS).await;
     exec(&handler, "+w(A,B) <- user(A,_,_), user(B,_,_)").await;
     assert_eq!(rows(&handler, "?w(A,B)").await, all_user_pairs());
@@ -77,7 +70,7 @@ async fn persistent_rule_wildcards_do_not_join() {
 #[tokio::test]
 async fn session_rule_wildcards_do_not_join() {
     let temp = TempDir::new().unwrap();
-    let handler = open_handler(temp.path());
+    let handler = handler_at(temp.path());
     exec(&handler, USERS).await;
     assert_eq!(
         rows(&handler, "w(A,B) <- user(A,_,_), user(B,_,_)\n?w(A,B)").await,
@@ -89,11 +82,11 @@ async fn session_rule_wildcards_do_not_join() {
 async fn persistent_wildcard_rule_survives_restart() {
     let temp = TempDir::new().unwrap();
     {
-        let handler = open_handler(temp.path());
+        let handler = handler_at(temp.path());
         exec(&handler, USERS).await;
         exec(&handler, "+w(A,B) <- user(A,_,_), user(B,_,_)").await;
     }
-    let handler = open_handler(temp.path());
+    let handler = handler_at(temp.path());
     assert_eq!(rows(&handler, "?w(A,B)").await, all_user_pairs());
 }
 
@@ -101,7 +94,7 @@ async fn persistent_wildcard_rule_survives_restart() {
 #[tokio::test]
 async fn wildcards_in_a_chained_join_do_not_join() {
     let temp = TempDir::new().unwrap();
-    let handler = open_handler(temp.path());
+    let handler = handler_at(temp.path());
     exec(&handler, r#"+e[(1,2,"a"),(2,3,"b"),(3,4,"c")]"#).await;
     exec(&handler, "+two(X,Z) <- e(X,Y,_), e(Y,Z,_)").await;
     assert_eq!(
@@ -114,7 +107,7 @@ async fn wildcards_in_a_chained_join_do_not_join() {
 #[tokio::test]
 async fn wildcards_in_negated_atoms() {
     let temp = TempDir::new().unwrap();
-    let handler = open_handler(temp.path());
+    let handler = handler_at(temp.path());
     exec(&handler, "+follows[(1,10),(2,20),(3,10)]").await;
     exec(&handler, "+muted[(1,99)]").await;
     exec(
@@ -138,7 +131,7 @@ async fn wildcards_in_negated_atoms() {
 #[tokio::test]
 async fn wildcards_under_an_aggregate() {
     let temp = TempDir::new().unwrap();
-    let handler = open_handler(temp.path());
+    let handler = handler_at(temp.path());
     exec(&handler, USERS).await;
     exec(&handler, "+peers(A, count<B>) <- user(A,_,_), user(B,_,_)").await;
     assert_eq!(
@@ -151,7 +144,7 @@ async fn wildcards_under_an_aggregate() {
 #[tokio::test]
 async fn wildcards_in_a_recursive_rule() {
     let temp = TempDir::new().unwrap();
-    let handler = open_handler(temp.path());
+    let handler = handler_at(temp.path());
     exec(&handler, r#"+e[(1,2,"a"),(2,3,"b"),(3,4,"c")]"#).await;
     exec(&handler, "+r(X,Y,L) <- e(X,Y,L)").await;
     exec(&handler, r#"+r(X,Z,"via") <- r(X,Y,_), r(Y,Z,_)"#).await;

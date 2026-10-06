@@ -1,18 +1,9 @@
 //! Tests for error handling: no input should crash the server.
 
-use inputlayer::{Config, IQLEngine, StorageEngine, Tuple, Value};
+use crate::harness::storage;
+use inputlayer::{IQLEngine, Tuple, Value};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use tempfile::TempDir;
-
-// Test Helpers
-fn create_test_storage() -> (StorageEngine, TempDir) {
-    let temp = TempDir::new().expect("create temp dir");
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    let storage = StorageEngine::new(config).expect("create storage engine");
-    (storage, temp)
-}
 
 fn create_engine() -> IQLEngine {
     IQLEngine::new()
@@ -118,7 +109,7 @@ fn test_unbound_head_variable_returns_error() {
 // Storage Error Handling (no panics)
 #[test]
 fn test_query_nonexistent_kg_returns_error() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
 
     let result = storage.execute_query_on("nonexistent_kg", "result(X) <- data(X)");
     assert!(
@@ -129,7 +120,7 @@ fn test_query_nonexistent_kg_returns_error() {
 
 #[test]
 fn test_insert_into_nonexistent_kg_returns_error() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
     let storage = storage; // Make mutable for insert operation
 
     let result = storage.insert_into("nonexistent_kg", "data", vec![(1, 2)]);
@@ -141,7 +132,7 @@ fn test_insert_into_nonexistent_kg_returns_error() {
 
 #[test]
 fn test_delete_from_nonexistent_kg_returns_error() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
     let storage = storage; // Make mutable for delete operation
 
     let result = storage.delete_from("nonexistent_kg", "data", vec![(1, 2)]);
@@ -153,7 +144,7 @@ fn test_delete_from_nonexistent_kg_returns_error() {
 
 #[test]
 fn test_drop_nonexistent_kg_returns_error() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
 
     let result = storage.drop_knowledge_graph("nonexistent_kg");
     assert!(result.is_err(), "Drop non-existent KG should return error");
@@ -161,7 +152,7 @@ fn test_drop_nonexistent_kg_returns_error() {
 
 #[test]
 fn test_drop_nonexistent_rule_handles_gracefully() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
     storage.create_knowledge_graph("test").unwrap();
 
     // Dropping non-existent rule should not panic
@@ -172,7 +163,7 @@ fn test_drop_nonexistent_rule_handles_gracefully() {
 
 #[test]
 fn test_create_duplicate_kg_returns_error() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
     storage.create_knowledge_graph("duplicate").unwrap();
 
     let result = storage.create_knowledge_graph("duplicate");
@@ -182,7 +173,7 @@ fn test_create_duplicate_kg_returns_error() {
 // Query Execution Error Handling (no panics)
 #[test]
 fn test_query_undefined_relation_returns_error() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
     storage.create_knowledge_graph("test").unwrap();
 
     // Querying an undefined relation with a free variable is "unsafe" in IQL
@@ -197,7 +188,7 @@ fn test_query_undefined_relation_returns_error() {
 
 #[test]
 fn test_recursive_query_on_empty_relation() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
     storage.create_knowledge_graph("test").unwrap();
 
     // First create the base relation (empty)
@@ -260,7 +251,7 @@ fn test_value_type_mismatches_dont_panic() {
 // Concurrent Error Handling (no panics under contention)
 #[test]
 fn test_concurrent_errors_dont_cause_panic() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
     storage.create_knowledge_graph("concurrent_errors").unwrap();
 
     let storage = Arc::new(RwLock::new(storage));
@@ -294,7 +285,7 @@ fn test_concurrent_errors_dont_cause_panic() {
 
 #[test]
 fn test_rapid_kg_create_drop_cycle() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
 
     // Rapid create/drop cycle should not cause issues
     for i in 0..50 {
@@ -307,7 +298,7 @@ fn test_rapid_kg_create_drop_cycle() {
 
 #[test]
 fn test_error_after_successful_operations() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
     storage.create_knowledge_graph("mixed").unwrap();
 
     // Successful operations
@@ -363,7 +354,7 @@ fn test_load_nonexistent_file_returns_error() {
 // Edge Case Error Handling (no panics)
 #[test]
 fn test_very_long_relation_name_handled() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
     storage.create_knowledge_graph("test").unwrap();
 
     let long_name = "a".repeat(1000);
@@ -497,7 +488,7 @@ fn test_empty_vector_operations_handled() {
 // State Consistency After Errors
 #[test]
 fn test_state_consistent_after_parse_error() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
     storage.create_knowledge_graph("state_test").unwrap();
 
     // Add valid data
@@ -517,7 +508,7 @@ fn test_state_consistent_after_parse_error() {
 
 #[test]
 fn test_state_consistent_after_execution_error() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
     storage.create_knowledge_graph("exec_test").unwrap();
 
     // Add valid data
@@ -537,7 +528,7 @@ fn test_state_consistent_after_execution_error() {
 
 #[test]
 fn test_partial_batch_error_handling() {
-    let (storage, _temp) = create_test_storage();
+    let (storage, _temp) = storage();
     storage.create_knowledge_graph("batch_test").unwrap();
 
     // Insert valid data

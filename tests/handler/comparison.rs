@@ -1,16 +1,7 @@
 //! Variable-vs-variable comparisons across value types, end to end through `Handler`.
 
+use crate::harness::handler;
 use inputlayer::protocol::Handler;
-use inputlayer::Config;
-use tempfile::TempDir;
-
-fn create_test_handler() -> (Handler, TempDir) {
-    let temp = TempDir::new().expect("temp dir");
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    let storage = inputlayer::StorageEngine::new(config).expect("storage engine");
-    (Handler::new(storage), temp)
-}
 
 async fn exec(handler: &Handler, program: &str) -> inputlayer::protocol::wire::QueryResult {
     handler
@@ -50,7 +41,7 @@ async fn setup_pairs(handler: &Handler) {
 
 #[tokio::test]
 async fn test_string_vars_all_operators_order_lexicographically() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     setup_pairs(&handler).await;
 
     let lt = strs(&[&["apple", "banana"]]);
@@ -72,7 +63,7 @@ async fn test_string_vars_all_operators_order_lexicographically() {
 
 #[tokio::test]
 async fn test_string_vars_compare_in_persistent_rule() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     setup_pairs(&handler).await;
     exec(&handler, "+ordered(A, B) <- pair(A, B), A < B").await;
 
@@ -84,7 +75,7 @@ async fn test_string_vars_compare_in_persistent_rule() {
 
 #[tokio::test]
 async fn test_mixed_type_vars_are_incomparable() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     exec(&handler, r#"+mixed[(1, "a"), (2, 3.5)]"#).await;
 
     // int vs string: no ordering holds, only `!=`.

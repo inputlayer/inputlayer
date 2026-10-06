@@ -2,18 +2,10 @@
 //! WI-11: Session rule reserved name validation tests.
 //! WI-13: KG name length validation tests.
 
+use crate::harness::{handler, storage};
 use inputlayer::protocol::Handler;
 use inputlayer::{Config, StorageEngine};
 use tempfile::TempDir;
-
-fn create_test_handler() -> (Handler, TempDir) {
-    let temp = TempDir::new().expect("create temp dir");
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    let storage = StorageEngine::new(config).expect("create storage engine");
-    let handler = Handler::new(storage);
-    (handler, temp)
-}
 
 fn create_handler_with_limits(
     max_query_size: usize,
@@ -29,14 +21,6 @@ fn create_handler_with_limits(
     let storage = StorageEngine::new(config).expect("create storage engine");
     let handler = Handler::new(storage);
     (handler, temp)
-}
-
-fn create_test_storage() -> (StorageEngine, TempDir) {
-    let temp = TempDir::new().expect("create temp dir");
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    let storage = StorageEngine::new(config).expect("create storage engine");
-    (storage, temp)
 }
 
 // === WI-07: Query Size Validation ===
@@ -164,7 +148,7 @@ async fn test_insert_string_at_value_limit_accepted() {
 
 #[tokio::test]
 async fn test_session_rule_double_underscore_prefix_rejected_in_query_program() {
-    let (handler, _tmp) = create_test_handler();
+    let (handler, _tmp) = handler();
     // Try to add a session rule with __ prefix
     let result = handler
         .query_program(None, "~__hidden(X) <- data(X)".to_string())
@@ -180,7 +164,7 @@ async fn test_session_rule_double_underscore_prefix_rejected_in_query_program() 
 
 #[tokio::test]
 async fn test_session_rule_double_underscore_prefix_rejected_in_execute_program() {
-    let (handler, _tmp) = create_test_handler();
+    let (handler, _tmp) = handler();
     let sid = handler.create_session("default").unwrap();
     let result = handler
         .execute_program(
@@ -203,7 +187,7 @@ async fn test_session_rule_double_underscore_prefix_rejected_in_execute_program(
 
 #[tokio::test]
 async fn test_session_rule_valid_name_accepted() {
-    let (handler, _tmp) = create_test_handler();
+    let (handler, _tmp) = handler();
     // Valid rule name (no __ prefix) should succeed
     let result = handler
         .query_program(None, "~my_path(X) <- data(X)\n?my_path(X)".to_string())
@@ -219,7 +203,7 @@ async fn test_session_rule_valid_name_accepted() {
 
 #[tokio::test]
 async fn test_session_rule_single_underscore_prefix_is_ok() {
-    let (handler, _tmp) = create_test_handler();
+    let (handler, _tmp) = handler();
     // Single underscore is fine
     let result = handler
         .query_program(None, "~_helper(X) <- data(X)\n?_helper(X)".to_string())
@@ -236,7 +220,7 @@ async fn test_session_rule_single_underscore_prefix_is_ok() {
 
 #[test]
 fn test_create_kg_name_at_limit_accepted() {
-    let (storage, _tmp) = create_test_storage();
+    let (storage, _tmp) = storage();
     // Exactly 128 bytes (at limit)
     let name = "a".repeat(128);
     assert!(
@@ -247,7 +231,7 @@ fn test_create_kg_name_at_limit_accepted() {
 
 #[test]
 fn test_create_kg_name_over_limit_rejected() {
-    let (storage, _tmp) = create_test_storage();
+    let (storage, _tmp) = storage();
     // 129 bytes (over limit)
     let name = "a".repeat(129);
     let result = storage.create_knowledge_graph(&name);
@@ -267,7 +251,7 @@ fn test_create_kg_name_over_limit_rejected() {
 
 #[test]
 fn test_create_kg_name_well_under_limit_accepted() {
-    let (storage, _tmp) = create_test_storage();
+    let (storage, _tmp) = storage();
     let name = "my_knowledge_graph";
     assert!(
         storage.create_knowledge_graph(name).is_ok(),
@@ -277,7 +261,7 @@ fn test_create_kg_name_well_under_limit_accepted() {
 
 #[test]
 fn test_create_kg_name_empty_still_rejected() {
-    let (storage, _tmp) = create_test_storage();
+    let (storage, _tmp) = storage();
     let result = storage.create_knowledge_graph("");
     assert!(result.is_err(), "Empty KG name should be rejected");
 }
@@ -286,7 +270,7 @@ fn test_create_kg_name_empty_still_rejected() {
 
 #[tokio::test]
 async fn test_vector_schema_declared_dimension_enforced_over() {
-    let (handler, _tmp) = create_test_handler();
+    let (handler, _tmp) = handler();
     // Declare schema with dim=3
     let schema_result = handler
         .query_program(None, "+embed(id: int, v: vector(3))".to_string())
@@ -319,7 +303,7 @@ async fn test_vector_schema_declared_dimension_enforced_over() {
 
 #[tokio::test]
 async fn test_vector_schema_declared_dimension_enforced_under() {
-    let (handler, _tmp) = create_test_handler();
+    let (handler, _tmp) = handler();
     handler
         .query_program(None, "+embed(id: int, v: vector(3))".to_string())
         .await
@@ -348,7 +332,7 @@ async fn test_vector_schema_declared_dimension_enforced_under() {
 
 #[tokio::test]
 async fn test_vector_schema_exact_dimension_accepted() {
-    let (handler, _tmp) = create_test_handler();
+    let (handler, _tmp) = handler();
     handler
         .query_program(None, "+embed(id: int, v: vector(3))".to_string())
         .await
@@ -365,7 +349,7 @@ async fn test_vector_schema_exact_dimension_accepted() {
 
 #[tokio::test]
 async fn test_vector_schema_no_dimension_accepts_any_size() {
-    let (handler, _tmp) = create_test_handler();
+    let (handler, _tmp) = handler();
     handler
         .query_program(None, "+embed(id: int, v: vector)".to_string())
         .await

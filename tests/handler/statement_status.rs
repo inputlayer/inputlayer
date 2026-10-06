@@ -1,6 +1,7 @@
 //! Per-statement status: failed statements are reported structurally, never
 //! as success message rows.
 
+use crate::harness::registry_env;
 use inputlayer::protocol::{ErrorCode, Handler, ProgramError, QueryResult, StatementError};
 use inputlayer::{Config, StorageEngine};
 use tempfile::TempDir;
@@ -300,6 +301,7 @@ async fn ontology_upgrade_tolerates_an_already_dropped_rule() {
     let (handler, tmp) = handler();
     // No registry: the upgrade must get past dropping old rules and fail
     // only at install.
+    let _registry = registry_env().await;
     std::env::set_var("INPUTLAYER_REGISTRY", tmp.path().join("no-registry"));
     run(
         &handler,

@@ -1,16 +1,7 @@
 //! Multi-clause rules whose clauses share a derived relation (issue #91).
 
+use crate::harness::handler;
 use inputlayer::protocol::Handler;
-use inputlayer::Config;
-use tempfile::TempDir;
-
-fn create_test_handler() -> (Handler, TempDir) {
-    let temp = TempDir::new().expect("temp dir");
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    let storage = inputlayer::StorageEngine::new(config).expect("storage engine");
-    (Handler::new(storage), temp)
-}
 
 async fn exec(handler: &Handler, program: &str) -> inputlayer::protocol::wire::QueryResult {
     handler
@@ -48,7 +39,7 @@ fn strs(rows: &[&[&str]]) -> Vec<Vec<String>> {
 
 #[tokio::test]
 async fn test_multi_clause_persistent_union_with_constant_returns_both_clauses() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     let result = run_all(
         &handler,
         r#"
@@ -73,7 +64,7 @@ async fn test_multi_clause_persistent_union_with_constant_returns_both_clauses()
 
 #[tokio::test]
 async fn test_multi_clause_persistent_self_join_union_keeps_head_arity() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     let result = run_all(
         &handler,
         r#"
@@ -100,7 +91,7 @@ async fn test_multi_clause_persistent_self_join_union_keeps_head_arity() {
 
 #[tokio::test]
 async fn test_multi_clause_union_poisoning_is_not_retroactive() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     run_all(
         &handler,
         r#"
@@ -120,7 +111,7 @@ async fn test_multi_clause_union_poisoning_is_not_retroactive() {
 
 #[tokio::test]
 async fn test_multi_clause_session_rules_sharing_derived_relation() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     run_all(
         &handler,
         r#"
@@ -153,7 +144,7 @@ async fn test_multi_clause_session_rules_sharing_derived_relation() {
 /// shared `active` / `coentity` relations.
 #[tokio::test]
 async fn test_multi_clause_consistency_conflict_collapsed_into_one_relation() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     let result = run_all(
         &handler,
         r#"
@@ -194,7 +185,7 @@ async fn test_multi_clause_consistency_conflict_collapsed_into_one_relation() {
 
 #[tokio::test]
 async fn test_multi_clause_with_negation_branch_sharing_variables() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     let result = run_all(
         &handler,
         r#"
@@ -222,7 +213,7 @@ async fn test_multi_clause_with_negation_branch_sharing_variables() {
 
 #[tokio::test]
 async fn test_multi_clause_recursion_over_derived_relation_with_bound_query() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     let result = run_all(
         &handler,
         r#"
@@ -241,7 +232,7 @@ async fn test_multi_clause_recursion_over_derived_relation_with_bound_query() {
 
 #[tokio::test]
 async fn test_multi_clause_aggregate_over_union_sharing_derived_relation() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     let result = run_all(
         &handler,
         r#"

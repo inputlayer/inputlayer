@@ -1,20 +1,11 @@
 //! Handler creation, query execution, and concurrent access tests.
 
+use crate::harness::handler;
 use inputlayer::protocol::Handler;
 use inputlayer::value::{Tuple, Value};
 use inputlayer::{Config, StorageEngine};
 use std::sync::Arc;
 use tempfile::TempDir;
-
-// Test Helpers
-fn create_test_handler() -> (Handler, TempDir) {
-    let temp = TempDir::new().expect("create temp dir");
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    let storage = StorageEngine::new(config).expect("create storage engine");
-    let handler = Handler::new(storage);
-    (handler, temp)
-}
 
 fn create_handler_with_config(config: Config) -> (Handler, TempDir) {
     let temp = TempDir::new().expect("create temp dir");
@@ -44,7 +35,7 @@ fn make_tuples_2col(values: &[(i64, i64)]) -> Vec<Tuple> {
 // Handler Creation Tests
 #[test]
 fn test_handler_creation() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Handler should start with zero counters
     assert_eq!(handler.total_queries(), 0);
@@ -81,7 +72,7 @@ fn test_handler_with_custom_config() {
 // Storage Access Tests
 #[test]
 fn test_get_storage_read() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Should be able to get read access to storage
     let storage = handler.get_storage();
@@ -90,7 +81,7 @@ fn test_get_storage_read() {
 
 #[test]
 fn test_get_storage_write() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Should be able to get write access to storage
     let storage = handler.get_storage_mut();
@@ -109,7 +100,7 @@ fn test_get_storage_write() {
 
 #[test]
 fn test_storage_multiple_reads() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Multiple sequential read accesses should work
     let kg1 = {
@@ -128,7 +119,7 @@ fn test_storage_multiple_reads() {
 // Query Counter Tests
 #[tokio::test]
 async fn test_query_count_increments() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     assert_eq!(handler.total_queries(), 0);
 
@@ -148,7 +139,7 @@ async fn test_query_count_increments() {
 // Schema Validation Tests
 #[test]
 fn test_validate_tuples_no_schema() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Without a schema, validation should pass
     let tuples = vec![
@@ -164,7 +155,7 @@ fn test_validate_tuples_no_schema() {
 
 #[test]
 fn test_validate_tuples_empty() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Empty batch should validate
     let tuples: Vec<Tuple> = vec![];
@@ -176,7 +167,7 @@ fn test_validate_tuples_empty() {
 // Query Program Tests
 #[tokio::test]
 async fn test_query_program_simple() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Insert some data first
     {
@@ -196,7 +187,7 @@ async fn test_query_program_simple() {
 
 #[tokio::test]
 async fn test_query_program_with_knowledge_graph() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Create a new knowledge graph
     {
@@ -220,7 +211,7 @@ async fn test_query_program_with_knowledge_graph() {
 
 #[tokio::test]
 async fn test_query_program_nonexistent_relation() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Query a relation that doesn't exist
     let result = handler
@@ -234,7 +225,7 @@ async fn test_query_program_nonexistent_relation() {
 
 #[tokio::test]
 async fn test_query_program_with_join() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Insert data for join
     {
@@ -259,7 +250,7 @@ async fn test_query_program_with_join() {
 
 #[tokio::test]
 async fn test_query_program_invalid_syntax() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Query with invalid syntax
     let result = handler
@@ -273,7 +264,7 @@ async fn test_query_program_invalid_syntax() {
 // Concurrent Access Tests
 #[tokio::test]
 async fn test_concurrent_queries() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
     let handler = Arc::new(handler);
 
     // Insert some data
@@ -313,7 +304,7 @@ async fn test_concurrent_queries() {
 fn test_concurrent_read_write() {
     use std::thread;
 
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
     let handler = Arc::new(handler);
 
     // Insert initial data
@@ -356,7 +347,7 @@ fn test_concurrent_read_write() {
 // Uptime Tests
 #[test]
 fn test_uptime_increases() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     let uptime1 = handler.uptime_seconds();
 
@@ -372,7 +363,7 @@ fn test_uptime_increases() {
 // Error Handling Tests
 #[tokio::test]
 async fn test_query_program_error_recovery() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // First query with error
     let result1 = handler
@@ -392,7 +383,7 @@ async fn test_query_program_error_recovery() {
 
 #[tokio::test]
 async fn test_query_nonexistent_knowledge_graph() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Query a knowledge graph that doesn't exist
     let result = handler
@@ -406,7 +397,7 @@ async fn test_query_nonexistent_knowledge_graph() {
 // Knowledge Graph Switching Tests
 #[tokio::test]
 async fn test_query_with_kg_switch() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Create and populate two knowledge graphs
     {
@@ -450,7 +441,7 @@ async fn test_query_with_kg_switch() {
 // Query Result Format Tests
 #[tokio::test]
 async fn test_query_result_schema() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Insert data with multiple columns
     {
@@ -482,7 +473,7 @@ async fn test_query_result_schema() {
 
 #[tokio::test]
 async fn test_query_result_with_different_types() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Insert different types
     {
@@ -508,7 +499,7 @@ async fn test_query_result_with_different_types() {
 // Edge Case Tests
 #[tokio::test]
 async fn test_query_empty_program() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     let result = handler.query_program(None, String::new()).await;
 
@@ -518,7 +509,7 @@ async fn test_query_empty_program() {
 
 #[tokio::test]
 async fn test_query_comment_only() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     let result = handler
         .query_program(None, "// This is a comment".to_string())
@@ -530,7 +521,7 @@ async fn test_query_comment_only() {
 
 #[tokio::test]
 async fn test_query_whitespace_only() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     let result = handler
         .query_program(None, "   \n\t  \n  ".to_string())
@@ -542,7 +533,7 @@ async fn test_query_whitespace_only() {
 
 #[test]
 fn test_handler_with_large_data() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Insert large amount of data (2-column for binary tuple return type)
     {
@@ -566,7 +557,7 @@ fn test_handler_with_large_data() {
 // Statistics Tests
 #[test]
 fn test_statistics_consistency() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Initial state
     let initial_queries = handler.total_queries();
@@ -595,7 +586,7 @@ fn test_statistics_consistency() {
 // Handler Method Tests
 #[test]
 fn test_handler_total_queries_atomic() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
     let handler = Arc::new(handler);
 
     // Concurrent reads of counter should work
@@ -617,7 +608,7 @@ fn test_handler_total_queries_atomic() {
 
 #[test]
 fn test_handler_uptime_seconds_consistent() {
-    let (handler, _temp) = create_test_handler();
+    let (handler, _temp) = handler();
 
     // Multiple uptime reads should be consistent (monotonically increasing)
     let mut prev = handler.uptime_seconds();
@@ -632,7 +623,7 @@ fn test_handler_uptime_seconds_consistent() {
 
 #[tokio::test]
 async fn test_conditional_delete_all_matching_removed() {
-    let (handler, _tmp) = create_test_handler();
+    let (handler, _tmp) = handler();
 
     // Setup: insert edges and a banned set
     handler
@@ -664,7 +655,7 @@ async fn test_conditional_delete_all_matching_removed() {
 
 #[tokio::test]
 async fn test_conditional_delete_empty_condition_touches_nothing() {
-    let (handler, _tmp) = create_test_handler();
+    let (handler, _tmp) = handler();
 
     handler
         .query_program(None, "+data[(1,),(2,),(3,)]".to_string())
@@ -691,7 +682,7 @@ async fn test_conditional_delete_empty_condition_touches_nothing() {
 
 #[tokio::test]
 async fn test_conditional_delete_nonexistent_relation_is_noop() {
-    let (handler, _tmp) = create_test_handler();
+    let (handler, _tmp) = handler();
 
     handler
         .query_program(None, "+items[(10,),(20,)]".to_string())
@@ -724,7 +715,7 @@ async fn test_conditional_delete_nonexistent_relation_is_noop() {
 
 #[tokio::test]
 async fn test_update_success_replaces_correctly() {
-    let (handler, _tmp) = create_test_handler();
+    let (handler, _tmp) = handler();
 
     // Insert initial scores
     handler
@@ -759,7 +750,7 @@ async fn test_update_success_replaces_correctly() {
 
 #[tokio::test]
 async fn test_update_empty_source_is_noop() {
-    let (handler, _tmp) = create_test_handler();
+    let (handler, _tmp) = handler();
 
     // 'ghost' relation doesn't exist - update should be a no-op
     let result = handler
@@ -1074,4 +1065,62 @@ async fn test_session_query_no_timing_when_off() {
         result.timing_breakdown.is_none(),
         "session query with timing_mode=Off should produce no timing_breakdown"
     );
+}
+
+// Configuration through `Handler::from_config`
+
+#[test]
+fn test_ws_idle_timeout_zero_disabled_is_valid() {
+    let temp = TempDir::new().unwrap();
+    let mut config = Config::default();
+    config.storage.data_dir = temp.path().to_path_buf();
+    config.http.ws_idle_timeout_ms = 0;
+    // Should be able to create handler with disabled idle timeout
+    assert!(
+        Handler::from_config(config).is_ok(),
+        "Handler::from_config with ws_idle_timeout_ms=0 should succeed"
+    );
+}
+
+#[test]
+fn test_ws_idle_timeout_custom_value_is_stored() {
+    let temp = TempDir::new().unwrap();
+    let mut config = Config::default();
+    config.storage.data_dir = temp.path().to_path_buf();
+    config.http.ws_idle_timeout_ms = 60_000;
+    let handler = Handler::from_config(config).unwrap();
+    assert_eq!(handler.config().http.ws_idle_timeout_ms, 60_000);
+}
+
+#[test]
+fn test_query_timeout_zero_means_disabled() {
+    let temp = TempDir::new().unwrap();
+    let mut config = Config::default();
+    config.storage.data_dir = temp.path().to_path_buf();
+    config.storage.performance.query_timeout_ms = 0;
+    let handler = Handler::from_config(config).unwrap();
+    assert_eq!(handler.config().storage.performance.query_timeout_ms, 0);
+}
+
+#[tokio::test]
+async fn test_query_timeout_config_is_accessible_via_handler() {
+    let temp = TempDir::new().unwrap();
+    let mut config = Config::default();
+    config.storage.data_dir = temp.path().to_path_buf();
+    config.storage.performance.query_timeout_ms = 12_345;
+    let handler = Handler::from_config(config).unwrap();
+    assert_eq!(
+        handler.config().storage.performance.query_timeout_ms,
+        12_345
+    );
+}
+
+#[test]
+fn test_max_query_cost_custom_value_stored() {
+    let temp = TempDir::new().unwrap();
+    let mut config = Config::default();
+    config.storage.data_dir = temp.path().to_path_buf();
+    config.storage.performance.max_query_cost = 500_000;
+    let handler = Handler::from_config(config).unwrap();
+    assert_eq!(handler.config().storage.performance.max_query_cost, 500_000);
 }

@@ -2,19 +2,10 @@
 //! committed with the tuples it inserted and deleted, so a client reads
 //! whether a write landed from data instead of message text.
 
+use crate::harness::handler;
 use inputlayer::protocol::{
     ErrorCode, Handler, ProgramError, QueryResult, StatementCounts, StatementKind,
 };
-use inputlayer::{Config, StorageEngine};
-use tempfile::TempDir;
-
-fn handler() -> (Handler, TempDir) {
-    let temp = TempDir::new().expect("create temp dir");
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    let storage = StorageEngine::new(config).expect("create storage engine");
-    (Handler::new(storage), temp)
-}
 
 async fn run(handler: &Handler, program: &str) -> Result<QueryResult, ProgramError> {
     handler

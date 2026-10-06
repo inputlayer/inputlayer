@@ -1,16 +1,7 @@
 //! Scalar aggregate typing and aggregate head column order.
 
-use inputlayer::protocol::{Handler, WireValue};
-use inputlayer::Config;
-use tempfile::TempDir;
-
-fn handler() -> (Handler, TempDir) {
-    let temp = TempDir::new().expect("temp dir");
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    let storage = inputlayer::StorageEngine::new(config).expect("storage engine");
-    (Handler::new(storage), temp)
-}
+use crate::harness::handler;
+use inputlayer::protocol::WireValue;
 
 async fn run(program: &[&str], query: &str) -> Vec<Vec<WireValue>> {
     let (h, _t) = handler();

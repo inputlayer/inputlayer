@@ -1,17 +1,8 @@
 //! Mutually recursive rules evaluate to a joint fixpoint over their SCC.
 
+use crate::harness::handler;
 use inputlayer::protocol::Handler;
 use inputlayer::provenance::proof_tree::NodeKind;
-use inputlayer::Config;
-use tempfile::TempDir;
-
-fn create_test_handler() -> (Handler, TempDir) {
-    let temp = TempDir::new().expect("temp dir");
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    let storage = inputlayer::StorageEngine::new(config).expect("storage engine");
-    (Handler::new(storage), temp)
-}
 
 async fn exec(handler: &Handler, program: &str) -> inputlayer::protocol::wire::QueryResult {
     handler
@@ -60,7 +51,7 @@ const EVEN_ODD: &str = r"
 
 #[tokio::test]
 async fn test_even_odd_over_chain_reaches_fixpoint() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     run_all(&handler, EVEN_ODD).await;
     assert_eq!(
         rows(&handler, "?is_even(X)").await,
@@ -74,7 +65,7 @@ async fn test_even_odd_over_chain_reaches_fixpoint() {
 
 #[tokio::test]
 async fn test_three_way_cycle_reaches_fixpoint() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     run_all(
         &handler,
         r"
@@ -94,7 +85,7 @@ async fn test_three_way_cycle_reaches_fixpoint() {
 
 #[tokio::test]
 async fn test_bound_query_over_mutual_recursion() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     run_all(&handler, EVEN_ODD).await;
     assert_eq!(rows(&handler, "?is_even(6)").await, expect(&["6"]));
     assert!(rows(&handler, "?is_even(5)").await.is_empty());
@@ -126,7 +117,7 @@ async fn test_bound_query_over_mutual_recursion() {
 
 #[tokio::test]
 async fn test_base_retraction_shrinks_mutual_fixpoint() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     run_all(&handler, EVEN_ODD).await;
     exec(&handler, "-succ(3, 4)").await;
     assert_eq!(rows(&handler, "?is_even(X)").await, expect(&["0", "2"]));
@@ -135,7 +126,7 @@ async fn test_base_retraction_shrinks_mutual_fixpoint() {
 
 #[tokio::test]
 async fn test_stratified_negation_above_mutual_recursion() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     run_all(&handler, EVEN_ODD).await;
     run_all(
         &handler,
@@ -153,7 +144,7 @@ async fn test_stratified_negation_above_mutual_recursion() {
 
 #[tokio::test]
 async fn test_negation_inside_cycle_is_rejected() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     run_all(&handler, "+base[(1), (2)]").await;
     let result = exec(
         &handler,
@@ -171,7 +162,7 @@ async fn test_negation_inside_cycle_is_rejected() {
 
 #[tokio::test]
 async fn test_session_rules_mutual_recursion() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     run_all(
         &handler,
         "+succ[(0, 1), (1, 2), (2, 3), (3, 4)]\n+zero[(0)]",
@@ -193,7 +184,7 @@ async fn test_session_rules_mutual_recursion() {
 
 #[tokio::test]
 async fn test_session_rule_over_persistent_mutual_recursion() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     run_all(&handler, EVEN_ODD).await;
     let result = exec(&handler, "big_even(N) <- is_even(N), N > 4\n?big_even(X)").await;
     let mut got: Vec<String> = result
@@ -207,7 +198,7 @@ async fn test_session_rule_over_persistent_mutual_recursion() {
 
 #[tokio::test]
 async fn test_why_explains_mutually_recursive_fact() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     run_all(&handler, EVEN_ODD).await;
     let result = exec(&handler, ".why ?is_even(4)").await;
     let graphs = result.proof_trees.expect("proof trees");
@@ -235,7 +226,7 @@ async fn test_why_explains_mutually_recursive_fact() {
 
 #[tokio::test]
 async fn test_self_recursion_unaffected() {
-    let (handler, _t) = create_test_handler();
+    let (handler, _t) = handler();
     run_all(
         &handler,
         r"

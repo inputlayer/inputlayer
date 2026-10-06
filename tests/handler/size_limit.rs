@@ -11,6 +11,7 @@
 // Test setup aborts on failure; `unwrap` is the intended behavior.
 #![allow(clippy::unwrap_used)]
 
+use crate::harness::handler;
 use inputlayer::protocol::wire::{ErrorCode, QueryResult, WireValue};
 use inputlayer::protocol::Handler;
 use inputlayer::size_limits::{
@@ -24,13 +25,6 @@ use tempfile::TempDir;
 
 /// The size from the audit's reproduction.
 const HUGE: i64 = 300_000_000_000_000_000;
-
-fn handler() -> (Handler, TempDir) {
-    let temp = TempDir::new().unwrap();
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    (Handler::new(StorageEngine::new(config).unwrap()), temp)
-}
 
 async fn run(handler: &Handler, program: &str) -> Result<QueryResult, (ErrorCode, String)> {
     match handler.query_program(None, program.to_string()).await {

@@ -10,16 +10,9 @@
 //!   arithmetic on both sides), and treated `Y = f(X)` with `Y` already bound
 //!   as an assignment instead of a filter.
 
+use crate::harness::handler_at;
 use inputlayer::protocol::Handler;
-use inputlayer::Config;
-use std::path::Path;
 use tempfile::TempDir;
-
-fn open_handler(dir: &Path) -> Handler {
-    let mut config = Config::default();
-    config.storage.data_dir = dir.to_path_buf();
-    Handler::new(inputlayer::StorageEngine::new(config).expect("storage engine"))
-}
 
 async fn exec(handler: &Handler, program: &str) -> inputlayer::protocol::wire::QueryResult {
     handler
@@ -81,7 +74,7 @@ fn expected_replay_conflict() -> Vec<Vec<String>> {
 #[tokio::test]
 async fn persistent_rule_binds_a_computed_head_variable() {
     let temp = TempDir::new().unwrap();
-    let handler = open_handler(temp.path());
+    let handler = handler_at(temp.path());
     setup_events(&handler).await;
 
     let registered = exec(&handler, EVENT_CONTENT).await;
@@ -98,7 +91,7 @@ async fn persistent_rule_binds_a_computed_head_variable() {
 #[tokio::test]
 async fn persistent_rule_compares_two_function_calls() {
     let temp = TempDir::new().unwrap();
-    let handler = open_handler(temp.path());
+    let handler = handler_at(temp.path());
     setup_events(&handler).await;
 
     exec(&handler, REPLAY_CONFLICT).await;
@@ -112,12 +105,12 @@ async fn persistent_rule_compares_two_function_calls() {
 async fn persistent_function_rules_survive_restart() {
     let temp = TempDir::new().unwrap();
     {
-        let handler = open_handler(temp.path());
+        let handler = handler_at(temp.path());
         setup_events(&handler).await;
         exec(&handler, EVENT_CONTENT).await;
         exec(&handler, REPLAY_CONFLICT).await;
     }
-    let handler = open_handler(temp.path());
+    let handler = handler_at(temp.path());
     assert_eq!(
         rows(&handler, "?event_content(S,K,N,C)").await,
         expected_event_content()
@@ -131,7 +124,7 @@ async fn persistent_function_rules_survive_restart() {
 #[tokio::test]
 async fn session_rule_compares_two_function_calls() {
     let temp = TempDir::new().unwrap();
-    let handler = open_handler(temp.path());
+    let handler = handler_at(temp.path());
     setup_events(&handler).await;
 
     // Equal content never conflicts: only the differing pair qualifies.
@@ -159,7 +152,7 @@ async fn session_rule_compares_two_function_calls() {
 #[tokio::test]
 async fn bound_variable_equated_to_function_call_filters() {
     let temp = TempDir::new().unwrap();
-    let handler = open_handler(temp.path());
+    let handler = handler_at(temp.path());
     exec(&handler, r#"+word[("a", "A"), ("b", "x")]"#).await;
 
     let only_a = table(&[&[r#""a""#, r#""A""#]]);
@@ -172,7 +165,7 @@ async fn bound_variable_equated_to_function_call_filters() {
 #[tokio::test]
 async fn function_call_and_arithmetic_operands_filter() {
     let temp = TempDir::new().unwrap();
-    let handler = open_handler(temp.path());
+    let handler = handler_at(temp.path());
     exec(&handler, r#"+word[("a", "A"), ("bb", "x")]"#).await;
     exec(&handler, "+num[1, 2, 3]").await;
 

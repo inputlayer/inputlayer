@@ -1,17 +1,8 @@
 //! Typed arithmetic in comparisons and assignments, and expression
 //! arguments in body atoms.
 
-use inputlayer::protocol::{Handler, WireValue};
-use inputlayer::Config;
-use tempfile::TempDir;
-
-fn handler() -> (Handler, TempDir) {
-    let temp = TempDir::new().expect("temp dir");
-    let mut config = Config::default();
-    config.storage.data_dir = temp.path().to_path_buf();
-    let storage = inputlayer::StorageEngine::new(config).expect("storage engine");
-    (Handler::new(storage), temp)
-}
+use crate::harness::handler;
+use inputlayer::protocol::WireValue;
 
 async fn exec(program: &[&str], query: &str) -> Result<Vec<Vec<WireValue>>, String> {
     let (h, _t) = handler();

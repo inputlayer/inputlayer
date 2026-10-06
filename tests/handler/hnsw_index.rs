@@ -4,19 +4,12 @@
 // Test setup aborts on failure; `unwrap` is the intended behavior.
 #![allow(clippy::unwrap_used)]
 
+use crate::harness::handler_at;
 use inputlayer::protocol::wire::{QueryResult, WireValue};
 use inputlayer::protocol::Handler;
-use inputlayer::{Config, StorageEngine};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use std::path::Path;
 use tempfile::TempDir;
-
-fn handler_at(dir: &Path) -> Handler {
-    let mut config = Config::default();
-    config.storage.data_dir = dir.to_path_buf();
-    Handler::new(StorageEngine::new(config).expect("storage engine"))
-}
 
 async fn run(handler: &Handler, program: &str) -> Result<QueryResult, String> {
     handler.query_program(None, program.to_string()).await

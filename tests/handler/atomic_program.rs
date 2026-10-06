@@ -3,6 +3,7 @@
 //! and rules unchanged, readers and subscribers see one rule generation, and a
 //! command that cannot join the transaction fails the program before any write.
 
+use crate::harness::registry_env;
 use inputlayer::protocol::handler::Notification;
 use inputlayer::protocol::{ErrorCode, Handler, ProgramError, QueryResult, WireValue};
 use inputlayer::{Config, StorageEngine};
@@ -237,7 +238,7 @@ fn registry(root: &Path, rules: &str) {
 async fn failed_pack_installation_applies_nothing() {
     let dir = TempDir::new().unwrap();
     let packs = TempDir::new().unwrap();
-    // The only test in this binary that installs packs, so the variable is ours.
+    let _registry = registry_env().await;
     std::env::set_var("INPUTLAYER_REGISTRY", packs.path());
     let handler = handler(dir.path());
 
