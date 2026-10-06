@@ -8,6 +8,8 @@
 #   - the newer commit, then the older one: each binary is its own commit's
 #   - the older commit, then the newer one, in a second clone: the same
 #   - a cached baseline is returned again without a rebuild
+#   - a commit that does not compile fails, and no build directory is left
+#     behind, built or not
 #
 # Usage: scripts/perf-gate-baseline-selftest.sh   (needs cargo; no network)
 set -euo pipefail
@@ -100,10 +102,18 @@ else
 fi
 expect_baseline "$TMP/older-first" HEAD~1 older
 
+echo 'does not compile' > "$TMP/older-first/src/lib.rs"
+git -C "$TMP/older-first" commit --quiet -am "baseline broken"
+if (cd "$TMP/older-first" && "$HELPER" HEAD > /dev/null 2> "$TMP/build.log"); then
+    fail "a baseline that does not compile was reported built"
+else
+    pass "a baseline that does not compile fails"
+fi
+
 if [ -n "$(ls "$TMP/older-first/target/perf-gate/baseline-build")" ]; then
     fail "a build directory was left behind"
 else
-    pass "no build directory is left behind"
+    pass "no build directory is left behind, built or not"
 fi
 
 if [ "$FAILURES" -gt 0 ]; then
