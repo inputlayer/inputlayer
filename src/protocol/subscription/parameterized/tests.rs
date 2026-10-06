@@ -310,23 +310,21 @@ mod rounds {
             &[r#"?item("s3", X)"#, r#"?item("s4", X)"#],
         );
         assert!(!one.family.shares(), "no own cost to compare a round with");
-        // First refreshes evaluate each view's own query, compiling its plan:
-        // not a cost to compare a round with.
-        assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 1])]);
-        assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 2])]);
-        assert_eq!(one.family.own_cost_us.load(Ordering::Relaxed), 0);
-        assert!(!one.family.probing.load(Ordering::Relaxed));
-        assert!(!one.family.shares());
-        // Their next evaluations reuse the plans: their cost starts a probe.
+        // A first refresh evaluates the view's own query, compiling its plan:
+        // its cost leaves the compilation out, and starts a probe.
         // Own evaluations slower than any round here: the guard keeps sharing.
-        write(&handler, "+item[(\"s1\", 2), (\"s2\", 3)]").await;
-        assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 2])]);
-        let own = one.family.own_cost_us.load(Ordering::Relaxed);
+        let family = Arc::clone(&one.family);
+        let gate = family.probe_gate.write().await;
+        assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 1])]);
+        let own = family.own_cost_us.load(Ordering::Relaxed);
         assert!(own > 0);
-        one.family
+        assert!(family.probing.load(Ordering::Relaxed), "probe started");
+        assert!(!family.shares());
+        family
             .own_cost_us
             .store(own.max(1_000_000_000), Ordering::Relaxed);
-        assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 3])]);
+        drop(gate);
+        assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 2])]);
         probed(&one.family).await;
         assert!(one.family.shares(), "the probe kept sharing");
         let before = metrics.shared_evaluations();
@@ -355,6 +353,57 @@ mod rounds {
         assert_eq!(metrics.shared_evaluations(), before + 1);
     }
 
+    /// A family whose views have only subscribed, each compiling its own
+    /// plan, is judged by then: the first commit costs one round, not every
+    /// view's own query (#383).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_family_judged_while_its_views_subscribe_shares_its_first_commit() {
+        let (handler, _tmp) = handler();
+        let rows = |value: u32| -> String {
+            let rows: Vec<String> = (1..=6).map(|i| format!("(\"s{i}\", {value})")).collect();
+            format!("+item[{}]", rows.join(", "))
+        };
+        write(&handler, &rows(0)).await;
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut views: Vec<_> = (1..=6)
+            .map(|i| {
+                member(
+                    &families,
+                    &handler,
+                    &metrics,
+                    &format!("?item(\"s{i}\", X)"),
+                )
+            })
+            .collect();
+        let family = Arc::clone(&views[0].family);
+
+        // Hold the probe until own evaluations are slower than any round.
+        let gate = family.probe_gate.write().await;
+        for (i, view) in views.iter_mut().enumerate() {
+            let refresh = view.refresh().await.unwrap();
+            assert_eq!(inserted(&refresh), [json!([format!("s{}", i + 1), 0])]);
+        }
+        assert!(family.probing.load(Ordering::Relaxed), "probe started");
+        family.own_cost_us.store(1_000_000_000, Ordering::Relaxed);
+        drop(gate);
+        probed(&family).await;
+        assert!(family.shares(), "judged before any commit");
+        let before = metrics.shared_evaluations();
+
+        write(&handler, &rows(1)).await;
+        for (i, view) in views.iter_mut().enumerate() {
+            let refresh = view.refresh().await.unwrap();
+            assert_eq!(inserted(&refresh), [json!([format!("s{}", i + 1), 1])]);
+        }
+        assert_eq!(metrics.shared_evaluations(), before + 1, "one round");
+        assert_eq!(
+            family.own_cost_us.load(Ordering::Relaxed),
+            1_000_000_000,
+            "no view evaluated its own query"
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn a_view_sharing_at_the_probes_revision_reads_its_round() {
         let (handler, _tmp) = handler();
@@ -369,12 +418,12 @@ mod rounds {
             &metrics,
             &[r#"?item("s3", X)"#, r#"?item("s4", X)"#],
         );
-        one.refresh().await.unwrap();
-        two.refresh().await.unwrap();
-
-        // Hold the probe until own evaluations are slower than any round.
+        // Hold the probe, which the first own evaluation starts, until own
+        // evaluations are slower than any round.
         let family = Arc::clone(&one.family);
         let gate = family.probe_gate.write().await;
+        one.refresh().await.unwrap();
+        two.refresh().await.unwrap();
         write(&handler, "+item[(\"s1\", 2), (\"s2\", 3)]").await;
         assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 2])]);
         assert!(family.probing.load(Ordering::Relaxed), "probe started");
@@ -413,14 +462,15 @@ mod rounds {
         let metrics = Arc::new(SubscriptionMetrics::default());
         let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
         let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
+        // First refreshes while the views fit on the compute permits: no probe.
+        one.refresh().await.unwrap();
+        two.refresh().await.unwrap();
         let _idle = idle(
             &families,
             &handler,
             &metrics,
             &[r#"?item("s3", X)"#, r#"?item("s4", X)"#],
         );
-        one.refresh().await.unwrap();
-        two.refresh().await.unwrap();
         // Own evaluations far faster than any round.
         one.family.own_cost_us.store(1, Ordering::Relaxed);
         one.family.sharing.store(true, Ordering::Relaxed);
@@ -466,20 +516,21 @@ mod rounds {
         let metrics = Arc::new(SubscriptionMetrics::default());
         let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
         let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
+        // First refreshes while the views fit on the compute permits: no probe.
+        one.refresh().await.unwrap();
+        two.refresh().await.unwrap();
         let _idle = idle(
             &families,
             &handler,
             &metrics,
             &[r#"?item("s3", X)"#, r#"?item("s4", X)"#],
         );
-        one.refresh().await.unwrap();
-        two.refresh().await.unwrap();
         assert_eq!(metrics.shared_evaluations(), 0);
 
         // Hold the probe until the views have refreshed.
         let family = Arc::clone(&one.family);
         let gate = family.probe_gate.write().await;
-        // A plan-cached own evaluation makes a probe due.
+        // An own evaluation makes a probe due.
         write(&handler, "+item(\"x\", 1)").await;
         one.refresh().await.unwrap();
         assert!(family.probing.load(Ordering::Relaxed), "probe started");
@@ -497,7 +548,7 @@ mod rounds {
         probed(&family).await;
         assert_eq!(metrics.shared_evaluations(), 1, "only the probe's round");
         assert!(!family.shares(), "the probe was judged too slow");
-        assert_eq!(family.stops.load(Ordering::Relaxed), 1);
+        assert_eq!(family.stops.load(Ordering::Relaxed), 0, "a first verdict");
         assert!(
             family.latest.load().is_none(),
             "the round judged too slow is let go"
@@ -515,6 +566,8 @@ mod rounds {
         let families = Families::default();
         let metrics = Arc::new(SubscriptionMetrics::default());
         let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
+        // A first refresh while the view fits on the compute permits: no probe.
+        one.refresh().await.unwrap();
         let _idle = idle(
             &families,
             &handler,
@@ -525,7 +578,6 @@ mod rounds {
                 r#"?item("s4", X)"#,
             ],
         );
-        one.refresh().await.unwrap();
         let family = Arc::clone(&one.family);
 
         // The first views' own evaluations are far faster than any round:
@@ -538,7 +590,7 @@ mod rounds {
         drop(gate);
         probed(&family).await;
         assert!(!family.shares(), "the probe was judged too slow");
-        assert_eq!(family.stops.load(Ordering::Relaxed), 1);
+        assert_eq!(family.stops.load(Ordering::Relaxed), 0, "a first verdict");
         write(&handler, "+item(\"x\", 2)").await;
         one.refresh().await.unwrap();
         assert!(!family.probing.load(Ordering::Relaxed), "backing off");
@@ -567,6 +619,155 @@ mod rounds {
         assert!(family.shares(), "the second probe kept sharing");
         assert_eq!(metrics.shared_evaluations(), 2);
         assert_eq!(family.stops.load(Ordering::Relaxed), 0);
+    }
+
+    /// `handler`'s `item` rows for `bindings` keys, and views of the first
+    /// `subscribed` of them.
+    async fn keyed(
+        families: &Families,
+        handler: &Arc<Handler>,
+        metrics: &Arc<SubscriptionMetrics>,
+        bindings: usize,
+        subscribed: usize,
+    ) -> Vec<MemberQuery> {
+        let rows: Vec<String> = (1..=bindings).map(|i| format!("(\"s{i}\", 0)")).collect();
+        write(handler, &format!("+item[{}]", rows.join(", "))).await;
+        let mut views = Vec::new();
+        subscribe(&mut views, families, handler, metrics, subscribed);
+        views
+    }
+
+    /// Grow `views` to `bindings` views, each of its own key.
+    fn subscribe(
+        views: &mut Vec<MemberQuery>,
+        families: &Families,
+        handler: &Arc<Handler>,
+        metrics: &Arc<SubscriptionMetrics>,
+        bindings: usize,
+    ) {
+        for i in views.len() + 1..=bindings {
+            let query = format!("?item(\"s{i}\", X)");
+            views.push(member(families, handler, metrics, &query));
+        }
+    }
+
+    /// A family judged too slow with its first 9 views, on 8 compute
+    /// permits, is judged again with all 1,000: the same costs share there,
+    /// and the first verdict counted no failure (#383).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_family_too_slow_to_share_while_its_views_subscribe_shares_at_full_size() {
+        let (handler, _tmp) = handler_with(8);
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut views = keyed(&families, &handler, &metrics, 1_000, 9).await;
+        let family = Arc::clone(&views[0].family);
+
+        // A round's cost, measured once its plan is compiled: with no own
+        // cost yet, these rounds are not judged.
+        let snapshot = || handler.get_storage().get_snapshot_for(KG).unwrap();
+        family.evaluate(snapshot(), true).await.unwrap();
+        let started = std::time::Instant::now();
+        family.evaluate(snapshot(), true).await.unwrap();
+        let round = started.elapsed().as_micros() as u64;
+        // An own cost a round is 32 times slower than: too slow for 9 views,
+        // which allow 4 times, and fast enough for 1,000, which allow 250.
+        let own = (round / 32).max(1);
+
+        let gate = family.probe_gate.write().await;
+        views[0].refresh().await.unwrap();
+        assert!(family.probing.load(Ordering::Relaxed), "probe started");
+        family.own_cost_us.store(own, Ordering::Relaxed);
+        drop(gate);
+        probed(&family).await;
+        assert!(!family.shares(), "too slow for 9 views");
+        assert_eq!(family.stops.load(Ordering::Relaxed), 0, "still growing");
+
+        subscribe(&mut views, &families, &handler, &metrics, 1_000);
+        let gate = family.probe_gate.write().await;
+        write(&handler, "+item(\"s1\", 1)").await;
+        assert_eq!(
+            inserted(&views[0].refresh().await.unwrap()),
+            [json!(["s1", 1])]
+        );
+        assert!(family.probing.load(Ordering::Relaxed), "probed again");
+        family.own_cost_us.store(own, Ordering::Relaxed);
+        drop(gate);
+        probed(&family).await;
+        assert!(family.shares(), "fast enough for 1,000 views");
+        assert_eq!(family.stops.load(Ordering::Relaxed), 0);
+    }
+
+    /// Verdicts against a family as its views subscribe, each with twice the
+    /// bindings of the one before, count no failure: at its full size it
+    /// probes again after one commit, and a verdict against it there makes
+    /// it wait longer.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn failures_while_a_family_grows_do_not_lengthen_its_wait() {
+        let (handler, _tmp) = handler_with(8);
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut views = keyed(&families, &handler, &metrics, 1, 0).await;
+        let snapshot = handler.get_storage().get_snapshot_for(KG).unwrap();
+        let rules = snapshot.persistent_rules();
+        let own = std::time::Duration::from_millis(1);
+
+        subscribe(&mut views, &families, &handler, &metrics, 9);
+        let family = Arc::clone(&views[0].family);
+        assert!(family.record_own(own, &snapshot), "never judged");
+        family.stop_sharing(rules);
+        for bindings in [18, 36, 72, 144, 288, 576] {
+            subscribe(&mut views, &families, &handler, &metrics, bindings);
+            assert!(family.record_own(own, &snapshot), "{bindings}: grown");
+            family.stop_sharing(rules);
+        }
+        assert_eq!(family.stops.load(Ordering::Relaxed), 0, "still growing");
+
+        // 1,000 views: under twice the 576 last judged. Each commit evaluates
+        // every view's own query.
+        subscribe(&mut views, &families, &handler, &metrics, 1_000);
+        let commit = |family: &Family| {
+            let probes = (0..1_000).filter(|_| family.record_own(own, &snapshot));
+            probes.count()
+        };
+        assert_eq!(commit(&family), 1, "judged at full size after a commit");
+        family.stop_sharing(rules);
+        assert_eq!(family.stops.load(Ordering::Relaxed), 1, "settled");
+        assert_eq!(commit(&family), 0, "backing off");
+    }
+
+    /// A family too slow to share that gains a view between commits is not
+    /// still growing: the verdict a commit after its first counts, and it
+    /// probes no more until its bindings double.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_family_gaining_a_view_per_commit_does_not_probe_on_every_commit() {
+        let (handler, _tmp) = handler_with(8);
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut views = keyed(&families, &handler, &metrics, 1, 9).await;
+        let family = Arc::clone(&views[0].family);
+        let snapshot = handler.get_storage().get_snapshot_for(KG).unwrap();
+        let rules = snapshot.persistent_rules();
+        let own = std::time::Duration::from_millis(1);
+        assert!(family.record_own(own, &snapshot), "never judged");
+        family.stop_sharing(rules);
+        assert_eq!(family.stops.load(Ordering::Relaxed), 0, "a first verdict");
+
+        // Each commit evaluates every view's own query, and a probe that
+        // starts is judged too slow.
+        let mut probes = Vec::new();
+        for bindings in 10..=19 {
+            subscribe(&mut views, &families, &handler, &metrics, bindings);
+            let due = (0..bindings).filter(|_| family.record_own(own, &snapshot));
+            probes.push(due.count());
+            if probes.last() != Some(&0) {
+                family.stop_sharing(rules);
+            }
+        }
+        assert_eq!(probes, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(family.stops.load(Ordering::Relaxed), 1);
+
+        subscribe(&mut views, &families, &handler, &metrics, 20);
+        assert!(family.record_own(own, &snapshot), "twice the 10 judged");
     }
 
     /// Views of `?reach("nK", Y)` for `bindings` nodes near the end of a
@@ -630,7 +831,7 @@ mod rounds {
         write(&handler, "+item[(\"s1\", 1), (\"s2\", 2)]").await;
         let families = Families::default();
         let metrics = Arc::new(SubscriptionMetrics::default());
-        let mut views: Vec<_> = (1..=4)
+        let mut views: Vec<_> = (1..=2)
             .map(|i| {
                 member(
                     &families,
@@ -641,9 +842,16 @@ mod rounds {
             })
             .collect();
         let family = Arc::clone(&views[0].family);
+        // First refreshes while the views fit on the compute permits: no probe.
         for view in &mut views {
             view.refresh().await.unwrap();
         }
+        let _idle = idle(
+            &families,
+            &handler,
+            &metrics,
+            &[r#"?item("s3", X)"#, r#"?item("s4", X)"#],
+        );
         write(&handler, "+item(\"s1\", 3)").await;
         family.own_cost_us.store(1_000_000_000, Ordering::Relaxed);
         views[0].refresh().await.unwrap();
@@ -661,6 +869,9 @@ mod rounds {
         )
         .await;
 
+        // The own evaluation under the new rules starts a probe: held, so
+        // that only the old round is judged.
+        let _probe = family.probe_gate.write().await;
         write(&handler, "+tagged(S) <- item(S, 1)").await;
         views[0].refresh().await.unwrap();
         assert!(!family.shares());
@@ -696,6 +907,8 @@ mod rounds {
             })
             .collect();
         let family = Arc::clone(&views[0].family);
+        // No probe is judged here: only own evaluations set the costs.
+        let _probe = family.probe_gate.write().await;
         for view in &mut views {
             view.refresh().await.unwrap();
         }
@@ -703,11 +916,12 @@ mod rounds {
 
         write(&handler, "+tagged(S) <- item(S, 1)").await;
         views[0].refresh().await.unwrap();
-        assert_eq!(family.own_cost_us.load(Ordering::Relaxed), 0);
+        let own = family.own_cost_us.load(Ordering::Relaxed);
+        assert!(own > 0, "the cost under the new rules");
         // An own evaluation of the old rules that finishes after the change.
-        let probe = family.record_own(Some(std::time::Duration::from_millis(5)), &before);
+        let probe = family.record_own(std::time::Duration::from_secs(1_000), &before);
         assert!(!probe);
-        assert_eq!(family.own_cost_us.load(Ordering::Relaxed), 0);
+        assert_eq!(family.own_cost_us.load(Ordering::Relaxed), own);
         assert_eq!(family.own_since_stop.load(Ordering::Relaxed), 1);
     }
 
@@ -732,11 +946,15 @@ mod rounds {
             })
             .collect();
         let family = Arc::clone(&views[0].family);
+        // Hold the probe, which the first own evaluation starts, until own
+        // evaluations are slower than any round.
+        let gate = family.probe_gate.write().await;
         for view in &mut views {
             view.refresh().await.unwrap();
         }
         write(&handler, "+edge(\"n4\", \"n5\")").await;
         family.own_cost_us.store(1_000_000_000, Ordering::Relaxed);
+        drop(gate);
         views[0].refresh().await.unwrap();
         probed(&family).await;
         assert!(family.shares(), "not recursive: the probe kept sharing");
@@ -771,11 +989,12 @@ mod rounds {
         let metrics = Arc::new(SubscriptionMetrics::default());
         let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
         let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
-        let _idle = idle(&families, &handler, &metrics, &[r#"?item("s3", X)"#]);
+        // First refreshes while the views fit on the compute permits.
         one.refresh().await.unwrap();
         two.refresh().await.unwrap();
+        let _idle = idle(&families, &handler, &metrics, &[r#"?item("s3", X)"#]);
 
-        // The first plan-cached own evaluation decides, without a probe.
+        // The next own evaluation decides, without a probe.
         write(&handler, "+item[(\"s1\", 3), (\"s2\", 4)]").await;
         assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 3])]);
         assert!(one.family.shares());
@@ -798,14 +1017,15 @@ mod rounds {
         let metrics = Arc::new(SubscriptionMetrics::default());
         let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
         let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
+        // First refreshes while the views fit on the compute permits: no probe.
+        one.refresh().await.unwrap();
+        two.refresh().await.unwrap();
         let _idle = idle(
             &families,
             &handler,
             &metrics,
             &[r#"?item("s3", X)"#, r#"?item("s4", X)"#],
         );
-        one.refresh().await.unwrap();
-        two.refresh().await.unwrap();
         one.family
             .own_cost_us
             .store(1_000_000_000, Ordering::Relaxed);
@@ -852,6 +1072,10 @@ mod rounds {
             .iter()
             .map(|s| member(families, handler, metrics, &format!("?item(\"{s}\", X)")))
             .collect();
+        // First refreshes while the views fit on the compute permits: no probe.
+        for view in &mut views {
+            view.refresh().await.unwrap();
+        }
         let idle = idle(
             families,
             handler,
@@ -862,9 +1086,6 @@ mod rounds {
                 r#"?item("i3", X)"#,
             ],
         );
-        for view in &mut views {
-            view.refresh().await.unwrap();
-        }
         let family = &views[0].family;
         family.sharing.store(true, Ordering::Relaxed);
         assert!(family.shares());

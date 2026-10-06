@@ -41,13 +41,15 @@
 //! so saving them a little latency on an idle server must not cost the
 //! server many times the work, and saving the server work must not make
 //! every delta wait many times longer. Costs leave out waiting
-//! for a permit and compiling a plan, and a view's own cost counts only
-//! evaluations that reused a compiled plan. Costs hold under the rules they
-//! were measured with: a rule change stops sharing and starts them over. A
-//! family never evaluates its lifted query while a parameter binds an atom
-//! that reads, under the current rules, a recursive relation: the constant
-//! lets Magic Sets restrict the work, and the lifted query may compute the
-//! whole closure. Otherwise, once it has a view's own cost to compare with,
+//! for a permit and compiling a plan, so a view's first evaluation, which
+//! compiles its plan, already gives its own cost: a family is judged while
+//! its views subscribe, not on the first commit that refreshes them all.
+//! Costs hold under the rules they were measured with: a rule change stops
+//! sharing and starts them over. A family never evaluates its lifted query
+//! while a parameter binds an atom that reads, under the current rules, a
+//! recursive relation: the constant lets Magic Sets restrict the work, and
+//! the lifted query may compute the whole closure. Otherwise, once it has a
+//! view's own cost to compare with and more bindings than compute permits,
 //! a family probes: it evaluates the round of that revision, which no view
 //! waits for, under the server's probe permit rather than a compute permit,
 //! and starts sharing only when that round is fast enough. Views that then
@@ -57,8 +59,12 @@
 //! average, and probes (or decides) again after some commits, waiting longer
 //! after each failure, or as soon as it has twice the bindings it had when
 //! it stopped: a verdict reached while views were still subscribing must
-//! not hold for the many more that follow. While sharing, a view evaluates
-//! its own query now and then to keep that cost current.
+//! not hold for the many more that follow. Nor does it count as a failure:
+//! only a stop with under twice the bindings of the previous verdict does,
+//! and makes the family wait longer. A family no failure was counted against
+//! since a round last kept sharing, not even earlier while its views were
+//! subscribing, probes again after one commit. While sharing, a view
+//! evaluates its own query now and then to keep that cost current.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -510,10 +516,11 @@ pub struct Family {
     round_gate: tokio::sync::RwLock<()>,
     /// Own evaluations since sharing stopped.
     own_since_stop: AtomicU64,
-    /// Times sharing stopped since a round last kept it.
+    /// Times sharing stopped, with under twice the bindings of the verdict
+    /// before, since a round last kept it.
     stops: AtomicU64,
-    /// Bindings when sharing last stopped.
-    stopped_at_bindings: AtomicU64,
+    /// Bindings at the last verdict (0: none yet).
+    judged_at_bindings: AtomicU64,
     /// Recent cost of a view's own evaluation, in microseconds (0: unknown).
     own_cost_us: AtomicU64,
     /// Recent cost of a round since sharing last stopped, in microseconds
@@ -608,7 +615,7 @@ impl Family {
         self.shared_cost_us.store(0, Ordering::Relaxed);
         self.own_since_stop.store(0, Ordering::Relaxed);
         self.stops.store(0, Ordering::Relaxed);
-        self.stopped_at_bindings.store(0, Ordering::Relaxed);
+        self.judged_at_bindings.store(0, Ordering::Relaxed);
         verdict
     }
 
@@ -737,6 +744,7 @@ impl Family {
                 );
                 self.stop_sharing(&rules);
             } else if self.start_sharing(&rules) {
+                self.judged_at_bindings.store(bindings, Ordering::Relaxed);
                 if self.stops.load(Ordering::Relaxed) != 0 {
                     self.stops.store(0, Ordering::Relaxed);
                 }
@@ -791,40 +799,38 @@ impl Family {
         judged
     }
 
-    /// Stop sharing on a verdict under `rules`, counting a failure, unless
-    /// the family no longer judges them.
+    /// Stop sharing on a verdict under `rules`, unless the family no longer
+    /// judges them. It counts as a failure only with under twice the bindings
+    /// of the verdict before: a family still growing is not judged for good.
     fn stop_sharing(&self, rules: &Arc<PersistentRules>) {
         if !self.judges(rules) {
             return;
         }
         self.own_since_stop.store(0, Ordering::Relaxed);
         self.shared_cost_us.store(0, Ordering::Relaxed);
-        self.stops.fetch_add(1, Ordering::Relaxed);
-        self.stopped_at_bindings.store(
-            self.bindings.load(Ordering::Relaxed) as u64,
-            Ordering::Relaxed,
-        );
+        let bindings = self.bindings.load(Ordering::Relaxed) as u64;
+        let judged_at = self.judged_at_bindings.swap(bindings, Ordering::Relaxed);
+        if bindings < judged_at.saturating_mul(2) {
+            self.stops.fetch_add(1, Ordering::Relaxed);
+        }
         self.sharing.store(false, Ordering::Relaxed);
     }
 
-    /// Note a view's own evaluation on `snapshot`: its cost when it reused a
-    /// compiled plan (`None` when it compiled one). Whether to probe: no
-    /// parameter binds recursion under `snapshot`'s rules, the own cost is
-    /// known, there are more bindings than compute permits, and the family
-    /// never stopped sharing, enough own evaluations passed since it did, or
-    /// it has twice the bindings it had then.
-    fn record_own(&self, cost: Option<Duration>, snapshot: &KnowledgeGraphSnapshot) -> bool {
+    /// Note a view's own evaluation on `snapshot`, of `cost`. Whether to
+    /// probe: no parameter binds recursion under `snapshot`'s rules, there
+    /// are more bindings than compute permits, and the family was never
+    /// judged, has twice the bindings it had when it stopped sharing, or
+    /// enough own evaluations passed since it did: a commit's only while no
+    /// failure was counted since a round last kept sharing, not even earlier
+    /// while its views were subscribing.
+    fn record_own(&self, cost: Duration, snapshot: &KnowledgeGraphSnapshot) -> bool {
         let rules = snapshot.persistent_rules();
         if self.binds_recursion(snapshot) || !self.judges(rules) {
             return false;
         }
-        let average = match cost {
-            Some(cost) => match self.smooth(&self.own_cost_us, cost, rules) {
-                Some(average) => average,
-                None => return false,
-            },
-            None => self.own_cost_us.load(Ordering::Relaxed),
-        };
+        if self.smooth(&self.own_cost_us, cost, rules).is_none() {
+            return false;
+        }
         if self.sharing.load(Ordering::Relaxed) {
             return false;
         }
@@ -833,12 +839,15 @@ impl Family {
         let stops = self.stops.load(Ordering::Relaxed);
         let grown = bindings
             >= self
-                .stopped_at_bindings
+                .judged_at_bindings
                 .load(Ordering::Relaxed)
                 .saturating_mul(2);
-        average > 0
-            && self.outnumbers_permits()
-            && (stops == 0 || grown || since_stop >= probe_after(bindings, stops))
+        let wait = if stops == 0 {
+            bindings
+        } else {
+            probe_after(bindings, stops)
+        };
+        self.outnumbers_permits() && (grown || since_stop >= wait)
     }
 
     /// Evaluate the round of `snapshot`'s revision (the pending round, which
@@ -915,7 +924,7 @@ impl Families {
                         round_gate: tokio::sync::RwLock::default(),
                         own_since_stop: AtomicU64::new(0),
                         stops: AtomicU64::new(0),
-                        stopped_at_bindings: AtomicU64::new(0),
+                        judged_at_bindings: AtomicU64::new(0),
                         own_cost_us: AtomicU64::new(0),
                         shared_cost_us: AtomicU64::new(0),
                         rounds: AtomicU64::new(0),
@@ -972,10 +981,7 @@ impl MemberQuery {
         let snapshot = self.own.current_snapshot()?;
         let rules = Arc::clone(snapshot.persistent_rules());
         let evaluated = self.own.evaluate_on(Arc::clone(&snapshot)).await?;
-        if self
-            .family
-            .record_own(evaluated.plan_cached.then_some(evaluated.cost), &snapshot)
-        {
+        if self.family.record_own(evaluated.cost, &snapshot) {
             Family::probe(&self.family, snapshot);
         }
         self.validated = Some(rules);
@@ -1014,7 +1020,6 @@ impl MemberQuery {
             dependencies: partitions.dependencies.clone(),
             revision: partitions.revision,
             cost: Duration::ZERO,
-            plan_cached: false,
         })
     }
 }
