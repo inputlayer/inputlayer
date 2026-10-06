@@ -9,13 +9,19 @@
 //!   path a subscribed agent sees;
 //! - `subscription[group]` - every query in one subscription group, each
 //!   member assembled from pushed group deltas;
-//! - `spec` - recorded `.iql.out` results (corpus cases only).
+//! - `spec` - recorded `.iql.out` results (corpus cases only);
+//! - `maintained` - `recompute` on an engine whose persistent rules are
+//!   maintained views, when `INPUTLAYER_ORACLE_VIEWS=maintained`.
 //!
-//! Histories come from hand-written scenarios, seeded random generation and
-//! the `.iql` corpus. A divergence is minimized to a short reproducing script.
+//! Histories come from hand-written scenarios, seeded random generation, the
+//! `.iql` corpus and the scenario suite's shop pack ([`shop`]). A divergence
+//! is minimized to a short reproducing script.
 //!
 //! Scale the random run with `INPUTLAYER_ORACLE_SEEDS=<n>` (default 12) and
-//! reproduce one seed with `INPUTLAYER_ORACLE_SEED=<seed>`.
+//! reproduce one seed with `INPUTLAYER_ORACLE_SEED=<seed>`. With
+//! `INPUTLAYER_ORACLE_VIEWS=maintained` every history also runs through the
+//! `maintained` adapter (and the soak's server runs in that mode); until V2
+//! (#309) adds the mode, every test fails saying it is not available.
 //!
 //! [`soak`] holds a real server under sustained concurrent writers, rule
 //! changes and many (fast, slow, stalled, grouped) subscribers to the same
@@ -34,11 +40,14 @@ mod oracle;
 mod recompute;
 mod reference;
 mod scenarios;
+mod shop;
 mod soak;
 mod subscription;
 
 use adapter::Adapter;
+use engine::views_mode;
 use group::GroupAdapter;
+use inputlayer_testkit::Mode;
 use model::History;
 use oracle::Report;
 use recompute::RecomputeAdapter;
@@ -46,12 +55,18 @@ use reference::ReferenceAdapter;
 use subscription::{Fault, SubscriptionAdapter};
 
 /// The standard adapter set, reference first so it is the baseline wherever
-/// it can answer.
+/// it can answer, and `maintained` when [`views_mode`] selects it.
 fn adapters(queries: &[String]) -> Vec<Box<dyn Adapter>> {
     let mut adapters = with_fault(queries, Fault::None);
     adapters.push(Box::new(
         GroupAdapter::open(queries).expect("open subscription group engine"),
     ));
+    if views_mode() == Mode::Maintained {
+        match RecomputeAdapter::open_maintained() {
+            Ok(adapter) => adapters.push(Box::new(adapter)),
+            Err(error) => panic!("open the maintained adapter: {error:?}"),
+        }
+    }
     adapters
 }
 
@@ -200,6 +215,13 @@ fn iql_corpus_agrees_with_spec_and_reference() {
     corpus::check_all();
 }
 
+/// The shop pack and the scenario histories run on it (S9, S9b) agree
+/// across all adapters, and the reference models all of them.
+#[test]
+fn shop_pack_corpus_agrees_across_all_adapters() {
+    corpus::check_shop_pack();
+}
+
 /// Concurrent writers, rule churn and many subscribers against one server,
 /// every observation checked against the reference at its revision. A smoke
 /// by default; `scripts/soak.sh` runs the sustained soak.
@@ -212,6 +234,7 @@ fn concurrent_soak_agrees_with_reference() {
     let report = runtime.block_on(soak::run(
         env!("CARGO_BIN_EXE_inputlayer-server"),
         soak::Config::from_env(),
+        views_mode(),
     ));
     report.write();
     let summary = report.summary();

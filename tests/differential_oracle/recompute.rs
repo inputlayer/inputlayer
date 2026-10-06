@@ -1,5 +1,13 @@
 //! Recompute adapter: every observation is a fresh query against the current
 //! snapshot through the normal program path.
+//!
+//! The `maintained` adapter is the same adapter on an engine whose persistent
+//! rules are incrementally maintained views (`engine.views = "maintained"`),
+//! so the reference, recompute and maintained answers are compared at every
+//! checkpoint. It joins the standard set when `INPUTLAYER_ORACLE_VIEWS` is
+//! `maintained`; until V2 (#309) adds the mode, opening it fails.
+
+use inputlayer_testkit::Mode;
 
 use crate::adapter::Adapter;
 use crate::engine::{result_rows, EngineHost};
@@ -7,19 +15,29 @@ use crate::model::{AdapterError, Observation, Outcome, Revision};
 
 pub struct RecomputeAdapter {
     host: EngineHost,
+    name: &'static str,
 }
 
 impl RecomputeAdapter {
     pub fn open() -> Result<Self, AdapterError> {
         Ok(Self {
             host: EngineHost::open()?,
+            name: "recompute",
+        })
+    }
+
+    /// The `maintained` adapter.
+    pub fn open_maintained() -> Result<Self, AdapterError> {
+        Ok(Self {
+            host: EngineHost::open_in(Mode::Maintained)?,
+            name: "maintained",
         })
     }
 }
 
 impl Adapter for RecomputeAdapter {
     fn name(&self) -> &'static str {
-        "recompute"
+        self.name
     }
 
     fn execute(&mut self, statement: &str, _revision: Revision) -> Result<Outcome, AdapterError> {

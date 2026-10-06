@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check perf-gate-remote bench-engine-remote bench-sessions-remote bench-views-remote soak soak-remote secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions bench-views test test-fast test-release unit-test xfail-list integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check perf-gate-remote bench-engine-remote bench-sessions-remote bench-views-remote soak soak-remote secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions bench-views test test-fast test-release unit-test xfail-list integration-test test-scenarios test-scenarios-modes test-budget oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -336,8 +336,39 @@ xfail-list:
 integration-test:
 	cargo test --workspace --all-features --test '*'
 
+# Scenario suite (tests/scenarios) alone, in debug as the PR gate runs it
+# (part of unit-test), in the views mode INPUTLAYER_SCENARIO_VIEWS selects.
+test-scenarios:
+	@mkdir -p $(dir $(XFAIL_LOG)) && : > $(XFAIL_LOG)
+	INPUTLAYER_XFAIL_LOG=$(abspath $(XFAIL_LOG)) cargo test --all-features --test scenarios; \
+		status=$$?; $(MAKE) --no-print-directory xfail-list; exit $$status
+
+# Scenario S16's mode matrix: the scenario suite once per views mode. The
+# recompute run must pass; the maintained run may fail (V2 #309 adds the
+# mode) until V9 (#315) lands, which makes it required: then drop the `||`.
+test-scenarios-modes:
+	INPUTLAYER_SCENARIO_VIEWS=recompute $(MAKE) --no-print-directory test-scenarios
+	INPUTLAYER_SCENARIO_VIEWS=maintained $(MAKE) --no-print-directory test-scenarios || \
+		echo "maintained run failed: allowed until V9 (#315) makes it required"
+
+# Tier time budgets (tests/budget.toml): the PR gate's tests (unit-test, then
+# every snapshot spec on the debug binaries), each tier's time summed from the
+# logs and checked by scripts/check-test-budget.py, which fails a tier more
+# than 25 percent over its budget. The budgets are for the PR gate's 4-vCPU
+# runner; a busy development box runs slower. Writes $(TEST_BUDGET_DIR)/
+# tests-timing.json.
+TEST_BUDGET_DIR ?= target/test-budget
+test-budget:
+	@mkdir -p $(TEST_BUDGET_DIR)
+	set -o pipefail; $(MAKE) --no-print-directory unit-test 2>&1 | tee $(TEST_BUDGET_DIR)/cargo-test.log
+	set -o pipefail; ./scripts/run_snapshot_tests.sh --debug --skip-build 2>&1 | tee $(TEST_BUDGET_DIR)/specs.log
+	./scripts/check-test-budget.py --cargo-log $(TEST_BUDGET_DIR)/cargo-test.log \
+		--specs-log $(TEST_BUDGET_DIR)/specs.log --json $(TEST_BUDGET_DIR)/tests-timing.json
+
 # Differential correctness oracle (part of unit-test; this runs it alone).
 # Scale random histories with INPUTLAYER_ORACLE_SEEDS=<n>.
+# INPUTLAYER_ORACLE_VIEWS=maintained adds the maintained adapter; until V2
+# (#309) adds the mode, every test fails saying it is not available.
 oracle-test:
 	cargo test --all-features --test differential_oracle
 

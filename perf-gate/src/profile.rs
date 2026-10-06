@@ -17,6 +17,7 @@ pub struct Profile {
     pub delta_first: FirstDeltaParams,
     pub delta_keyed: KeyedParams,
     pub interference: InterferenceParams,
+    pub shop_install: ShopParams,
     /// The engine suite's fixtures (not gated; see `fixtures::engine`).
     pub engine: EngineParams,
 }
@@ -84,6 +85,14 @@ pub struct InterferenceParams {
     pub delta: DeltaParams,
     /// Large results the slow consumer requests and never reads.
     pub slow_consumer_requests: usize,
+}
+
+/// The scenario suite's shop pack (`Size::Small`) installed into fresh
+/// knowledge graphs.
+#[derive(Debug, Clone, Serialize)]
+pub struct ShopParams {
+    /// Installs per round, each into a graph of its own.
+    pub installs: usize,
 }
 
 /// Parameters of the engine suite: the cases the gate's fixtures leave out.
@@ -291,6 +300,8 @@ impl Profile {
                 },
                 slow_consumer_requests: 8,
             },
+            // The policy's p50 ceiling needs `min_samples_p50` per round.
+            shop_install: ShopParams { installs: 20 },
             engine: EngineParams::standard(),
         }
     }
@@ -315,6 +326,7 @@ impl Profile {
         profile.delta_keyed.keys /= 4;
         profile.delta_keyed.writes /= 4;
         profile.interference.delta.writes /= 5;
+        profile.shop_install.installs /= 4;
         let engine = &mut profile.engine;
         for query in [&mut engine.rule_query, &mut engine.unbound_query] {
             query.warmup = 1;

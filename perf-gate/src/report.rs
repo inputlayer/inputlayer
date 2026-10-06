@@ -72,6 +72,25 @@ pub fn markdown(record: &RunRecord, policy: &Policy, verdict: &Verdict) -> Strin
     }
     let _ = writeln!(out, "\n### Required metrics\n");
     table(&mut out, verdict.metrics.iter().filter(|m| m.required));
+    if !verdict.ceilings.is_empty() {
+        let _ = writeln!(out, "\n### Ceilings (absolute)\n");
+        let _ = writeln!(out, "| metric | candidate | ceiling | status |");
+        let _ = writeln!(out, "|---|---|---|---|");
+        for c in &verdict.ceilings {
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} |",
+                c.metric,
+                value(c.candidate_median, false),
+                value(Some(c.ceiling), false),
+                if c.status == Status::Pass {
+                    status_word(c.status).to_string()
+                } else {
+                    format!("{}: {}", status_word(c.status), c.reason)
+                }
+            );
+        }
+    }
     let _ = writeln!(out, "\n### Diagnostic metrics (not gated)\n");
     table(&mut out, verdict.metrics.iter().filter(|m| !m.required));
     out

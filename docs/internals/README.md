@@ -112,13 +112,6 @@ cargo test
 
 ## Test Coverage
 
-- **1567 unit tests** across all modules (as of 2026-02-08)
-- **1109 snapshot tests** for end-to-end validation
-
-Tests are organized by category in `examples/iql/`:
-- `01_basics/` - Basic queries
-- `16_vectors/` - Vector operations
-- `29_temporal/` - Temporal functions
-- `30_quantization/` - Int8 quantization
-- `31_lsh/` - LSH functions
-- `32_math/` - Math functions
+Tests are organized in tiers (unit, component, scenario, snapshot specs,
+oracle, SDK, performance); [TESTING.md](../../TESTING.md) says what belongs
+where and lists the snapshot spec categories in `examples/iql/`.

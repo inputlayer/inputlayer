@@ -58,3 +58,10 @@ required = [
 p50 = 0.05
 p99 = 0.10
 rate = 0.05
+
+# Absolute ceilings on the candidate, in microseconds: the median of its
+# per-round values must not exceed them, whatever the baseline measured.
+[ceilings]
+# The scenario suite's shop pack (Size::Small) installs in under 200 ms
+# (TESTING.md, Scenario Suite; #347).
+"shop_install.install_us.p50" = 200000

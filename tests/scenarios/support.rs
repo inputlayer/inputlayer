@@ -55,7 +55,8 @@ pub fn write_revision_matches_delta(write: &QueryResult, delta: &Delta) -> Check
 }
 
 /// `refused(reply, code, message_contains)`: the request failed with the
-/// structured `code` and a message naming the reason.
+/// structured `code` and a message (or, for an unparsable program, a parse
+/// error) naming the reason.
 ///
 /// A refusal with the right message but without the code fails with
 /// [`Violation::Rejected`] whose text starts `missing code`, which a known
@@ -81,7 +82,7 @@ pub fn refused(
             )))
         }
     };
-    if !refusal.message.contains(message_contains) {
+    if !refusal.names(message_contains) {
         return Err(Violation::Transport(format!(
             "refusal does not name {message_contains:?}: {refusal:?}"
         )));

@@ -89,8 +89,9 @@ impl Fixture {
         Ok(())
     }
 
-    /// The statements grouped into the programs [`Self::install`] commits.
-    fn programs(&self) -> Vec<String> {
+    /// The statements grouped into the programs [`Self::install`] commits
+    /// (the perf gate's `shop_install` fixture sends them the same way).
+    pub fn programs(&self) -> Vec<String> {
         let mut programs = Vec::new();
         let mut program = String::new();
         for statement in &self.statements {
