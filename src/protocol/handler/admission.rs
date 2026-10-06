@@ -478,11 +478,15 @@ impl State {
         if running >= inner.capacity || lane_state.running >= settings.max {
             return None;
         }
-        // A free permit with a lane below its reserve waiting is theirs.
+        // A free permit with a lane below its reserve waiting (and able to
+        // take it) is theirs.
         let reserved_waiting = Lane::POOL.iter().any(|other| {
+            let state = &self.lanes[other.index()];
+            let settings = &inner.lanes[other.index()];
             *other != lane
-                && !self.lanes[other.index()].queue.is_empty()
-                && self.lanes[other.index()].running < inner.lanes[other.index()].min
+                && !state.queue.is_empty()
+                && state.running < settings.min
+                && state.running < settings.max
         });
         if reserved_waiting {
             return None;
@@ -679,7 +683,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_freed_permit_goes_to_a_lane_below_its_reserve_first() {
-        let pool = pool(2);
+        let pool = pool_with(2, |c| {
+            c.write.min_permits = 1;
+            c.background.min_permits = 1;
+        });
         let w1 = admitted(&pool, Lane::Write).await;
         let _w2 = admitted(&pool, Lane::Write).await;
         // Writes queue more; a background refresh and a query arrive after.
@@ -878,10 +885,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_idle_lane_starts_level_with_the_active_ones() {
-        let pool = pool_with(1, |c| {
-            c.interactive.min_permits = 0;
-            c.write.min_permits = 0;
-        });
+        let pool = pool_with(1, |c| c.interactive.min_permits = 0);
         // Writes use the pool for a while.
         for _ in 0..20 {
             let permit = admitted(&pool, Lane::Write).await;

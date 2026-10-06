@@ -164,10 +164,10 @@ async fn admit(
                     "query_refused_admission_timeout"
                 );
                 overloaded(format!(
-                    "Server overloaded: no compute permit for the {} lane within {} s \
+                    "Server overloaded: no compute permit for the {} lane within {} ms \
                          (storage.performance.admission.max_wait_ms); nothing ran. Retry later",
                     lane.name(),
-                    admission.max_wait().as_secs()
+                    admission.max_wait().as_millis()
                 ))
             }
         }

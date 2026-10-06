@@ -289,7 +289,28 @@ async fn a_request_the_engine_cannot_admit_in_time_is_refused_as_overloaded() ->
     assert_eq!(refusal_code(outcome)?, "cancelled");
     let ack = long.cancel_ack().await?;
     assert_eq!(ack, "cancelled");
-    let rows = behind.query("?edge(0, X)").await?.rows;
+    // The stopped join holds its permit until its next cooperative check,
+    // which a loaded host can delay past the short admission wait here.
+    let settled = Instant::now();
+    let rows = loop {
+        match behind.try_execute("?edge(0, X)").await? {
+            Ok(result) => break result.rows,
+            Err(refusal) if refusal.code.as_deref() == Some("overloaded") => {
+                if settled.elapsed() > Duration::from_secs(10) {
+                    return Err(Violation::Rejected(format!(
+                        "the permit never freed after the cancel: {}",
+                        refusal.message
+                    )));
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(refusal) => {
+                return Err(Violation::Rejected(format!(
+                    "cheap query refused after the cancel: {refusal:?}"
+                )))
+            }
+        }
+    };
     assert_eq!(rows.len() as i64, SIDE);
     Ok(())
 }

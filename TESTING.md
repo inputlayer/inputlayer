@@ -145,7 +145,7 @@ make e2e-reactive                                   # release build, writes late
 INPUTLAYER_SCENARIO_VIEWS=maintained cargo test --test scenarios  # refused until V2 (#309)
 ```
 
-Modules: `reactive`, `stream`, `delivery`, `saturation` and `wire` (the agent
+Modules: `reactive`, `stream`, `delivery`, `saturation`, `admission` and `wire` (the agent
 path below), `harness` (the testkit pieces scenarios build on, checked against
 a real engine), the catalogue scenarios `lifecycle`, `claims`, `retraction`,
 `restart` and `tenancy` (below), and the scenarios that hold the milestone 9
@@ -311,6 +311,17 @@ acknowledgement, and no session gets a stray delta or a `subscription_error`
 (its module doc states the full contract). Its timing bounds hold for a
 release engine, so it runs only in `make e2e-reactive` and is ignored in
 debug builds.
+
+`tests/scenarios/admission.rs` requires fair admission under load (#176):
+while 16 writers saturate one knowledge graph and 200 sessions' views refresh
+on every commit, a reader's cheap queries on their own connection answer
+within a bound at the 99th percentile, every write is acknowledged, no view
+reports an error and every view ends equal to a fresh query (release only,
+like `saturation`; run both pinned to few cores to judge small hosts). Its
+second scenario runs in debug too: on a one-permit engine with a short
+admission wait, a cheap query behind a long one is refused with `overloaded`
+once that wait passes, one behind a full lane queue at once, and the
+`inputlayer_admission_refused_total` counters say why.
 
 `tests/scenarios/views.rs` requires the view work counters on
 `/metrics/prometheus` to tell how reads of deployed rules were answered:

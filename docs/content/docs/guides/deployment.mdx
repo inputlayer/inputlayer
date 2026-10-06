@@ -798,10 +798,10 @@ Requests wait for a permit on one of three **lanes**, which share the pool by th
 | Lane | What runs on it | Default weight |
 |---|---|---|
 | `interactive` | Queries, `read`s, proofs, session queries and commands that change no durable state | 4 |
-| `write` | Programs that commit: facts, schemas, rules, index builds and the other commands that change durable state | 2 |
-| `background` | Subscription refreshes and the shared rounds of standing-query families | 2 |
+| `write` | Programs that commit: facts, schemas, rules, index builds and the other commands that change durable state | 1 |
+| `background` | Subscription refreshes and the shared rounds of standing-query families | 4 |
 
-When a permit frees, the lane that has used the least permit time for its weight gets it, so a lane running cheap work keeps getting through however much another lane queues, and a lane that monopolized the pool yields until the others catch up. Two bounds sit on top of that share: a lane holding fewer than its `min_permits` (default 1) is served before any other, so every lane makes progress while it has work even on a host with two permits; and no lane holds more than its `max_permits` (default `0`: every permit). The pool is work-conserving: a free permit never idles while any lane can use it. Sharing probes of standing-query families hold one permit of their own beside the pool.
+When a permit frees, the lane that has used the least permit time for its weight gets it, so a lane running cheap work keeps getting through however much another lane queues, and a lane that monopolized the pool yields until the others catch up. Writes get the smallest share on purpose: every commit refreshes the views that depend on it, so writes admitted faster than those refreshes drain only make the deliveries later; overload may slow writes down, but never the deliveries they cause, and the share keeps writers moving. Two bounds sit on top of that share: a lane holding fewer than its `min_permits` is served before any other (default 1 for `interactive`, so a cheap query never waits behind a full sweep of refreshes or writes, even on a host with two permits; 0 for the others, whose weights already guarantee their share); and no lane holds more than its `max_permits` (default `0`: every permit). The pool is work-conserving: a free permit never idles while any lane can use it. Sharing probes of standing-query families hold one permit of their own beside the pool.
 
 Waits are bounded. A lane's queue holds at most `max_queued` requests (default 4,096 for `interactive` and `write`; unbounded for `background`, whose queue is bounded by the views that exist); one more is refused at once. No request waits longer than its own deadline or `max_wait_ms` (default 30,000), whichever is sooner. A request refused for either gets code `overloaded` (or `deadline_exceeded` when its own deadline passed), never runs later, and applied nothing; a request cancelled or disconnected while it waits leaves the queue at once. The `inputlayer_admission_*` [metrics](#metrics) show each lane's running and queued requests, refusals and summed wait and hold times.
 
@@ -817,14 +817,14 @@ max_permits = 0            # 0: every permit
 max_queued = 4096
 
 [storage.performance.admission.write]
-weight = 2
-min_permits = 1
+weight = 1
+min_permits = 0
 max_permits = 0
 max_queued = 4096
 
 [storage.performance.admission.background]
-weight = 2
-min_permits = 1
+weight = 4
+min_permits = 0
 max_permits = 0
 max_queued = 0             # bounded by the views that exist
 ```

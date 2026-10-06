@@ -402,7 +402,8 @@ fn default_lane_min_permits() -> usize {
     1
 }
 
-/// Requests someone waits for get the largest share.
+/// Requests someone waits for: a large share, and the one reserve, so a
+/// cheap query never waits behind a full sweep of refreshes or writes.
 fn default_interactive_lane() -> LaneConfig {
     LaneConfig {
         weight: 4,
@@ -412,10 +413,15 @@ fn default_interactive_lane() -> LaneConfig {
     }
 }
 
+/// Writes get the smallest share and no reserve: overload may slow writes
+/// down, but never the deliveries they cause. Every commit refreshes the
+/// views that depend on it, so writes admitted faster than those refreshes
+/// drain only make the deliveries later; the share keeps writers moving
+/// without letting them outrun their own refreshes.
 fn default_write_lane() -> LaneConfig {
     LaneConfig {
-        weight: 2,
-        min_permits: 1,
+        weight: 1,
+        min_permits: 0,
         max_permits: 0,
         max_queued: 4096,
     }
@@ -425,8 +431,8 @@ fn default_write_lane() -> LaneConfig {
 /// once at a time, so the queue needs no bound of its own.
 fn default_background_lane() -> LaneConfig {
     LaneConfig {
-        weight: 2,
-        min_permits: 1,
+        weight: 4,
+        min_permits: 0,
         max_permits: 0,
         max_queued: 0,
     }

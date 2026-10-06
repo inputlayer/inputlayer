@@ -157,18 +157,20 @@ max_permits = 0
 max_queued = 4096
 
 # Programs that commit facts, schemas or rules, and commands that change
-# durable state (index builds, graph and user management)
+# durable state (index builds, graph and user management). The smallest
+# share and no reserve: overload may slow writes down, but never the
+# deliveries they cause (each commit refreshes the views that depend on it).
 [storage.performance.admission.write]
-weight = 2
-min_permits = 1
+weight = 1
+min_permits = 0
 max_permits = 0
 max_queued = 4096
 
 # Subscription refreshes and shared standing-query rounds (bounded by the
 # views that exist, each refreshing at most once at a time)
 [storage.performance.admission.background]
-weight = 2
-min_permits = 1
+weight = 4
+min_permits = 0
 max_permits = 0
 max_queued = 0
 
