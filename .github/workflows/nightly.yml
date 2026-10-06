@@ -197,7 +197,7 @@ jobs:
   # a private network, so this job needs a self-hosted runner that can ssh to
   # it: the repository variable NIGHTLY_BENCH_RUNNER names that runner's
   # label. Without it the job is skipped and the report marks the soak and the
-# gate as an expected failure.
+  # gate as an expected failure.
   bench:
     name: Benchmark host (soak, performance gate)
     if: vars.NIGHTLY_BENCH_RUNNER != ''

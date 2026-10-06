@@ -41,8 +41,8 @@ impl EngineHost {
         let handler = Some(start(&runtime, &dir)?);
         Ok(Self {
             runtime,
-            dir,
             handler,
+            dir,
         })
     }
 
