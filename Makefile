@@ -667,7 +667,8 @@ lint:
 # then the same-host performance gate. Formatting always runs; PRE_PR_BASE
 # routes Rust inputs to lint, workspace tests and affected snapshots, SDK
 # inputs to their tests (plus JS type checking), perf-gate/ to its checks, and
-# Makefile or scripts/ changes to the pre-pr gate's own tests. On a shared
+# Makefile or scripts/ changes to the pre-pr gate's own tests and the baseline
+# build's. On a shared
 # development box, measure on the benchmark host instead (commit first):
 # make pre-pr PRE_PR_PERF=perf-gate-remote.
 PRE_PR_PERF ?= perf-gate
@@ -707,6 +708,7 @@ pre-pr-js: js-test
 
 pre-pr-selftest:
 	python3 -m unittest scripts/test_pre_pr.py
+	./scripts/perf-gate-baseline-selftest.sh
 
 # Performance gate: this tree's server vs the approved baseline, same host.
 # Mandatory before calling a PR done; see perf-gate/README.md.

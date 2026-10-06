@@ -335,7 +335,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Lint and unit-test the performance gate tool.
+  # Lint and unit-test the performance gate tool, and test its baseline build.
   perf-gate-tool:
     name: Performance gate tool
     needs: gate
@@ -351,6 +351,9 @@ jobs:
 
       - name: Clippy and unit tests
         run: make perf-gate-check
+
+      - name: Baselines are built from their own sources
+        run: scripts/perf-gate-baseline-selftest.sh
 
   # The performance gate itself: the approved baseline against this commit,
   # both built in release mode and measured interleaved on this one runner,
@@ -383,8 +386,8 @@ jobs:
       - name: Cache baseline server
         uses: useblacksmith/cache@v5
         with:
-          path: target/perf-gate/servers
-          key: perf-gate-baseline-${{ hashFiles('perf-gate/baselines/approved.toml') }}-${{ steps.toolchain.outputs.key }}
+          path: target/perf-gate/baseline-servers
+          key: perf-gate-baseline-servers-${{ hashFiles('perf-gate/baselines/approved.toml') }}-${{ steps.toolchain.outputs.key }}
 
       - name: Pin the CPU frequency governor
         run: |

@@ -59,8 +59,13 @@ other benchmark there should hold it too (`flock`), and `--wait-lock
   instrumentation and holds no timer locks. Every latency is taken in the
   client from send to receipt of the frame, read before the JSON is parsed.
 - **Paired and interleaved.** The baseline commit is built from `git archive`
-  and cached per commit and toolchain. Each round runs every fixture on both
-  arms. Each (round, fixture, arm) gets a fresh server and a fresh data
+  and cached per commit and toolchain
+  (`target/perf-gate/baseline-servers/`). Every baseline is built in a
+  target directory of its own, removed once its binary is cached
+  (`scripts/perf-gate-baseline.sh`): in a shared one, cargo reuses another
+  commit's workspace crates, because `git archive` dates every file at its
+  commit, older than the last build there. Each round runs every fixture on
+  both arms. Each (round, fixture, arm) gets a fresh server and a fresh data
   directory under `target/`, which is a real disk, so durable inserts pay
   their fsync. The arm order alternates by round and by fixture, so drift on
   the host affects both arms evenly.

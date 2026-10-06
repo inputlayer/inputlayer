@@ -34,7 +34,7 @@ class PrePrRoutingTests(unittest.TestCase):
                 path = repo / 'bin' / name
                 path.write_text(STUB)
                 path.chmod(0o755)
-            for name in ('test-affected.sh', 'perf-gate.sh'):
+            for name in ('test-affected.sh', 'perf-gate.sh', 'perf-gate-baseline-selftest.sh'):
                 path = repo / 'scripts' / name
                 path.write_text(STUB)
                 path.chmod(0o755)
@@ -68,7 +68,7 @@ class PrePrRoutingTests(unittest.TestCase):
             (['packages/inputlayer-py/change.py'], {'uv'}),
             (['packages/inputlayer-js/change.ts'], {'npm'}),
             (['perf-gate/change.rs'], {'test', 'clippy'}),
-            (['scripts/change.sh'], {'python3'}),
+            (['scripts/change.sh'], {'python3', 'perf-gate-baseline-selftest.sh'}),
         ]
         for paths, expected in cases:
             with self.subTest(paths=paths):

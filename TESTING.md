@@ -371,7 +371,7 @@ Scenario engines write `server.log` into their temporary directory (`Engine::log
 | `make bench-engine-remote` | Engine suite (rules, closure, deletes and updates, claims, `.why`, sessions, memory, recovery, WAL share) on the benchmark host | Release checkpoints and engine baselines |
 | `make bench-views-remote` | Write and read cost against deployed rules by graph size, rule count and subscribers, with rule-evaluation counts, on the benchmark host | Changing evaluation, subscriptions or rule maintenance (the view work, #305) |
 | `make perf-gate-check` | Clippy and unit tests of the gate tool | After changing `perf-gate/` |
-| `make pre-pr-selftest` | Behavioural tests of `make pre-pr` routing (`scripts/test_pre_pr.py`) | After changing `Makefile` or `scripts/` |
+| `make pre-pr-selftest` | Behavioural tests of `make pre-pr` routing (`scripts/test_pre_pr.py`) and of the baseline build: two baselines, each from its own sources (`scripts/perf-gate-baseline-selftest.sh`) | After changing `Makefile` or `scripts/` |
 | `make e2e-reactive` | Scenario suite in release against real engines, latency samples | Subscription or wire changes |
 | `make oracle-test` | Differential correctness oracle only | Changing evaluation, subscriptions or rule catalog changes |
 
