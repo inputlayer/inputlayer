@@ -267,7 +267,7 @@ says what belongs where and how to run each.
 | Tier | Location | Purpose |
 |------|----------|---------|
 | Unit | `#[cfg(test)]` modules in `src/` | One module's logic |
-| Component | `tests/*.rs` | One layer through its public API, in process |
+| Component | `tests/` | One layer through its public API, in process |
 | Scenario | `tests/scenarios/` | Agents on real server processes over the wire |
 | Snapshot specs | `examples/iql/` | IQL semantics of record, golden transcripts |
 | Oracle | `tests/differential_oracle/` | The same history through independent evaluators |
