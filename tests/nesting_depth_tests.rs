@@ -67,16 +67,7 @@ impl Drop for ResetLimit {
 fn open(dir: &Path) -> Handler {
     let mut config = Config::default();
     config.storage.data_dir = dir.to_path_buf();
-    // These tests are about input size, not time: a debug build on a busy
-    // machine takes most of the default 30 s deadline for the largest body.
-    config.storage.performance.query_timeout_ms = 300_000;
     Handler::new(StorageEngine::new(config).expect("create storage engine"))
-}
-
-/// Whether this run is the soak (`INPUTLAYER_SOAK=1`), which also runs the
-/// tests too slow for a PR.
-fn soak_enabled() -> bool {
-    std::env::var("INPUTLAYER_SOAK").is_ok_and(|value| value == "1")
 }
 
 fn handler() -> (Handler, TempDir) {
@@ -230,14 +221,10 @@ fn configured_nesting_limit_is_enforced() {
 
 /// The highest configurable limit still fits every pass over the term: terms
 /// at the ceiling parse and evaluate end to end. About 20 s of the PR gate,
-/// in release as in debug, so it runs with the soak (`INPUTLAYER_SOAK=1`,
-/// set by `scripts/soak.sh`).
+/// in release as in debug, so it runs with the soak (`scripts/soak.sh`).
 #[test]
+#[ignore = "soak: scripts/soak.sh"]
 fn terms_at_the_nesting_ceiling_evaluate() {
-    if !soak_enabled() {
-        eprintln!("skipped: the ceiling sweep runs with INPUTLAYER_SOAK=1");
-        return;
-    }
     changing_the_limit(async {
         let (handler, _tmp) = handler();
         ok(&handler, "+r(-3)").await;
@@ -315,32 +302,19 @@ async fn handler_with_body_facts() -> (Handler, TempDir) {
     (handler, temp)
 }
 
-/// A rule whose body is `body` plans and evaluates end to end.
-fn assert_body_evaluates(body: String) {
-    on_engine_threads(async move {
+/// Bodies at the size limit plan and evaluate end to end, one at a time.
+/// Joins and wide atoms at the limit are too slow to evaluate here.
+#[test]
+fn bodies_at_the_size_limit_evaluate() {
+    on_engine_threads(async {
         let (handler, _tmp) = handler_with_body_facts().await;
-        ok(&handler, &format!("+p(Y) <- {body}")).await;
-        assert_eq!(value(&handler, "p").await, "Int64(-3)");
+        let n = MAX_RULE_BODY_SIZE;
+        let at_limit = [comparisons(n - 2), negations(n / 2 - 1), constants(510)];
+        for (i, body) in at_limit.iter().enumerate() {
+            ok(&handler, &format!("+p{i}(Y) <- {body}")).await;
+            assert_eq!(value(&handler, &format!("p{i}")).await, "Int64(-3)");
+        }
     });
-}
-
-// Bodies at the size limit plan and evaluate end to end, one test per shape
-// so they run side by side. Joins and wide atoms at the limit are too slow
-// to evaluate here.
-
-#[test]
-fn comparisons_at_the_body_size_limit_evaluate() {
-    assert_body_evaluates(comparisons(MAX_RULE_BODY_SIZE - 2));
-}
-
-#[test]
-fn negations_at_the_body_size_limit_evaluate() {
-    assert_body_evaluates(negations(MAX_RULE_BODY_SIZE / 2 - 1));
-}
-
-#[test]
-fn constants_at_the_body_size_limit_evaluate() {
-    assert_body_evaluates(constants(510));
 }
 
 /// One element past the body size limit is refused, in every shape that
