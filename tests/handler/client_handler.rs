@@ -1124,3 +1124,53 @@ fn test_max_query_cost_custom_value_stored() {
     let handler = Handler::from_config(config).unwrap();
     assert_eq!(handler.config().storage.performance.max_query_cost, 500_000);
 }
+
+// Result columns of a session query are named after the query's variables
+
+#[tokio::test]
+async fn test_session_query_column_names() {
+    let (handler, _temp) = handler();
+    for program in [
+        r#"+direct_flight[("new_york", "london", 7.0), ("london", "paris", 1.5)]"#,
+        "+can_reach(A, B) <- direct_flight(A, B, _)",
+        "+can_reach(A, C) <- direct_flight(A, B, _), can_reach(B, C)",
+    ] {
+        handler
+            .query_program(None, program.to_string())
+            .await
+            .unwrap();
+    }
+    let session_id = handler.create_session("default").unwrap();
+    let columns = |result: &inputlayer::protocol::wire::QueryResult| -> Vec<String> {
+        result.schema.iter().map(|c| c.name.clone()).collect()
+    };
+
+    let result = handler
+        .query_program_with_session(&session_id, "?can_reach(From, To)".to_string())
+        .await
+        .unwrap();
+    assert_eq!(
+        columns(&result),
+        vec!["From", "To"],
+        "Session query should also preserve column names"
+    );
+
+    // Insert and re-query via session
+    handler
+        .query_program(
+            None,
+            r#"+direct_flight("paris", "tokyo", 12.0)"#.to_string(),
+        )
+        .await
+        .unwrap();
+
+    let result2 = handler
+        .query_program_with_session(&session_id, "?can_reach(From, To)".to_string())
+        .await
+        .unwrap();
+    assert_eq!(
+        columns(&result2),
+        vec!["From", "To"],
+        "Session query column names must be stable after insert"
+    );
+}

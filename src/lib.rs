@@ -220,6 +220,8 @@ pub mod provenance; // Why-provenance proof trees and negative explanations
 
 // Utilities
 mod catalog;
+#[cfg(test)]
+mod pipeline_tests;
 mod pipeline_trace;
 mod recursion;
 #[cfg(test)]

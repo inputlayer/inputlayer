@@ -1,0 +1,293 @@
+Connecting to server at http://127.0.0.1:18341...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_flights_n20t11
+Knowledge graph 'test_flights_n20t11' created.
+Switched to knowledge graph: test_flights_n20t11
+> .kg use test_flights_n20t11
+Switched to knowledge graph: test_flights_n20t11
+> +direct_flight[("new_york", "london", 7.0), ("london", "paris", 1.5), ("paris", "tokyo", 12.0), ("tokyo", "sydney", 9.5)]
+Inserted 4 fact(s) into 'direct_flight'.
+> ?direct_flight(From, To, Hours)
+┌────────────┬──────────┬───────┐
+│ From       │ To       │ Hours │
+├────────────┼──────────┼───────┤
+│ "london"   │ "paris"  │   1.5 │
+│ "new_york" │ "london" │   7.0 │
+│ "paris"    │ "tokyo"  │  12.0 │
+│ "tokyo"    │ "sydney" │   9.5 │
+└────────────┴──────────┴───────┘
+4 rows
+> ?direct_flight("london", To, Hours)
+┌──────────┬─────────┬───────┐
+│ london   │ To      │ Hours │
+├──────────┼─────────┼───────┤
+│ "london" │ "paris" │   1.5 │
+└──────────┴─────────┴───────┘
+1 rows
+> +can_reach(A, B) <- direct_flight(A, B, _)
+Rule 'can_reach' registered.
+> +can_reach(A, C) <- direct_flight(A, B, _), can_reach(B, C)
+Rule 'can_reach' registered.
+> ?can_reach(From, To)
+┌────────────┬──────────┐
+│ From       │ To       │
+├────────────┼──────────┤
+│ "london"   │ "paris"  │
+│ "london"   │ "sydney" │
+│ "london"   │ "tokyo"  │
+│ "new_york" │ "london" │
+│ "new_york" │ "paris"  │
+│ "new_york" │ "sydney" │
+│ "new_york" │ "tokyo"  │
+│ "paris"    │ "sydney" │
+│ "paris"    │ "tokyo"  │
+│ "tokyo"    │ "sydney" │
+└────────────┴──────────┘
+10 rows
+> ?can_reach("new_york", "sydney")
+┌────────────┬──────────┐
+│ new_york   │ sydney   │
+├────────────┼──────────┤
+│ "new_york" │ "sydney" │
+└────────────┴──────────┘
+1 rows
+> ?can_reach("new_york", Dest)
+┌────────────┬──────────┐
+│ new_york   │ Dest     │
+├────────────┼──────────┤
+│ "new_york" │ "london" │
+│ "new_york" │ "paris"  │
+│ "new_york" │ "sydney" │
+│ "new_york" │ "tokyo"  │
+└────────────┴──────────┘
+4 rows
+> ?can_reach(Origin, Destination)
+┌────────────┬─────────────┐
+│ Origin     │ Destination │
+├────────────┼─────────────┤
+│ "london"   │ "paris"     │
+│ "london"   │ "sydney"    │
+│ "london"   │ "tokyo"     │
+│ "new_york" │ "london"    │
+│ "new_york" │ "paris"     │
+│ "new_york" │ "sydney"    │
+│ "new_york" │ "tokyo"     │
+│ "paris"    │ "sydney"    │
+│ "paris"    │ "tokyo"     │
+│ "tokyo"    │ "sydney"    │
+└────────────┴─────────────┘
+10 rows
+> ?can_reach(X, Y)
+┌────────────┬──────────┐
+│ X          │ Y        │
+├────────────┼──────────┤
+│ "london"   │ "paris"  │
+│ "london"   │ "sydney" │
+│ "london"   │ "tokyo"  │
+│ "new_york" │ "london" │
+│ "new_york" │ "paris"  │
+│ "new_york" │ "sydney" │
+│ "new_york" │ "tokyo"  │
+│ "paris"    │ "sydney" │
+│ "paris"    │ "tokyo"  │
+│ "tokyo"    │ "sydney" │
+└────────────┴──────────┘
+10 rows
+> .why ?can_reach("new_york", "sydney")
+┌────────────┬──────────┐
+│ _c0        │ _c1      │
+├────────────┼──────────┤
+│ "new_york" │ "sydney" │
+└────────────┴──────────┘
+1 rows
+> .why_not can_reach("new_york", "sao_paulo")
+┌──────────────────────────────────────────┐
+│ explanation                              │
+├──────────────────────────────────────────┤
+│ "can_reach(\"new_york\", \"sao_paulo\")… │
+│ ""                                       │
+│ "  Rule: can_reach (clause 0)"           │
+│ "    can_reach(A, B) <- direct_flight(A… │
+│ "    Blocker: Body predicate 0 (direct_… │
+│ ""                                       │
+│ "  Rule: can_reach (clause 1)"           │
+│ "    can_reach(A, C) <- direct_flight(A… │
+│ "    Blocker: Body predicate 1 (can_rea… │
+└──────────────────────────────────────────┘
+9 rows
+> +hub_score(City, count<Dest>) <- can_reach(City, Dest)
+Rule 'hub_score' registered.
+> ?hub_score(City, Score)
+┌────────────┬───────┐
+│ City       │ Score │
+├────────────┼───────┤
+│ "london"   │     3 │
+│ "new_york" │     4 │
+│ "paris"    │     2 │
+│ "tokyo"    │     1 │
+└────────────┴───────┘
+4 rows
+> +direct_flight("london", "dubai", 7.0)
+Inserted 1 fact(s) into 'direct_flight'.
+> ?direct_flight(From, To, Hours)
+┌────────────┬──────────┬───────┐
+│ From       │ To       │ Hours │
+├────────────┼──────────┼───────┤
+│ "london"   │ "dubai"  │   7.0 │
+│ "london"   │ "paris"  │   1.5 │
+│ "new_york" │ "london" │   7.0 │
+│ "paris"    │ "tokyo"  │  12.0 │
+│ "tokyo"    │ "sydney" │   9.5 │
+└────────────┴──────────┴───────┘
+5 rows
+> ?can_reach(From, To)
+┌────────────┬──────────┐
+│ From       │ To       │
+├────────────┼──────────┤
+│ "london"   │ "dubai"  │
+│ "london"   │ "paris"  │
+│ "london"   │ "sydney" │
+│ "london"   │ "tokyo"  │
+│ "new_york" │ "dubai"  │
+│ "new_york" │ "london" │
+│ "new_york" │ "paris"  │
+│ "new_york" │ "sydney" │
+│ "new_york" │ "tokyo"  │
+│ "paris"    │ "sydney" │
+│ "paris"    │ "tokyo"  │
+│ "tokyo"    │ "sydney" │
+└────────────┴──────────┘
+12 rows
+> ?can_reach(Src, Dst)
+┌────────────┬──────────┐
+│ Src        │ Dst      │
+├────────────┼──────────┤
+│ "london"   │ "dubai"  │
+│ "london"   │ "paris"  │
+│ "london"   │ "sydney" │
+│ "london"   │ "tokyo"  │
+│ "new_york" │ "dubai"  │
+│ "new_york" │ "london" │
+│ "new_york" │ "paris"  │
+│ "new_york" │ "sydney" │
+│ "new_york" │ "tokyo"  │
+│ "paris"    │ "sydney" │
+│ "paris"    │ "tokyo"  │
+│ "tokyo"    │ "sydney" │
+└────────────┴──────────┘
+12 rows
+> ?can_reach("new_york", Dest)
+┌────────────┬──────────┐
+│ new_york   │ Dest     │
+├────────────┼──────────┤
+│ "new_york" │ "dubai"  │
+│ "new_york" │ "london" │
+│ "new_york" │ "paris"  │
+│ "new_york" │ "sydney" │
+│ "new_york" │ "tokyo"  │
+└────────────┴──────────┘
+5 rows
+> +direct_flight("dubai", "sydney", 11.0)
+Inserted 1 fact(s) into 'direct_flight'.
+> ?can_reach("new_york", "sydney")
+┌────────────┬──────────┐
+│ new_york   │ sydney   │
+├────────────┼──────────┤
+│ "new_york" │ "sydney" │
+└────────────┴──────────┘
+1 rows
+> -direct_flight("london", "dubai", 7.0)
+Deleted 1 facts from 'direct_flight'.
+> ?can_reach("new_york", "sydney")
+┌────────────┬──────────┐
+│ new_york   │ sydney   │
+├────────────┼──────────┤
+│ "new_york" │ "sydney" │
+└────────────┴──────────┘
+1 rows
+> ?can_reach(From, To)
+┌────────────┬──────────┐
+│ From       │ To       │
+├────────────┼──────────┤
+│ "dubai"    │ "sydney" │
+│ "london"   │ "paris"  │
+│ "london"   │ "sydney" │
+│ "london"   │ "tokyo"  │
+│ "new_york" │ "london" │
+│ "new_york" │ "paris"  │
+│ "new_york" │ "sydney" │
+│ "new_york" │ "tokyo"  │
+│ "paris"    │ "sydney" │
+│ "paris"    │ "tokyo"  │
+│ "tokyo"    │ "sydney" │
+└────────────┴──────────┘
+11 rows
+> -direct_flight("tokyo", "sydney", 9.5)
+Deleted 1 facts from 'direct_flight'.
+> ?can_reach("new_york", "sydney")
+No results.
+> ?can_reach(From, To)
+┌────────────┬──────────┐
+│ From       │ To       │
+├────────────┼──────────┤
+│ "dubai"    │ "sydney" │
+│ "london"   │ "paris"  │
+│ "london"   │ "tokyo"  │
+│ "new_york" │ "london" │
+│ "new_york" │ "paris"  │
+│ "new_york" │ "tokyo"  │
+│ "paris"    │ "tokyo"  │
+└────────────┴──────────┘
+7 rows
+> +direct_flight[("london", "dubai", 7.0), ("dubai", "singapore", 7.5), ("singapore", "sydney", 8.0)]
+Inserted 3 fact(s) into 'direct_flight'.
+> ?can_reach(From, To)
+┌─────────────┬─────────────┐
+│ From        │ To          │
+├─────────────┼─────────────┤
+│ "dubai"     │ "singapore" │
+│ "dubai"     │ "sydney"    │
+│ "london"    │ "dubai"     │
+│ "london"    │ "paris"     │
+│ "london"    │ "singapore" │
+│ "london"    │ "sydney"    │
+│ "london"    │ "tokyo"     │
+│ "new_york"  │ "dubai"     │
+│ "new_york"  │ "london"    │
+│ "new_york"  │ "paris"     │
+│ "new_york"  │ "singapore" │
+│ "new_york"  │ "sydney"    │
+│ "new_york"  │ "tokyo"     │
+│ "paris"     │ "tokyo"     │
+│ "singapore" │ "sydney"    │
+└─────────────┴─────────────┘
+15 rows
+> -direct_flight("dubai", "singapore", 7.5)
+Deleted 1 facts from 'direct_flight'.
+> ?can_reach(From, To)
+┌─────────────┬──────────┐
+│ From        │ To       │
+├─────────────┼──────────┤
+│ "dubai"     │ "sydney" │
+│ "london"    │ "dubai"  │
+│ "london"    │ "paris"  │
+│ "london"    │ "sydney" │
+│ "london"    │ "tokyo"  │
+│ "new_york"  │ "dubai"  │
+│ "new_york"  │ "london" │
+│ "new_york"  │ "paris"  │
+│ "new_york"  │ "sydney" │
+│ "new_york"  │ "tokyo"  │
+│ "paris"     │ "tokyo"  │
+│ "singapore" │ "sydney" │
+└─────────────┴──────────┘
+12 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_flights_n20t11
+Knowledge graph 'test_flights_n20t11' dropped.

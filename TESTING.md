@@ -30,7 +30,7 @@ See [CONTRIBUTING](CONTRIBUTING#pre-commit-checks) for `make pre-pr` routing, ba
 |---|---|---|---|---|---|---|
 | T0 static | formatting, clippy on every target, rustdoc, `cargo deny` and `cargo audit`, secret scan, SDK type checks | `make check`, `make lint`, `make deny`, `make secret-check` | parallel jobs | yes | | |
 | T1 unit | one module's logic in isolation: parser, IR, code generator operators, planner, values, config, auth primitives, WAL codec | `#[cfg(test)]` modules in `src/` of every workspace crate, doc tests | `unit = 60` s | yes | | |
-| T2 component | one layer through its public API in one process: `StorageEngine` and persistence, `Handler`, the loopback `/ws` protocol, standing queries, replication | `tests/*.rs` and `tests/standing_query_tests/` (one binary per layer is planned, #341) | `component = 180` s | yes | | |
+| T2 component | one layer through its public API in one process: `StorageEngine` and persistence, `Handler`, the loopback `/ws` protocol, standing queries, replication | one binary per layer: `tests/storage/`, `tests/handler/`, `tests/ws/`, `tests/standing_query/`; other `tests/*.rs` | `component = 180` s | yes | | |
 | T3 scenario | several agents on real `inputlayer-server` processes over the wire: subscribe, query, write with `expect_revision`, limits, restart, failover; the [catalogue](#scenario-catalogue) | `tests/scenarios/` on the `testkit` crate | `scenarios = 120` s | yes (debug) | release, with latency samples | |
 | T4 spec snapshots | IQL syntax and query semantics of record, one `.iql` script and its `.iql.out` transcript per case | `examples/iql/<category>/`, `scripts/run_snapshot_tests.sh` | `specs = 60` s | affected categories | all | |
 | T5 oracle and property | the same history through independent evaluators, compared at every revision; property tests | `tests/differential_oracle/`, `tests/property_arithmetic.rs` | `oracle_pr = 20` s | 12 seeds | 50 seeds | |
@@ -61,7 +61,7 @@ The budgets are calibrated on the CI runner: a busy development box runs the sam
 | a parser rule, an operator, a planner pass, a value conversion | the module's `#[cfg(test)]` tests (T1) | `tests/` |
 | what a statement does through `Handler` (errors, counts, atomicity, proofs, limits) | the handler's component test binary in `tests/` (T2) | a spec, unless the output format is the point |
 | storage, WAL, restart, backup, replication between two processes | the storage or replication binary in `tests/` (T2) | |
-| a wire frame, pipelining, cancellation, revocation, standing queries over `/ws` | the `ws_*` binaries or `tests/standing_query_tests/` (T2) | a scenario, unless several connections or processes are the point |
+| a wire frame, pipelining, cancellation, revocation, standing queries over `/ws` | `tests/ws/` or `tests/standing_query/` (T2) | a scenario, unless several connections or processes are the point |
 | query semantics a user types (joins, negation, recursion, aggregates, functions) | a spec in `examples/iql/<category>/` (T4), plus an oracle scenario if deletes or revisions matter | a pipeline test in `tests/` |
 | anything that spans subscribe, query, write and revision, several agents, limits while others continue, restart or failover | a scenario in `tests/scenarios/` (T3), naming the issue it gates | a new `tests/*.rs` binary |
 | incremental maintenance correctness (deletes, recursion, negation, aggregates, rule replacement) | an oracle scenario in `tests/differential_oracle/scenarios.rs` (T5), and a corpus pack (`shop.rs` is one) for new constructs | |
@@ -73,7 +73,7 @@ Rules for every test:
 - No verdict from wall-clock time outside the perf tier. A behaviour that depends on cost gets a seam behind the `test-support` feature (`Handler::with_sharing_regardless_of_cost()` is the pattern) or a counter.
 - No `#[ignore]` to hide a failure. A test that cannot pass yet is a `KnownDefect` expected failure naming its issue (see [Expected failures](#expected-failures)), which fails loudly once the defect is fixed. The one exception is a scenario whose timing bounds need a release engine (`saturation`), ignored in debug builds and run by `make e2e-reactive`.
 - No `sleep` to wait for a state; use the harness's `converge`, `expect_quiet`, `poll_delta`, barriers or notifies.
-- Process-wide state (nesting limit, rayon pool, tracing subscriber) is either made per instance or tested in its own binary; a `tracing` hook uses a global subscriber armed per thread (`credential_revocation_tests` is the pattern).
+- Process-wide state (nesting limit, rayon pool, tracing subscriber) is either made per instance or tested in its own binary; a `tracing` hook uses a global subscriber armed per thread (the `tests/ws` harness is the pattern).
 - A new test binary under `tests/` needs a reason in the PR; the default is a module in the layer's existing binary.
 - Every `.iql` spec uses a unique knowledge graph name (`_n<category>t<file>`) and drops it at the end.
 
@@ -92,10 +92,20 @@ About 3,400 tests, most of them in the engine crate's library binary (about a mi
 
 ```bash
 make integration-test                             # every tests/ binary
-cargo test --all-features --test ws_cancel_tests  # one binary
+cargo test --all-features --test handler          # one layer
+cargo test --all-features --test ws ws_cancel::   # one module of it
 ```
 
-Each binary starts its layer per test (temporary data directory, bootstrap admin, a loopback port for `/ws`). `nesting_depth_tests` stays its own binary because the nesting limit is process-wide. Deadlines and cancellation are tested adversarially over an in-process `/ws` connection by `tests/ws_cancel_tests.rs`: a queued request whose deadline passes or that is cancelled never runs later, a running query stops promptly, and a large write cancelled at increasing delays across its commit boundary always reports an outcome that matches the data, and a blind retry leaves exactly one copy. `tests/replication_tests.rs` runs a primary and a warm-standby follower as two processes: consistent prefixes when the primary dies, partitions, resyncs and synchronous shipping. Credential revocation is covered over a real `/ws` connection by `tests/credential_revocation_tests.rs`; handler unit tests in `src/protocol/handler/credential_mutation_tests.rs` cover failed password and role replacements, user drop and recreation across restart, grants and API keys refused for unknown users, and a bootstrap key that fails to store.
+Component tests are one binary per layer, each a directory with one module per subject and a `harness` module for what the modules share. A new component test is a module of its layer's binary, not a new `tests/*.rs` file.
+
+| Binary | Layer | Driven through |
+|--------|-------|----------------|
+| `tests/storage` | Storage engine and the persist layer: durability, recovery, restart equivalence, the data directory lock, backups, name validation | `StorageEngine` and `FilePersist` in process |
+| `tests/handler` | Programs and their outcomes: statement status and counts, limits, authorization, provenance, indexes, evaluation regressions, server startup | `Handler` in process, no socket |
+| `tests/ws` | The `/ws` protocol: sessions, pipelining, cancellation, delivery, `expect_revision`, notification cursors, credential revocation, login hardening | An in-process server on a loopback port and a raw `/ws` client |
+| `tests/standing_query` | Standing queries, shared views and subscription groups | The same, with its own client |
+
+Each binary starts its layer per test (temporary data directory, bootstrap admin, a loopback port for `/ws`). The modules of a binary share one process: a test that sets a process-wide value (an environment variable, the tracing subscriber, the thread pool size) takes it from the harness or holds the harness's lock for it. `nesting_depth_tests` stays its own binary because the nesting limit is process-wide. Deadlines and cancellation are tested adversarially over an in-process `/ws` connection by `tests/ws/ws_cancel.rs`: a queued request whose deadline passes or that is cancelled never runs later, a running query stops promptly, and a large write cancelled at increasing delays across its commit boundary always reports an outcome that matches the data, and a blind retry leaves exactly one copy. `tests/replication_tests.rs` runs a primary and a warm-standby follower as two processes: consistent prefixes when the primary dies, partitions, resyncs and synchronous shipping. Credential revocation is covered over a real `/ws` connection by `tests/ws/credential_revocation.rs`; handler unit tests in `src/protocol/handler/credential_mutation_tests.rs` cover failed password and role replacements, user drop and recreation across restart, grants and API keys refused for unknown users, and a bootstrap key that fails to store.
 
 ## Tier 3: scenarios
 

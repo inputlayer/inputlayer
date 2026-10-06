@@ -5,6 +5,6 @@
 [modules]
 "src/hnsw_index.rs" = ["12_errors", "16_vectors", "28_docs_coverage", "30_quantization", "31_lsh", "33_meta", "90_product_fixtures"]
 "src/hnsw_index_tests.rs" = ["12_errors", "16_vectors", "28_docs_coverage", "30_quantization", "31_lsh", "33_meta", "90_product_fixtures"]
-"src/provenance" = ["36_explain_trace", "90_product_fixtures"]
+"src/provenance" = ["20_applications", "36_explain_trace", "90_product_fixtures"]
 "src/temporal_ops.rs" = ["18_advanced_patterns", "29_temporal"]
 "src/vector_ops.rs" = ["12_errors", "16_vectors", "28_docs_coverage", "30_quantization", "31_lsh", "33_meta", "90_product_fixtures"]

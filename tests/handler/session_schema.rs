@@ -21,7 +21,7 @@ use std::sync::Arc;
 //
 // For integration tests of actual StorageEngine session functionality, see:
 // - examples/iql/04_session/*.iql (snapshot tests for session lifecycle)
-// - tests/storage_engine_tests.rs (integration tests)
+// - tests/storage/storage_engine.rs (integration tests)
 mod session_data_pattern_tests {
     use super::*;
 

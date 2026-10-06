@@ -1,6 +1,9 @@
 //! Helpers the ws modules share: the configuration of a test server and
 //! serving a handler on a loopback port.
 
+// Test setup aborts on failure; `unwrap` is the intended behavior.
+#![allow(clippy::unwrap_used)]
+
 use inputlayer::protocol::rest::create_router;
 use inputlayer::protocol::Handler;
 use inputlayer::Config;

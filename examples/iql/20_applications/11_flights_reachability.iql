@@ -1,0 +1,62 @@
+// Test: Flights Reachability Lifecycle
+// Description: Direct flights, recursive reachability, new routes, retraction
+// through a diamond, .why / .why_not and a count aggregate. Result columns are
+// named after the query's variables at every step, never col0, col1.
+
+.kg create test_flights_n20t11
+.kg use test_flights_n20t11
+
+// Step 1: direct flights
++direct_flight[("new_york", "london", 7.0), ("london", "paris", 1.5), ("paris", "tokyo", 12.0), ("tokyo", "sydney", 9.5)]
+?direct_flight(From, To, Hours)
+?direct_flight("london", To, Hours)
+
+// Step 2: reachability
++can_reach(A, B) <- direct_flight(A, B, _)
++can_reach(A, C) <- direct_flight(A, B, _), can_reach(B, C)
+?can_reach(From, To)
+?can_reach("new_york", "sydney")
+?can_reach("new_york", Dest)
+
+// Columns follow the variables of each query
+?can_reach(Origin, Destination)
+?can_reach(X, Y)
+
+// Provenance
+.why ?can_reach("new_york", "sydney")
+.why_not can_reach("new_york", "sao_paulo")
+
+// Hub score: reachable destinations per city
++hub_score(City, count<Dest>) <- can_reach(City, Dest)
+?hub_score(City, Score)
+
+// Step 3: a new route reaches the derived relation
++direct_flight("london", "dubai", 7.0)
+?direct_flight(From, To, Hours)
+?can_reach(From, To)
+?can_reach(Src, Dst)
+?can_reach("new_york", Dest)
+
+// Step 4: two independent paths to sydney
++direct_flight("dubai", "sydney", 11.0)
+?can_reach("new_york", "sydney")
+
+// Removing one path keeps sydney reachable
+-direct_flight("london", "dubai", 7.0)
+?can_reach("new_york", "sydney")
+?can_reach(From, To)
+
+// Removing the other makes it unreachable
+-direct_flight("tokyo", "sydney", 9.5)
+?can_reach("new_york", "sydney")
+?can_reach(From, To)
+
+// A bulk insert and another retraction
++direct_flight[("london", "dubai", 7.0), ("dubai", "singapore", 7.5), ("singapore", "sydney", 8.0)]
+?can_reach(From, To)
+-direct_flight("dubai", "singapore", 7.5)
+?can_reach(From, To)
+
+// Cleanup
+.kg use default
+.kg drop test_flights_n20t11
