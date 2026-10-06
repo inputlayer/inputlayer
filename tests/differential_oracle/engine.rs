@@ -146,8 +146,7 @@ fn start(
     views: Mode,
 ) -> Result<Arc<Handler>, AdapterError> {
     let _guard = runtime.enter();
-    let handler =
-        Arc::new(Handler::from_config(config(dir, views)).map_err(AdapterError::Failed)?);
+    let handler = Arc::new(Handler::from_config(config(dir, views)).map_err(AdapterError::Failed)?);
     {
         let storage = handler.get_storage();
         // Present after a restart; created on first open.
