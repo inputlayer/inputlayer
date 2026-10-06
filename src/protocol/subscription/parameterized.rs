@@ -60,8 +60,8 @@
 //! after each failure, or as soon as it has twice the bindings it had when
 //! it stopped: a verdict reached while views were still subscribing must
 //! not hold for the many more that follow. Nor does it count as a failure:
-//! a family that stopped with more bindings than at its previous verdict
-//! probes again after one commit, and only a failure with no more bindings
+//! a family that stopped with at least twice the bindings of its previous
+//! verdict probes again after one commit, and only a failure with fewer
 //! than that makes it wait longer. While sharing, a view evaluates its own
 //! query now and then to keep that cost current.
 
@@ -515,7 +515,7 @@ pub struct Family {
     round_gate: tokio::sync::RwLock<()>,
     /// Own evaluations since sharing stopped.
     own_since_stop: AtomicU64,
-    /// Times sharing stopped, with no more bindings than at the verdict
+    /// Times sharing stopped, with under twice the bindings of the verdict
     /// before, since a round last kept it.
     stops: AtomicU64,
     /// Bindings at the last verdict (0: none yet).
@@ -799,8 +799,8 @@ impl Family {
     }
 
     /// Stop sharing on a verdict under `rules`, unless the family no longer
-    /// judges them. It counts as a failure only with no more bindings than
-    /// at the verdict before: a family still growing is not judged for good.
+    /// judges them. It counts as a failure only with under twice the bindings
+    /// of the verdict before: a family still growing is not judged for good.
     fn stop_sharing(&self, rules: &Arc<PersistentRules>) {
         if !self.judges(rules) {
             return;
@@ -808,7 +808,8 @@ impl Family {
         self.own_since_stop.store(0, Ordering::Relaxed);
         self.shared_cost_us.store(0, Ordering::Relaxed);
         let bindings = self.bindings.load(Ordering::Relaxed) as u64;
-        if bindings <= self.judged_at_bindings.swap(bindings, Ordering::Relaxed) {
+        let judged_at = self.judged_at_bindings.swap(bindings, Ordering::Relaxed);
+        if bindings < judged_at.saturating_mul(2) {
             self.stops.fetch_add(1, Ordering::Relaxed);
         }
         self.sharing.store(false, Ordering::Relaxed);

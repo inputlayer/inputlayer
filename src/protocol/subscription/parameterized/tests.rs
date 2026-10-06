@@ -699,8 +699,8 @@ mod rounds {
 
     /// Verdicts against a family as its views subscribe, each with twice the
     /// bindings of the one before, count no failure: at its full size it
-    /// probes again after one commit, and only a second verdict against it
-    /// there makes it wait longer.
+    /// probes again after one commit, and a verdict against it there makes
+    /// it wait longer.
     #[tokio::test(flavor = "multi_thread")]
     async fn failures_while_a_family_grows_do_not_lengthen_its_wait() {
         let (handler, _tmp) = handler_with(8);
@@ -731,11 +731,43 @@ mod rounds {
         };
         assert_eq!(commit(&family), 1, "judged at full size after a commit");
         family.stop_sharing(rules);
-        assert_eq!(family.stops.load(Ordering::Relaxed), 0, "grown since 576");
-        assert_eq!(commit(&family), 1, "and once more");
-        family.stop_sharing(rules);
         assert_eq!(family.stops.load(Ordering::Relaxed), 1, "settled");
         assert_eq!(commit(&family), 0, "backing off");
+    }
+
+    /// A family too slow to share that gains a view between commits is not
+    /// still growing: the verdict a commit after its first counts, and it
+    /// probes no more until its bindings double.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_family_gaining_a_view_per_commit_does_not_probe_on_every_commit() {
+        let (handler, _tmp) = handler_with(8);
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut views = keyed(&families, &handler, &metrics, 1, 9).await;
+        let family = Arc::clone(&views[0].family);
+        let snapshot = handler.get_storage().get_snapshot_for(KG).unwrap();
+        let rules = snapshot.persistent_rules();
+        let own = std::time::Duration::from_millis(1);
+        assert!(family.record_own(own, &snapshot), "never judged");
+        family.stop_sharing(rules);
+        assert_eq!(family.stops.load(Ordering::Relaxed), 0, "a first verdict");
+
+        // Each commit evaluates every view's own query, and a probe that
+        // starts is judged too slow.
+        let mut probes = Vec::new();
+        for bindings in 10..=19 {
+            subscribe(&mut views, &families, &handler, &metrics, bindings);
+            let due = (0..bindings).filter(|_| family.record_own(own, &snapshot));
+            probes.push(due.count());
+            if probes.last() != Some(&0) {
+                family.stop_sharing(rules);
+            }
+        }
+        assert_eq!(probes, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(family.stops.load(Ordering::Relaxed), 1);
+
+        subscribe(&mut views, &families, &handler, &metrics, 20);
+        assert!(family.record_own(own, &snapshot), "twice the 10 judged");
     }
 
     /// Views of `?reach("nK", Y)` for `bindings` nodes near the end of a
