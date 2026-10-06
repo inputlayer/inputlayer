@@ -4,12 +4,20 @@
 //! (each graph reconciled, graphs the primary lacks dropped) and then events
 //! in LSN order. After each applied frame it saves its position and acks.
 //! Silence longer than `replication.timeout_ms`, a gap in LSNs, or any error
-//! ends the connection; it reconnects with backoff. A failed apply or a gap
+//! ends the connection; it reconnects with backoff.
+//!
+//! Reading and applying run apart, so a graph that takes long to apply does
+//! not stop the follower reading: one task reads the socket into a bounded
+//! buffer (the `buffer` module), the session applies from it, and a third
+//! task sends the acks and, every `replication.heartbeat_ms` without one, a
+//! ping. When the buffer is full the reader waits and the primary's send
+//! blocks; the pings tell the primary the follower is busy, not gone. A failed apply or a gap
 //! clears the position, so the next connection resyncs from a checkpoint.
 //! Consecutive resyncs that end before the follower catches up with the
 //! primary's head back off further, up to `MAX_RESYNC_BACKOFF`, so a resync that cannot finish does
 //! not cost the primary a checkpoint every few seconds.
 
+use super::buffer::{buffer, Filler, BUFFER_BYTES};
 use super::{
     decode_frame, FollowerMessage, FollowerState, PrimaryMessage, StartMode, MAX_FRAME_BYTES,
 };
@@ -19,11 +27,12 @@ use crate::replication::event::{decode_line, split_lines};
 use crate::replication::position::position_path;
 use crate::replication::{Event, Line, Position, ResyncMark};
 use crate::storage_engine::{GraphEvent, GraphState, ReplicaChange};
-use futures_util::{FutureExt, SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::task::JoinHandle;
+use tokio::sync::mpsc;
+use tokio::task::{JoinHandle, JoinSet};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
@@ -166,19 +175,24 @@ impl Follower {
 
         let handler = Arc::clone(&self.handler);
         let status = handler.replication_status();
+        let (sink, stream) = ws.split();
+        let (filler, mut received) = buffer(BUFFER_BYTES);
+        let (acks, outgoing) = mpsc::channel(ACKS_QUEUED);
+        // Dropped with the session, which ends both tasks and the connection.
+        let mut tasks = JoinSet::new();
+        let heard = Arc::clone(&handler);
+        tasks.spawn(read(stream, filler, timeout, move || {
+            heard.replication_status().contact(0);
+        }));
+        let idle = Duration::from_millis(config.heartbeat_ms);
+        tasks.spawn(write(sink, outgoing, idle));
         let mut resync: Option<Resync> = None;
         let mut stream_id = 0;
         loop {
-            let message = match tokio::time::timeout(timeout, ws.next()).await {
-                Err(_) => {
-                    return Err(format!(
-                        "no word from the primary for {} ms",
-                        timeout.as_millis()
-                    ))
-                }
-                Ok(None) => return Err("the primary closed the stream".into()),
-                Ok(Some(Err(e))) => return Err(e.to_string()),
-                Ok(Some(Ok(message))) => message,
+            let message = match received.next().await {
+                None => return Err("the stream reader stopped".into()),
+                Some(Err(e)) => return Err(e),
+                Some(Ok(message)) => message,
             };
             match message {
                 Message::Text(text) => {
@@ -220,6 +234,8 @@ impl Follower {
                     if head > 0 {
                         status.contact(head);
                     }
+                    // Why the stream ended, when it did behind frames still to apply.
+                    let mut ended = None;
                     let lsn = if first == 0 {
                         let state = resync.as_mut().ok_or("checkpoint data outside a resync")?;
                         match self.resync_lines(state, lines.to_vec(), stream_id).await? {
@@ -241,11 +257,11 @@ impl Follower {
                         let mut head = head;
                         let mut next = first + split_lines(lines).count() as u64;
                         while batch.len() < BATCH_BYTES {
-                            let Some(message) = ws.next().now_or_never() else {
+                            let Some(message) = received.ready() else {
                                 break;
                             };
                             match message {
-                                Some(Ok(Message::Binary(frame))) => {
+                                Ok(Message::Binary(frame)) => {
                                     let (more, more_head, lines) = decode_frame(&frame)?;
                                     if more != next {
                                         return Err(format!(
@@ -258,22 +274,20 @@ impl Follower {
                                     next += split_lines(lines).count() as u64;
                                     batch.extend_from_slice(lines);
                                 }
-                                Some(Ok(Message::Text(text))) => {
-                                    match serde_json::from_str(&text) {
-                                        Ok(PrimaryMessage::Heartbeat { head }) => {
-                                            status.contact(head);
-                                            caught_up = true;
-                                        }
-                                        Ok(PrimaryMessage::Error { message }) => {
-                                            return Err(message)
-                                        }
-                                        _ => return Err(format!("unexpected message: {text}")),
+                                Ok(Message::Text(text)) => match serde_json::from_str(&text) {
+                                    Ok(PrimaryMessage::Heartbeat { head }) => {
+                                        status.contact(head);
+                                        caught_up = true;
                                     }
+                                    Ok(PrimaryMessage::Error { message }) => return Err(message),
+                                    _ => return Err(format!("unexpected message: {text}")),
+                                },
+                                Ok(_) => {}
+                                // Apply what arrived first.
+                                Err(e) => {
+                                    ended = Some(e);
+                                    break;
                                 }
-                                Some(Ok(_)) => {}
-                                Some(Err(e)) => return Err(e.to_string()),
-                                // Closed: apply what arrived; the next read reports it.
-                                None => break,
                             }
                         }
                         let lsn = self.apply_events(stream_id, first, batch).await?;
@@ -284,11 +298,13 @@ impl Follower {
                     };
                     self.streamed = true;
                     let ack = FollowerMessage::Ack { lsn };
-                    ws.send(Message::Text(json(&ack)))
+                    acks.send(Message::Text(json(&ack)))
                         .await
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|_| "the stream closed before an ack was sent")?;
+                    if let Some(e) = ended {
+                        return Err(e);
+                    }
                 }
-                Message::Close(_) => return Err("the primary closed the stream".into()),
                 _ => {}
             }
         }
@@ -499,10 +515,220 @@ impl Follower {
     }
 }
 
+/// Acks waiting to be sent (one per applied batch).
+const ACKS_QUEUED: usize = 16;
+
+/// Read `stream` into `buffer` until it fails, closes, or stays silent for
+/// `timeout`; the reason is the buffer's last item. `heard` runs for every
+/// message as it arrives. Time spent waiting for room in a full buffer is
+/// not silence: the primary cannot send then.
+async fn read<S, E>(
+    mut stream: S,
+    buffer: Filler<Result<Message, String>>,
+    timeout: Duration,
+    heard: impl Fn(),
+) where
+    S: Stream<Item = Result<Message, E>> + Unpin,
+    E: std::fmt::Display,
+{
+    loop {
+        let message = match tokio::time::timeout(timeout, stream.next()).await {
+            Err(_) => Err(format!(
+                "no word from the primary for {} ms",
+                timeout.as_millis()
+            )),
+            Ok(None | Some(Ok(Message::Close(_)))) => Err("the primary closed the stream".into()),
+            Ok(Some(Err(e))) => Err(e.to_string()),
+            Ok(Some(Ok(message))) => Ok(message),
+        };
+        let (bytes, last) = match &message {
+            Ok(message) => (message.len(), false),
+            Err(_) => (0, true),
+        };
+        if !last {
+            heard();
+        }
+        if !buffer.push(message, bytes).await || last {
+            return;
+        }
+    }
+}
+
+/// Send each of `outgoing` on `sink`, and a ping whenever `idle` passes
+/// without one, so the primary hears from a follower that is busy applying.
+async fn write<S>(mut sink: S, mut outgoing: mpsc::Receiver<Message>, idle: Duration)
+where
+    S: Sink<Message> + Unpin,
+{
+    loop {
+        let message = match tokio::time::timeout(idle, outgoing.recv()).await {
+            Ok(Some(message)) => message,
+            Ok(None) => return,
+            Err(_) => Message::Ping(Vec::new()),
+        };
+        if sink.send(message).await.is_err() {
+            return;
+        }
+    }
+}
+
 fn follower_name() -> String {
     std::env::var("HOSTNAME").unwrap_or_else(|_| "follower".to_string())
 }
 
 fn json<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value).expect("replication message serializes")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::primary::{send, Outbound};
+    use super::*;
+    use parking_lot::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::io::DuplexStream;
+    use tokio::time::Instant;
+    use tokio_tungstenite::tungstenite::protocol::Role;
+    use tokio_tungstenite::WebSocketStream;
+
+    type Socket = WebSocketStream<DuplexStream>;
+
+    /// The primary's patience with a follower it cannot send to.
+    const SEND_TIMEOUT: Duration = Duration::from_secs(10);
+    const SILENCE: Duration = Duration::from_secs(3);
+    const PING: Duration = Duration::from_millis(500);
+    const FRAME: usize = 256 * 1024;
+    /// 16 MiB of frames, against a 1 MiB receive buffer.
+    const FRAMES: usize = 64;
+    const BUFFER: usize = 1024 * 1024;
+
+    async fn pair() -> (Socket, Socket) {
+        let (primary, follower) = tokio::io::duplex(64 * 1024);
+        (
+            WebSocketStream::from_raw_socket(primary, Role::Server, None).await,
+            WebSocketStream::from_raw_socket(follower, Role::Client, None).await,
+        )
+    }
+
+    fn frame(i: usize) -> Vec<u8> {
+        let mut frame = vec![0; FRAME];
+        frame[..8].copy_from_slice(&(i as u64).to_be_bytes());
+        frame
+    }
+
+    /// Send every frame as the primary does: with its send timeout, hearing
+    /// the follower on a task of its own. Returns the longest one send
+    /// blocked.
+    async fn ship(primary: Socket, sent: Arc<AtomicUsize>) -> Result<Duration, String> {
+        let (sink, mut incoming) = primary.split();
+        let heard = Arc::new(Mutex::new(Instant::now()));
+        let mut out = Outbound {
+            sink,
+            heard: Arc::clone(&heard),
+        };
+        let hearing = tokio::spawn(async move {
+            while let Some(Ok(_)) = incoming.next().await {
+                *heard.lock() = Instant::now();
+            }
+        });
+        let mut longest = Duration::ZERO;
+        for i in 0..FRAMES {
+            let started = Instant::now();
+            let result = send(&mut out, Message::Binary(frame(i)), SEND_TIMEOUT).await;
+            if result.is_err() {
+                hearing.abort();
+            }
+            result?;
+            longest = longest.max(started.elapsed());
+            sent.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(longest)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_follower_busy_applying_keeps_the_stream_and_loses_nothing() {
+        let (primary, follower) = pair().await;
+        let sent = Arc::new(AtomicUsize::new(0));
+        let shipping = tokio::spawn(ship(primary, Arc::clone(&sent)));
+
+        let (sink, stream) = follower.split();
+        let (filler, mut received) = buffer(BUFFER);
+        let (_acks, outgoing) = mpsc::channel(ACKS_QUEUED);
+        let reading = tokio::spawn(read(stream, filler, SILENCE, || {}));
+        let writing = tokio::spawn(write(sink, outgoing, PING));
+
+        // Applying one graph takes six times the primary's send timeout.
+        tokio::time::sleep(SEND_TIMEOUT * 6).await;
+        // The buffer filled and the primary was held back: it sent the
+        // buffer's worth and what the socket holds, not the whole stream.
+        let held_back = sent.load(Ordering::SeqCst);
+        assert!(held_back >= BUFFER / FRAME, "sent {held_back} frames");
+        assert!(held_back <= BUFFER / FRAME + 4, "sent {held_back} frames");
+        assert!(!reading.is_finished() && !shipping.is_finished());
+
+        let mut next = 0;
+        while next < FRAMES {
+            match received.next().await {
+                Some(Ok(Message::Binary(got))) => {
+                    assert!(got == frame(next), "frame {next} arrived out of order");
+                    next += 1;
+                }
+                Some(Ok(_)) => {}
+                other => panic!("the stream ended at frame {next}: {other:?}"),
+            }
+        }
+        let longest = shipping
+            .await
+            .unwrap()
+            .expect("the primary kept the stream");
+        assert!(longest >= SEND_TIMEOUT * 5, "blocked for {longest:?}");
+        reading.abort();
+        writing.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_follower_that_stops_reading_and_is_silent_is_dropped() {
+        let (primary, follower) = pair().await;
+        let started = Instant::now();
+        let shipping = tokio::spawn(ship(primary, Arc::default()));
+
+        // Reads into its buffer but never applies, and never pings.
+        let (_sink, stream) = follower.split();
+        let (filler, _received) = buffer(BUFFER);
+        let reading = tokio::spawn(read(stream, filler, SILENCE, || {}));
+
+        let error = shipping.await.unwrap().expect_err("the send gives up");
+        assert!(error.contains("silent for 10000 ms"), "{error}");
+        assert!(started.elapsed() < SEND_TIMEOUT * 2);
+        reading.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn silence_from_the_primary_ends_the_stream_but_a_full_buffer_does_not() {
+        let (mut primary, follower) = pair().await;
+        let (_sink, stream) = follower.split();
+        // Room for one message.
+        let (filler, mut received) = buffer(1);
+        let heard = Arc::new(AtomicUsize::new(0));
+        let count = Arc::clone(&heard);
+        let reading = tokio::spawn(read(stream, filler, SILENCE, move || {
+            count.fetch_add(1, Ordering::SeqCst);
+        }));
+        for i in 0..3 {
+            primary.send(Message::Binary(vec![i])).await.unwrap();
+        }
+
+        // The reader waits for room far longer than the silence timeout.
+        tokio::time::sleep(SILENCE * 10).await;
+        assert!(!reading.is_finished());
+        assert_eq!(heard.load(Ordering::SeqCst), 2);
+        for i in 0..3 {
+            assert_eq!(received.next().await, Some(Ok(Message::Binary(vec![i]))));
+        }
+        // Now it is reading again, and the primary says nothing.
+        let silence = received.next().await.expect("the reason").unwrap_err();
+        assert_eq!(silence, "no word from the primary for 3000 ms");
+        assert_eq!(received.next().await, None);
+        reading.await.unwrap();
+    }
 }

@@ -320,7 +320,8 @@ role = "standalone"
 # from (default 64 MiB). A follower further behind resyncs from a checkpoint.
 retain_bytes = 67108864
 
-# Primary: heartbeat interval on an idle stream, in ms.
+# Primary: heartbeat interval on an idle stream, in ms. Follower: how often
+# it pings the primary when it has nothing to acknowledge.
 heartbeat_ms = 500
 
 # Follower: the primary's HTTP base URL.
