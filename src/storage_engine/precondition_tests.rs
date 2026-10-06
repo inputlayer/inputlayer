@@ -197,7 +197,7 @@ fn revisions_not_issued_or_from_before_the_graph_existed_are_refused() {
     let temp = TempDir::new().unwrap();
     let storage = open(&temp);
     storage.insert_tuples_into(KG, "eta", vec![t(1)]).unwrap();
-    let future = super::super::snapshot::last_revision() + 1_000_000;
+    let future = super::super::revisions::last_revision() + 1_000_000;
     assert!(matches!(
         commit(&storage, "claim", 1, &expect(future, None)),
         Err(PreconditionError::Unissued { revision, .. }) if revision == future

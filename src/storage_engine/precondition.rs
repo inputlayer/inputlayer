@@ -14,12 +14,13 @@
 //! exactly against the snapshot a program commits on, under the KG's write
 //! lock, so the commit and the check see the same state.
 //!
-//! Revisions restart with the engine, and the change log only knows the
-//! knowledge graph from its first snapshot in this engine run
-//! ([`ChangeLog::since`]): a revision older than that fails, because what
-//! changed before it is unknown here.
+//! The change log only knows the knowledge graph from its first snapshot in
+//! this engine run ([`ChangeLog::since`]): a revision older than that fails,
+//! because what changed before it is unknown here. Every revision of an
+//! earlier run is older: a restarted engine continues above them (see
+//! [`super::revisions`]).
 
-use super::snapshot::last_revision;
+use super::revisions::last_revision;
 use super::KnowledgeGraphSnapshot;
 use crate::ast::dependencies::DependencyClosure;
 use crate::ast::Rule;

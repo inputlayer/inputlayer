@@ -47,6 +47,7 @@ mod replica;
 #[cfg(test)]
 mod replica_tests;
 mod residency;
+mod revisions;
 mod snapshot;
 mod vector_index;
 mod write_program;
@@ -213,6 +214,9 @@ pub struct StorageEngine {
     /// A replication follower: client writes are refused and only the
     /// replication applier changes state (see `replica`).
     replica: AtomicBool,
+    /// The durable bound on this engine's revisions, raised while it is open.
+    /// Declared before the lock: no raise writes the directory once it is free.
+    _revisions: revisions::OpenReservation,
     /// Single-writer ownership of `data_dir` for this engine's lifetime.
     /// Declared last so it is released only after every other field drops.
     _data_dir_lock: DataDirLock,
@@ -272,7 +276,11 @@ impl StorageEngine {
             elapsed_us = lock_start.elapsed().as_micros() as u64,
             "data_dir_lock_acquired"
         );
+        let has_state = config.storage.data_dir.join("persist").exists();
         fs::create_dir_all(config.storage.data_dir.join("metadata"))?;
+        // Before any snapshot: this run's revisions continue above every
+        // revision an earlier run on this directory issued.
+        let revisions = revisions::OpenReservation::open(&config.storage.data_dir, has_state)?;
 
         // Initialize DD-native persist backend
         let persist_config = PersistConfig {
@@ -306,6 +314,7 @@ impl StorageEngine {
             kg_set: RwLock::new(()),
             checkpoint_exports: checkpoint::CheckpointExports::default(),
             replica: AtomicBool::new(false),
+            _revisions: revisions,
             _data_dir_lock: data_dir_lock,
         };
 
@@ -403,6 +412,7 @@ impl StorageEngine {
     /// revision of its first snapshot.
     fn create_graph(&self, name: &str) -> StorageResult<u64> {
         self.persist.check_writable()?;
+        revisions::reserve_ahead()?;
         let start = Instant::now();
         naming::validate_kg_name(name).map_err(StorageError::InvalidName)?;
 
@@ -838,6 +848,7 @@ impl StorageEngine {
         &self,
         kg: &str,
     ) -> StorageResult<(Arc<KnowledgeGraphSnapshot>, RuleCatalog)> {
+        revisions::reserve_ahead()?;
         let db = self.kg_handle(kg)?;
         let db = db.read();
         Ok((db.snapshot(), db.rule_catalog.detached()))
@@ -2678,6 +2689,28 @@ mod tests {
         let live = storage.lock_kg("x").unwrap();
         assert!(live.retired.is_none());
         assert!(!Arc::ptr_eq(&stale, ArcRwLockWriteGuard::rwlock(&live)));
+    }
+
+    #[test]
+    fn test_dropping_a_graph_named_metadata_keeps_the_revision_bound() {
+        let temp = TempDir::new().unwrap();
+        let bound = || {
+            let bytes = fs::read(temp.path().join("revisions.json")).unwrap();
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["reserved"]
+                .as_u64()
+                .unwrap()
+        };
+        let storage = StorageEngine::new(create_test_config(temp.path().to_path_buf())).unwrap();
+        let issued = storage.create_knowledge_graph_at("metadata").unwrap();
+        storage.drop_knowledge_graph("metadata").unwrap();
+        let recorded = bound();
+        assert!(issued <= recorded, "{issued} is above the bound {recorded}");
+        drop(storage);
+
+        let storage = StorageEngine::new(create_test_config(temp.path().to_path_buf())).unwrap();
+        let revision = storage.create_knowledge_graph_at("later").unwrap();
+        assert!(revision > recorded, "{revision} reissues up to {recorded}");
+        assert!(revision <= bound());
     }
 
     fn relation_tuples(storage: &StorageEngine, kg: &str, rel: &str) -> Option<HashSet<Tuple>> {

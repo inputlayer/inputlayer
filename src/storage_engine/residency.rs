@@ -345,6 +345,7 @@ impl StorageEngine {
         &self,
         kg: &str,
     ) -> StorageResult<ArcRwLockWriteGuard<RawRwLock, KnowledgeGraph>> {
+        super::revisions::reserve_ahead()?;
         loop {
             let db = self.kg_handle(kg)?.write_arc();
             match db.retired {

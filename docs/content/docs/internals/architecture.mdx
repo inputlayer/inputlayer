@@ -62,7 +62,7 @@ No component keeps rule results between queries. Derived relations exist only in
 
 **Key Features**:
 - **DashMap** enables concurrent access to different KGs without global locking
-- **Revisions** from one counter shared by every knowledge graph of the engine run; each published snapshot gets the next one
+- **Revisions** from one counter shared by every knowledge graph; each published snapshot gets the next one, and a restarted engine continues above every revision its earlier runs issued
 - **Per-KG locking** allows parallel queries to different knowledge graphs
 
 ### 2.2 KnowledgeGraph

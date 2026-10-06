@@ -197,7 +197,7 @@ An `execute` that writes can say which state it was decided on. `expect_revision
 |---|---|
 | `expect_revision` | The revision the program was decided on. |
 | `expect_relations` | The scope: these relations and every relation they are derived from through persistent rules. Without it, the scope is the whole knowledge graph. A name that is not a relation, rule or schema of the knowledge graph fails with `validation`, so a misspelling cannot pass silently. |
-| `expect_epoch` | The stream epoch (`authenticated.stream_epoch`) the revision belongs to. Revisions restart with the engine, so a revision from another run fails the precondition. |
+| `expect_epoch` | The stream epoch (`authenticated.stream_epoch`) the revision belongs to. A revision from another run fails the precondition with or without it: a restarted engine continues above every revision its earlier runs issued. |
 
 If anything in scope changed, the program applies nothing and fails with code `precondition_failed`. The message names the relation (or the rules) that changed and the revision it changed at. Sending the same request again cannot succeed: read the state again and decide again. Of several writers that expect the same revision of the same scope, at most one commits, but only when each writer's program writes a relation in that scope. Writes outside the scope do not refuse each other: in the example above, two deciders writing `claim` with `expect_relations: ["eta"]` can both commit. Racing deciders that write a claim relation should include it in `expect_relations`, or rely on the claim guard.
 

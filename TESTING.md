@@ -225,11 +225,10 @@ subscription and subscription-group adapters must agree at every checkpoint,
 and the reference must model the whole history.
 
 Where the strategy's table and the documented contract differ, a scenario
-asserts the contract and says so in its doc comment: revisions restart with
-the engine and are paired with the run's stream epoch (S12 asserts a new epoch,
-a refused pre-crash `expect_revision` pinned to its epoch, and, as an expected
-failure (#380), a refused bare pre-crash `expect_revision` once the new run
-has issued that revision again; it also asserts the notifications after the
+asserts the contract and says so in its doc comment: a restarted engine
+continues above every revision of its earlier runs and starts a new stream
+epoch (S12 asserts a new epoch, and a refused pre-crash `expect_revision` both
+pinned to its epoch and bare (#380); it also asserts the notifications after the
 reconnect are exactly the new run's writes with contiguous `seq`), and a `writer` key may subscribe on
 its own graph (S15 refuses its access to the other graph instead). S15 also
 asserts that each permission refusal carries the code `access_denied`.
@@ -328,8 +327,7 @@ once #377 was fixed).
 
 Tracked defects run as **expected failures** through
 `inputlayer_testkit::KnownDefect`, naming the issue that fixes them (the
-milestone 9 ones are listed under Expected-failure scenarios;
-`restart::s12_restart_mid_scenario_preserves_revisions`, #380). Each asserts the
+milestone 9 ones are listed under Expected-failure scenarios). Each asserts the
 correct contract; its own violation passes as `XFAIL`, any other violation
 fails, and a holding contract fails as `XPASS` so the marker is removed and
 the scenario becomes required when the issue lands. `make unit-test`,

@@ -16,27 +16,17 @@
 //! exactly the new run's writes, with contiguous `seq`; a write still
 //! expecting a pre-crash revision is refused.
 //!
-//! Revisions restart with the engine and are paired with the run's stream
-//! epoch (`ClientFrame::Execute::expect_epoch`), so the scenario asserts a new
-//! epoch where the strategy's table asked for the first post-restart revision
-//! to exceed the last pre-crash one, and a pre-crash revision pinned to its
-//! epoch is refused. A bare pre-crash `expect_revision` (no epoch) must be
-//! refused too: the writer advances the new run until it has issued the
-//! pre-crash claim's revision, and a claim expecting that revision, scoped to
-//! `claim` so the stock writes are not what refuses it, is accepted today
-//! (expected failure, #380).
-use inputlayer_testkit::{Agent, Checked, Expect, KnownDefect, Reproduction, Violation, WsClient};
+//! A restarted engine continues above every revision of its earlier runs and
+//! starts a new stream epoch (`ClientFrame::Execute::expect_epoch`): the
+//! scenario asserts the new epoch, and that a pre-crash revision is refused
+//! both pinned to its epoch and bare (no epoch, #380). The bare claim is
+//! scoped to `claim`, so the stock writes are not what refuses it: its
+//! revision predates the knowledge graph in this run.
+use inputlayer_testkit::{Agent, Checked, Expect, Violation, WsClient};
 use serde_json::json;
 
 use crate::lifecycle::{up_to_claim, Lifecycle, KG, MINE, OFFERS};
 use crate::support::{committed, fresh, refused, write_revision, write_revision_matches_delta};
-
-const STALE_REVISION_ACCEPTED: KnownDefect = KnownDefect {
-    plan_item: "#380",
-    summary: "a pre-crash expect_revision without expect_epoch passes on the new run's revision",
-    signature: |v| matches!(v, Violation::Transport(m) if m.contains("the request succeeded")),
-    reproduction: Reproduction::Deterministic,
-};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s12_restart_mid_scenario_preserves_revisions() -> Checked<()> {
@@ -78,6 +68,10 @@ async fn s12_restart_mid_scenario_preserves_revisions() -> Checked<()> {
 
     // Resubscribe: the pre-crash views plus the committed claim.
     let snapshot = agent.subscribe("mine", MINE).await?.revision;
+    assert!(
+        snapshot > claimed_at,
+        "the first revision after the restart exceeds the last one before it"
+    );
     assert_eq!(agent.view("mine").rows, mine_before);
     agent.subscribe("offers", OFFERS).await?;
     assert_eq!(
@@ -92,8 +86,7 @@ async fn s12_restart_mid_scenario_preserves_revisions() -> Checked<()> {
         .view("offers")
         .assert_matches(&fresh(&mut auditor, OFFERS).await?)?;
 
-    // The writer continues until the new run has issued the pre-crash claim's
-    // revision: deltas name the new run's revisions, increasing.
+    // The writer continues: deltas name the new run's revisions, increasing.
     let mut previous = snapshot;
     let mut operations = Vec::new();
     let i13 = [json!(["o-42", "i13", "in_stock"])];
@@ -112,7 +105,7 @@ async fn s12_restart_mid_scenario_preserves_revisions() -> Checked<()> {
             (&i14[..], &[][..]),
         ),
     ];
-    for (program, operation, (inserted, retracted), (offered, withdrawn)) in writes.iter().cycle() {
+    for (program, operation, (inserted, retracted), (offered, withdrawn)) in &writes {
         let write = committed(writer.try_execute(program).await?)?;
         let delta = agent.next_delta("mine").await?;
         delta.assert_rows(inserted, retracted)?;
@@ -126,9 +119,6 @@ async fn s12_restart_mid_scenario_preserves_revisions() -> Checked<()> {
         offers.assert_rows(offered, withdrawn)?;
         write_revision_matches_delta(&write, &offers)?;
         operations.push(*operation);
-        if operations.len() >= writes.len() && previous >= claimed_at {
-            break;
-        }
     }
 
     // One replay_gap notice, then exactly this run's writes, seq contiguous.
@@ -180,13 +170,16 @@ async fn s12_restart_mid_scenario_preserves_revisions() -> Checked<()> {
         .view("offers")
         .assert_matches(&fresh(&mut auditor, OFFERS).await?)?;
 
-    // The same pre-crash revision without its epoch, now issued again by the
-    // new run, must be refused as well.
+    // The same pre-crash revision without its epoch is refused as well,
+    // nothing applied.
     let bare = Expect::at(claimed_at).relations(&["claim"]);
     let reply = agent
         .client_mut()
         .try_execute_expecting(claim_i4, &bare)
         .await?;
-    STALE_REVISION_ACCEPTED.judge(refused(reply, "precondition_failed", "revision").map(drop));
+    refused(reply, "precondition_failed", "predates")?;
+    agent
+        .view("offers")
+        .assert_matches(&fresh(&mut auditor, OFFERS).await?)?;
     Ok(())
 }

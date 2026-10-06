@@ -52,9 +52,8 @@ pub enum ClientFrame {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         expect_relations: Option<Vec<String>>,
         /// The stream epoch (`authenticated.stream_epoch`) `expect_revision`
-        /// belongs to: revisions restart with the engine, so a revision from
-        /// another engine run fails the precondition. Requires
-        /// `expect_revision`.
+        /// belongs to: a revision from another engine run fails the
+        /// precondition, with or without it. Requires `expect_revision`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         expect_epoch: Option<String>,
     },
