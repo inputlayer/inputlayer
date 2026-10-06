@@ -135,6 +135,43 @@ max_query_memory_bytes = 4294967296
 # the graph's stored size.
 max_graph_memory_bytes = 0
 
+# Admission of computations to the compute pool. Every query, write, proof,
+# read and subscription refresh holds one compute permit while it runs, and
+# waits for it on a lane: interactive work, writes or background refreshes.
+# Lanes share the permits by the time their computations hold them, weighted;
+# a lane under its min_permits is served first; none holds more than its
+# max_permits (0 = every permit). A lane's queue holds at most max_queued
+# requests (0 = no bound), and no request waits past its deadline or
+# max_wait_ms: past either it is refused with `overloaded` and never runs.
+[storage.performance.admission]
+# Computations that run at once (0 = the cores not reserved for I/O: about a
+# quarter, at least two, handle connections; the rest compute)
+compute_permits = 0
+max_wait_ms = 30000
+
+# Queries, reads, proofs, session queries, read-only commands
+[storage.performance.admission.interactive]
+weight = 4
+min_permits = 1
+max_permits = 0
+max_queued = 4096
+
+# Programs that commit facts, schemas or rules, and commands that change
+# durable state (index builds, graph and user management)
+[storage.performance.admission.write]
+weight = 2
+min_permits = 1
+max_permits = 0
+max_queued = 4096
+
+# Subscription refreshes and shared standing-query rounds (bounded by the
+# views that exist, each refreshing at most once at a time)
+[storage.performance.admission.background]
+weight = 2
+min_permits = 1
+max_permits = 0
+max_queued = 0
+
 [optimization]
 # Enable join spanning tree planning
 # Optimizes join order for better performance

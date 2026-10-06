@@ -25,7 +25,7 @@ pub use agent::{Agent, Delta, View};
 pub use client::{Commit, Expect, QueryResult, Refusal, WsClient};
 pub use contract::{Checked, Violation};
 pub use counters::Counters;
-pub use engine::{Engine, EngineBuilder, Mode, Replication};
+pub use engine::{AdmissionSettings, Engine, EngineBuilder, Mode, Replication};
 pub use fixture::{Fixture, Size};
 pub use known_defect::{KnownDefect, Reproduction, XFAIL_LOG_ENV};
 pub use metrics::SampleLog;

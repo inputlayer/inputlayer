@@ -168,7 +168,10 @@ export interface TimingBreakdown {
  * time; it is applied there, so do not retry it as a failed write.
  * `access_denied` refuses what the caller may not do (its role, write grants
  * or API key scope do not allow a statement, or its credential was revoked or
- * has expired); nothing ran.
+ * has expired); nothing ran. `overloaded` refuses a request the engine could
+ * not admit to compute in time (its lane's queue was full, or no compute
+ * permit came within the engine's longest admission wait); nothing ran, so
+ * retry later with backoff.
  */
 export type ErrorCode =
   | 'store_read_only'
@@ -184,7 +187,8 @@ export type ErrorCode =
   | 'outcome_unknown'
   | 'resource_exhausted'
   | 'replica_unconfirmed'
-  | 'access_denied';
+  | 'access_denied'
+  | 'overloaded';
 
 /** A failed statement of a multi-statement program (0-based `index`). */
 export interface StatementError {

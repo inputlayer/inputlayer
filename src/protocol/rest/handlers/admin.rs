@@ -333,6 +333,77 @@ fn prometheus_text(handler: &Handler) -> String {
         "Compute permits held by queries running now.",
         handler.compute_permits_in_use(),
     );
+    {
+        use crate::protocol::handler::admission::Lane;
+        let lanes = [
+            Lane::Interactive,
+            Lane::Write,
+            Lane::Background,
+            Lane::Probe,
+        ];
+        let stats: Vec<_> = lanes
+            .iter()
+            .map(|lane| (lane.name(), handler.admission().stats(*lane)))
+            .collect();
+        let label = |lane: &'static str| vec![("lane", lane.to_string())];
+        out.family(
+            "inputlayer_admission_running",
+            "gauge",
+            "Computations holding a compute permit now, by lane.",
+            stats.iter().map(|(lane, s)| (label(lane), s.running)),
+        );
+        out.family(
+            "inputlayer_admission_queued",
+            "gauge",
+            "Requests waiting for a compute permit now, by lane.",
+            stats.iter().map(|(lane, s)| (label(lane), s.queued)),
+        );
+        out.family(
+            "inputlayer_admission_admitted_total",
+            "counter",
+            "Requests admitted to compute, by lane.",
+            stats.iter().map(|(lane, s)| (label(lane), s.admitted)),
+        );
+        out.family(
+            "inputlayer_admission_refused_total",
+            "counter",
+            "Requests refused with overloaded, by lane and reason: queue_full (the lane's max_queued) or timeout (max_wait_ms).",
+            stats.iter().flat_map(|(lane, s)| {
+                [
+                    (
+                        vec![("lane", (*lane).to_string()), ("reason", "queue_full".to_string())],
+                        s.rejected_full,
+                    ),
+                    (
+                        vec![("lane", (*lane).to_string()), ("reason", "timeout".to_string())],
+                        s.timed_out,
+                    ),
+                ]
+            }),
+        );
+        out.family(
+            "inputlayer_admission_stopped_waiting_total",
+            "counter",
+            "Requests whose deadline passed or that were cancelled while they waited for a permit, by lane.",
+            stats.iter().map(|(lane, s)| (label(lane), s.stopped_waiting)),
+        );
+        out.family(
+            "inputlayer_admission_wait_seconds_total",
+            "counter",
+            "Time requests spent waiting for a compute permit, summed, by lane.",
+            stats
+                .iter()
+                .map(|(lane, s)| (label(lane), format!("{:.6}", s.wait_ns as f64 / 1e9))),
+        );
+        out.family(
+            "inputlayer_admission_held_seconds_total",
+            "counter",
+            "Time computations held compute permits, summed, by lane.",
+            stats
+                .iter()
+                .map(|(lane, s)| (label(lane), format!("{:.6}", s.held_ns as f64 / 1e9))),
+        );
+    }
 
     // Sessions
     out.single(
@@ -737,6 +808,9 @@ mod tests {
             "inputlayer_persist_flush_failures_total 0",
             "inputlayer_store_read_only 0",
             "inputlayer_compute_permits_in_use 0",
+            "inputlayer_admission_running{lane=\"write\"} 0",
+            "inputlayer_admission_queued{lane=\"background\"} 0",
+            "inputlayer_admission_refused_total{lane=\"interactive\",reason=\"queue_full\"} 0",
             "inputlayer_ws_connections 0",
             "inputlayer_rejections_total{reason=\"ws_connection_limit\"} 0",
             "inputlayer_auth_failures_total{method=\"password\"} 0",

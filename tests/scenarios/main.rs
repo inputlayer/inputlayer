@@ -17,7 +17,8 @@
 //! Modules: `reactive` (the agent subscription path), `stream` (the
 //! notification stream and snapshot handoff), `delivery` (results and deltas
 //! too large for one frame), `saturation` (sessions' deltas while writers
-//! overload the engine), `views` (how reads of deployed rules are answered:
+//! overload the engine), `admission` (cheap queries and honest refusals
+//! while writers and refreshes saturate the engine), `views` (how reads of deployed rules are answered:
 //! the view work counters), `wire` (request correlation) and `harness`
 //! (the testkit pieces the scenarios build on). The strategy's catalogue
 //! scenarios on the shop pack, each naming its captain's table row and the
@@ -36,6 +37,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod admission;
 mod burst;
 mod claims;
 mod consistency;

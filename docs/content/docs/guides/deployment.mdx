@@ -195,8 +195,13 @@ knowledge graph names.
 | `inputlayer_memory_limit_bytes` | gauge | The memory limit of the server's cgroup (container or systemd `MemoryMax=`). Absent without one. |
 | `inputlayer_query_memory_bytes` | gauge | Memory the queries running now hold. |
 | `inputlayer_query_memory_budget_bytes` | gauge | `max_total_query_memory_bytes` in effect (0: no limit). |
-| `inputlayer_compute_permits` | gauge | Queries that compute at once; more wait. |
-| `inputlayer_compute_permits_in_use` | gauge | Queries computing now. |
+| `inputlayer_compute_permits` | gauge | Computations that run at once over every lane; more wait for a permit on their lane. |
+| `inputlayer_compute_permits_in_use` | gauge | Computations holding a permit now. |
+| `inputlayer_admission_running{lane}`, `inputlayer_admission_queued{lane}` | gauge | Computations holding a permit, and requests waiting for one, on each lane (`interactive`, `write`, `background`, `probe`; see [Admission and lanes](#admission-and-lanes)). |
+| `inputlayer_admission_admitted_total{lane}` | counter | Requests admitted to compute, by lane. |
+| `inputlayer_admission_refused_total{lane,reason}` | counter | Requests refused with `overloaded`: `queue_full` (the lane's `max_queued`) or `timeout` (no permit within `max_wait_ms`). |
+| `inputlayer_admission_stopped_waiting_total{lane}` | counter | Requests whose deadline passed, or that were cancelled, while they waited for a permit. |
+| `inputlayer_admission_wait_seconds_total{lane}`, `inputlayer_admission_held_seconds_total{lane}` | counter | Time requests spent waiting for a permit, and time computations held one, summed by lane. `rate(wait)/rate(admitted)` is a lane's mean queueing delay. |
 | `inputlayer_query_{parse,optimize,execute,total}_seconds` | histogram | Query latency by phase (see [Query Profiling](query-profiling)). |
 | `inputlayer_rule_evaluations_total`, `inputlayer_view_reads_total`, `inputlayer_view_maintenance_us_total` | counter | How reads of persistent rules were answered: by evaluating the rules, or from a view, and the microseconds spent keeping views current (see [Query Profiling](query-profiling#prometheus-metrics)). |
 
@@ -253,6 +258,8 @@ Starting points; tune the thresholds to your traffic.
 | Query memory saturated | `inputlayer_query_memory_budget_bytes > 0 and inputlayer_query_memory_bytes / inputlayer_query_memory_budget_bytes > 0.9` | 5m | ticket |
 | Queries refused for memory | `rate(inputlayer_ws_errors_total{code="resource_exhausted"}[5m]) > 0` | 15m | ticket |
 | Compute saturated | `inputlayer_compute_permits_in_use >= inputlayer_compute_permits` | 10m | ticket |
+| Requests refused as overloaded | `rate(inputlayer_admission_refused_total[5m]) > 0` | 5m | page |
+| A lane queueing | `rate(inputlayer_admission_wait_seconds_total{lane="interactive"}[5m]) / rate(inputlayer_admission_admitted_total{lane="interactive"}[5m]) > 0.5` | 10m | ticket |
 | Deadlines missed | `rate(inputlayer_ws_errors_total{code="deadline_exceeded"}[5m]) / rate(inputlayer_queries_total[5m]) > 0.01` | 10m | ticket |
 | Connections near limit | `inputlayer_ws_connections_limit > 0 and inputlayer_ws_connections / inputlayer_ws_connections_limit > 0.8` | 10m | ticket |
 | Connections refused | `sum(rate(inputlayer_rejections_total{reason=~"http_connection_limit\|ws_connection_limit"}[5m])) > 0` | 5m | ticket |
@@ -781,6 +788,48 @@ Each query runs its own Differential Dataflow computation, and concurrent querie
 | Small production | 4 cores |
 | Medium production | 8 cores |
 | Large production | 16+ cores |
+
+### Admission and Lanes
+
+Every computation holds one **compute permit** while it runs: a query, a program that writes, a proof, a `read`, a subscription refresh or a shared standing-query round. The pool holds `storage.performance.admission.compute_permits` permits (default `0`: the cores not reserved for I/O, about three quarters of them), so the server never runs more dataflows at once than it has cores for.
+
+Requests wait for a permit on one of three **lanes**, which share the pool by the time their computations actually hold permits:
+
+| Lane | What runs on it | Default weight |
+|---|---|---|
+| `interactive` | Queries, `read`s, proofs, session queries and commands that change no durable state | 4 |
+| `write` | Programs that commit: facts, schemas, rules, index builds and the other commands that change durable state | 2 |
+| `background` | Subscription refreshes and the shared rounds of standing-query families | 2 |
+
+When a permit frees, the lane that has used the least permit time for its weight gets it, so a lane running cheap work keeps getting through however much another lane queues, and a lane that monopolized the pool yields until the others catch up. Two bounds sit on top of that share: a lane holding fewer than its `min_permits` (default 1) is served before any other, so every lane makes progress while it has work even on a host with two permits; and no lane holds more than its `max_permits` (default `0`: every permit). The pool is work-conserving: a free permit never idles while any lane can use it. Sharing probes of standing-query families hold one permit of their own beside the pool.
+
+Waits are bounded. A lane's queue holds at most `max_queued` requests (default 4,096 for `interactive` and `write`; unbounded for `background`, whose queue is bounded by the views that exist); one more is refused at once. No request waits longer than its own deadline or `max_wait_ms` (default 30,000), whichever is sooner. A request refused for either gets code `overloaded` (or `deadline_exceeded` when its own deadline passed), never runs later, and applied nothing; a request cancelled or disconnected while it waits leaves the queue at once. The `inputlayer_admission_*` [metrics](#metrics) show each lane's running and queued requests, refusals and summed wait and hold times.
+
+```toml
+[storage.performance.admission]
+compute_permits = 0        # 0: cores minus the I/O reserve
+max_wait_ms = 30000
+
+[storage.performance.admission.interactive]
+weight = 4
+min_permits = 1
+max_permits = 0            # 0: every permit
+max_queued = 4096
+
+[storage.performance.admission.write]
+weight = 2
+min_permits = 1
+max_permits = 0
+max_queued = 4096
+
+[storage.performance.admission.background]
+weight = 2
+min_permits = 1
+max_permits = 0
+max_queued = 0             # bounded by the views that exist
+```
+
+Raise the `write` weight, or cap `interactive` with `max_permits`, on a server whose writes matter more than its reads; cap `write` with `max_permits` on a server where many writers commit to one knowledge graph, since each commit serializes on that graph's write lock and a permit held while waiting for it computes nothing.
 
 ### Disk
 

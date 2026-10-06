@@ -91,6 +91,37 @@ pub struct EngineSettings {
     pub ws_max_preauth_per_ip: Option<usize>,
     /// Run the process under `taskset -c <cpus>`; `None` runs it unpinned.
     pub cpus: Option<String>,
+    /// `storage.performance.admission`: the compute pool's size and the
+    /// longest wait for a permit; `None` keeps the defaults.
+    pub admission: Option<AdmissionSettings>,
+}
+
+/// The compute pool's size and the longest admission wait
+/// (`storage.performance.admission`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdmissionSettings {
+    /// `compute_permits`: computations that run at once (0: the engine's
+    /// default, the cores not reserved for I/O).
+    pub compute_permits: usize,
+    /// `max_wait_ms`: longest a request waits for a permit before it is
+    /// refused with `overloaded`.
+    pub max_wait_ms: u64,
+    /// `interactive.max_queued`: most queries waiting on the interactive
+    /// lane (0: no bound).
+    pub interactive_max_queued: usize,
+}
+
+impl AdmissionSettings {
+    /// The `[storage.performance.admission]` table.
+    fn table(self) -> Result<toml::Table> {
+        let mut table = toml::Table::new();
+        table.insert("compute_permits".into(), integer(self.compute_permits)?);
+        table.insert("max_wait_ms".into(), integer_u64(self.max_wait_ms)?);
+        let mut interactive = toml::Table::new();
+        interactive.insert("max_queued".into(), integer(self.interactive_max_queued)?);
+        table.insert("interactive".into(), interactive.into());
+        Ok(table)
+    }
 }
 
 /// The `[replication]` section of an engine's config.
@@ -231,6 +262,14 @@ impl EngineBuilder {
         self
     }
 
+    /// Run with this compute pool and admission wait
+    /// (`storage.performance.admission`).
+    #[must_use]
+    pub fn admission(mut self, admission: AdmissionSettings) -> Self {
+        self.settings.admission = Some(admission);
+        self
+    }
+
     /// Run with this `[replication]` section.
     #[must_use]
     pub fn replication(mut self, replication: Replication) -> Self {
@@ -307,6 +346,12 @@ impl Engine {
     pub async fn metrics(&self) -> Result<Counters> {
         let body = http_get(self.port, "/metrics/prometheus", &self.api_key).await?;
         Ok(Counters::parse(&body))
+    }
+
+    /// The text of `/metrics/prometheus`, for the labelled samples
+    /// [`Counters`] does not parse.
+    pub async fn metrics_text(&self) -> Result<String> {
+        http_get(self.port, "/metrics/prometheus", &self.api_key).await
     }
 
     /// Create user `name` with server role `role` (`admin`, `editor` or `viewer`).
@@ -518,6 +563,9 @@ impl Engine {
         }
         if let Some(depth) = settings.max_nesting_depth {
             performance.insert("max_nesting_depth".into(), integer(depth)?);
+        }
+        if let Some(admission) = settings.admission {
+            performance.insert("admission".into(), admission.table()?.into());
         }
         if !performance.is_empty() {
             storage.insert("performance".into(), performance.into());

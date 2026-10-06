@@ -3,8 +3,8 @@
 //! A `read` pins its knowledge graph's current snapshot once and runs every
 //! query on it, so each result is its query's exact answer at the snapshot's
 //! revision, whatever commits meanwhile. The queries run concurrently under
-//! the request's one deadline and cancellation, each admitted and authorized
-//! as a query of `execute` is; the first failure, stop or deadline stops the
+//! the request's one deadline and cancellation, each admitted (on the
+//! interactive lane) and authorized as a query of `execute` is; the first failure, stop or deadline stops the
 //! queries still computing. A read sees persistent data only, as a
 //! subscription does, so a `read` and a `subscribe` of the same queries agree
 //! at the same revision. It fails as a whole when any query fails.
@@ -83,7 +83,7 @@ impl Handler {
                         text,
                         Some(statements),
                         query_control,
-                        &self.query_semaphore,
+                        super::admission::Lane::Interactive,
                     )
                     .await
                     .and_then(|result| settle_result(result, auth, true))

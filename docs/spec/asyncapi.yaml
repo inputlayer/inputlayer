@@ -983,7 +983,7 @@ components:
 
     ErrorCode:
       type: string
-      enum: [validation, not_found, conflict, unsupported, internal, invalid_request, rate_limited, deadline_exceeded, cancelled, outcome_unknown, store_read_only, resource_exhausted, precondition_failed, replica_unconfirmed, access_denied]
+      enum: [validation, not_found, conflict, unsupported, internal, invalid_request, rate_limited, deadline_exceeded, cancelled, outcome_unknown, store_read_only, resource_exhausted, precondition_failed, replica_unconfirmed, access_denied, overloaded]
       description: |
         Why a statement or request failed. `invalid_request` (malformed frame or `id`)
         and `rate_limited` reject a whole request before anything runs.
@@ -1003,6 +1003,11 @@ components:
         `access_denied`: the caller may not do this (its role, its write grants
         or its API key's scope do not allow the statement, or its credential was
         revoked or has expired); nothing ran.
+        `overloaded`: the server could not admit the request to compute in time:
+        its lane's queue was full, or no compute permit came within the longest
+        admission wait (`storage.performance.admission.max_wait_ms`) while the
+        request's own deadline was later. Nothing ran and nothing was applied;
+        retry later, with backoff.
 
     StatementError:
       type: object

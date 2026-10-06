@@ -329,6 +329,130 @@ pub struct PerformanceConfig {
     /// "off" = no overhead, "summary" = stage totals (default), "detailed" = per-rule breakdown.
     #[serde(default)]
     pub timing_mode: crate::execution::TimingMode,
+
+    /// How computations are admitted to the compute pool: the pool's size,
+    /// the longest wait for a permit, and each lane's share, reserve, cap
+    /// and queue bound.
+    #[serde(default)]
+    pub admission: AdmissionConfig,
+}
+
+/// Admission of computations to the compute pool (see
+/// `protocol::handler::admission`). Every query, write, proof, read and
+/// subscription refresh holds one compute permit while it runs; the lanes
+/// share the permits by the time their computations hold them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdmissionConfig {
+    /// Computations that run at once, over every lane. 0 = the cores not
+    /// reserved for I/O: about a quarter of them (at least two) handle
+    /// connections, the rest compute.
+    #[serde(default)]
+    pub compute_permits: usize,
+    /// Longest a request waits for a permit, in milliseconds, when its own
+    /// deadline is later: past it the request is refused with `overloaded`
+    /// and never runs.
+    #[serde(default = "default_admission_max_wait_ms")]
+    pub max_wait_ms: u64,
+    /// Queries, reads, proofs, session queries and commands that change no
+    /// durable state.
+    #[serde(default = "default_interactive_lane")]
+    pub interactive: LaneConfig,
+    /// Programs that commit: facts, schemas, rules, index builds and the
+    /// other commands that change durable state.
+    #[serde(default = "default_write_lane")]
+    pub write: LaneConfig,
+    /// Subscription refreshes and the shared rounds of standing-query
+    /// families.
+    #[serde(default = "default_background_lane")]
+    pub background: LaneConfig,
+}
+
+/// One lane's share of the compute pool.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LaneConfig {
+    /// The lane's share of permit time against the other lanes' weights
+    /// while all have work (0 counts as 1).
+    #[serde(default = "default_lane_weight")]
+    pub weight: u32,
+    /// Permits the lane is served up to before any other lane, so it keeps
+    /// progressing while it has work however busy the others are.
+    #[serde(default = "default_lane_min_permits")]
+    pub min_permits: usize,
+    /// Most permits the lane holds at once. 0 = every permit.
+    #[serde(default)]
+    pub max_permits: usize,
+    /// Most requests waiting on the lane; one more is refused at once with
+    /// `overloaded`. 0 = no bound (the deadline and `max_wait_ms` still
+    /// bound every wait).
+    #[serde(default)]
+    pub max_queued: usize,
+}
+
+fn default_admission_max_wait_ms() -> u64 {
+    30_000
+}
+
+fn default_lane_weight() -> u32 {
+    1
+}
+
+fn default_lane_min_permits() -> usize {
+    1
+}
+
+/// Requests someone waits for get the largest share.
+fn default_interactive_lane() -> LaneConfig {
+    LaneConfig {
+        weight: 4,
+        min_permits: 1,
+        max_permits: 0,
+        max_queued: 4096,
+    }
+}
+
+fn default_write_lane() -> LaneConfig {
+    LaneConfig {
+        weight: 2,
+        min_permits: 1,
+        max_permits: 0,
+        max_queued: 4096,
+    }
+}
+
+/// Refreshes are bounded by the views that exist, each refreshing at most
+/// once at a time, so the queue needs no bound of its own.
+fn default_background_lane() -> LaneConfig {
+    LaneConfig {
+        weight: 2,
+        min_permits: 1,
+        max_permits: 0,
+        max_queued: 0,
+    }
+}
+
+impl Default for AdmissionConfig {
+    fn default() -> Self {
+        Self {
+            compute_permits: 0,
+            max_wait_ms: default_admission_max_wait_ms(),
+            interactive: default_interactive_lane(),
+            write: default_write_lane(),
+            background: default_background_lane(),
+        }
+    }
+}
+
+impl Default for LaneConfig {
+    fn default() -> Self {
+        Self {
+            weight: default_lane_weight(),
+            min_permits: default_lane_min_permits(),
+            max_permits: 0,
+            max_queued: 0,
+        }
+    }
 }
 
 /// Query optimizer passes applied by every `IQLEngine` the server builds.
@@ -1292,6 +1416,7 @@ impl Config {
                     max_graph_memory_bytes: 0,
                     max_total_query_memory_bytes: None,
                     timing_mode: crate::execution::TimingMode::default(),
+                    admission: AdmissionConfig::default(),
                 },
                 max_knowledge_graphs: 1000,
                 max_loaded_knowledge_graphs: 0,
@@ -1357,6 +1482,7 @@ impl Default for PerformanceConfig {
             max_graph_memory_bytes: 0,          // 0 = unlimited
             max_total_query_memory_bytes: None, // 60% of the container's limit
             timing_mode: crate::execution::TimingMode::default(),
+            admission: AdmissionConfig::default(),
         }
     }
 }

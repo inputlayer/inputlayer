@@ -1,7 +1,8 @@
 //! Running a request's computation under its deadline and cancellation.
 //!
 //! One [`RequestControl`] spans the whole request: waiting for a compute
-//! permit, waiting on the blocking pool, and computing. A request stopped
+//! permit on its lane (see [`super::admission`]), waiting on the blocking
+//! pool, and computing. A request stopped
 //! while it waits never starts; one stopped while it computes is answered at
 //! once and its computation exits at its next cooperative check, which the
 //! evaluator makes every few thousand rows it forms, even inside one
@@ -13,19 +14,15 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
+use super::admission::{Admission, Lane, Permit, Refusal};
 use super::ProgramError;
 use crate::execution::{memory, RequestControl, Stop};
 use crate::protocol::wire::ErrorCode;
 use crate::statement::meta::MetaCommand;
 use crate::statement::Statement;
-
-/// Longest wait for a compute permit, whatever the request's deadline: past
-/// it the server is overloaded and says so rather than queueing further.
-const MAX_ADMISSION_WAIT: Duration = Duration::from_secs(30);
 
 /// How long a stopped computation may take to notice the stop before that
 /// is reported as a fault.
@@ -61,13 +58,14 @@ pub(crate) fn computation_failure_code(code: ErrorCode) -> ErrorCode {
     }
 }
 
-/// Run `job` on the blocking pool under `control`, holding one of
-/// `permits` while it computes. `job` sees `control` as the thread's request
-/// control, so the evaluator's cooperative checks and the commit boundary
-/// observe its deadline and cancellation, and the replication events it
-/// appends count as the request's.
+/// Run `job` on the blocking pool under `control`, holding a compute
+/// permit of `admission` on `lane` while it computes. `job` sees `control`
+/// as the thread's request control, so the evaluator's cooperative checks
+/// and the commit boundary observe its deadline and cancellation, and the
+/// replication events it appends count as the request's.
 pub(super) async fn run_blocking<T, F>(
-    permits: &Arc<Semaphore>,
+    admission: &Admission,
+    lane: Lane,
     control: &Arc<RequestControl>,
     job: F,
 ) -> Result<T, ProgramError>
@@ -75,7 +73,7 @@ where
     T: Send + 'static,
     F: FnOnce() -> Result<T, ProgramError> + Send + 'static,
 {
-    let permit = admit(permits, control).await?;
+    let permit = admit(admission, lane, control).await?;
     let job_control = Arc::clone(control);
     // The request's replication events are appended on the pool's thread.
     let writes = crate::replication::writes::current();
@@ -135,41 +133,58 @@ pub(super) fn statement_gate(statement: &Statement) -> Result<(), Stop> {
     }
 }
 
-/// Wait for a compute permit until `control` stops the request or the
-/// server is overloaded.
+/// Wait for a compute permit on `lane` until `control` stops the request or
+/// the lane refuses it; see [`super::admission`].
 async fn admit(
-    permits: &Arc<Semaphore>,
+    admission: &Admission,
+    lane: Lane,
     control: &RequestControl,
-) -> Result<OwnedSemaphorePermit, ProgramError> {
+) -> Result<Permit, ProgramError> {
     let started = Instant::now();
-    let acquire = tokio::time::timeout(MAX_ADMISSION_WAIT, Arc::clone(permits).acquire_owned());
-    let permit = tokio::select! {
-        biased;
-        acquired = acquire => match acquired {
-            Ok(Ok(permit)) => permit,
-            Ok(Err(_)) => {
-                return Err("Query semaphore closed (server shutting down)".to_string().into())
+    let permit = admission.acquire(lane, control).await.map_err(|refusal| {
+        let queued_ms = started.elapsed().as_millis() as u64;
+        match refusal {
+            Refusal::Stopped(stop) => {
+                // Nothing has started, so nothing can be committing.
+                info!(queued_ms, ?stop, lane = lane.name(), "query_stopped_queued");
+                stop_error(stop)
             }
-            Err(_) => {
-                return Err(format!(
-                    "Server overloaded: query queue full (timed out after {}s)",
-                    MAX_ADMISSION_WAIT.as_secs()
-                )
-                .into())
+            Refusal::QueueFull { lane, limit } => {
+                warn!(lane = lane.name(), limit, "query_refused_queue_full");
+                overloaded(format!(
+                    "Server overloaded: {limit} requests already wait on the {} lane; \
+                         nothing ran. Retry later",
+                    lane.name()
+                ))
             }
-        },
-        stop = control.interrupted() => {
-            // Nothing has started, so nothing can be committing.
-            let stop = stop.unwrap_or(Stop::Cancelled);
-            info!(queued_ms = started.elapsed().as_millis() as u64, ?stop, "query_stopped_queued");
-            return Err(stop_error(stop));
+            Refusal::Timeout { lane, waited } => {
+                warn!(
+                    lane = lane.name(),
+                    waited_ms = waited.as_millis() as u64,
+                    "query_refused_admission_timeout"
+                );
+                overloaded(format!(
+                    "Server overloaded: no compute permit for the {} lane within {} s \
+                         (storage.performance.admission.max_wait_ms); nothing ran. Retry later",
+                    lane.name(),
+                    admission.max_wait().as_secs()
+                ))
+            }
         }
-    };
+    })?;
     let queued_ms = started.elapsed().as_millis() as u64;
     if queued_ms > 0 {
-        info!(queued_ms, "query_semaphore_wait");
+        info!(queued_ms, lane = lane.name(), "query_semaphore_wait");
     }
     Ok(permit)
+}
+
+/// The error of a request the server could not admit.
+fn overloaded(message: String) -> ProgramError {
+    ProgramError {
+        message,
+        code: Some(ErrorCode::Overloaded),
+    }
 }
 
 /// Await `task` under `control`; see the module docs.
@@ -238,18 +253,47 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    fn permits(n: usize) -> Arc<Semaphore> {
-        Arc::new(Semaphore::new(n))
+    fn permits(n: usize) -> Admission {
+        Admission::with_capacity(&crate::config::AdmissionConfig::default(), n)
+    }
+
+    /// A job running on `permits`' interactive lane under `control`.
+    async fn run<T, F>(
+        permits: &Admission,
+        control: &Arc<RequestControl>,
+        job: F,
+    ) -> Result<T, ProgramError>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, ProgramError> + Send + 'static,
+    {
+        run_blocking(permits, Lane::Interactive, control, job).await
+    }
+
+    /// Hold every permit of `permits`.
+    fn hold_all(permits: &Admission) -> Vec<Permit> {
+        permits.try_hold_all().expect("pool idle")
+    }
+
+    /// Wait up to five seconds for a permit to be free.
+    async fn free_permit(permits: &Admission) -> Permit {
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            permits.acquire(Lane::Interactive, &RequestControl::new(None)),
+        )
+        .await
+        .expect("a permit frees")
+        .expect("admitted")
     }
 
     #[tokio::test]
     async fn a_request_stopped_while_queued_never_runs() {
         let permits = permits(1);
-        let held = Arc::clone(&permits).acquire_owned().await.unwrap();
+        let held = hold_all(&permits);
         let control = RequestControl::with_timeout(Some(Duration::from_millis(30)));
         let ran = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&ran);
-        let result = run_blocking(&permits, &control, move || {
+        let result = run(&permits, &control, move || {
             flag.store(true, Ordering::SeqCst);
             Ok(())
         })
@@ -275,7 +319,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(30)).await;
             canceller.cancel();
         });
-        let result = run_blocking(&permits, &control, move || {
+        let result = run(&permits, &control, move || {
             // A computation polling its cooperative check.
             while !crate::code_generator::current_request_control().is_some_and(|c| c.is_stopped())
             {
@@ -287,10 +331,7 @@ mod tests {
         .await;
         assert_eq!(result.unwrap_err().code, Some(ErrorCode::Cancelled));
         // The permit comes back once the computation notices the stop.
-        let permit = tokio::time::timeout(Duration::from_secs(5), permits.acquire())
-            .await
-            .unwrap();
-        assert!(permit.is_ok());
+        let _permit = free_permit(&permits).await;
         assert!(exited.load(Ordering::SeqCst));
     }
 
@@ -299,7 +340,7 @@ mod tests {
         let permits = permits(1);
         let control = RequestControl::with_timeout(Some(Duration::from_millis(20)));
         let (release, gate) = std::sync::mpsc::channel::<()>();
-        let result = run_blocking(&permits, &control, move || {
+        let result = run(&permits, &control, move || {
             // A computation between two of its checks.
             gate.recv().ok();
             Ok(())
@@ -308,19 +349,16 @@ mod tests {
         assert_eq!(result.unwrap_err().code, Some(ErrorCode::DeadlineExceeded));
         // Answered, but still computing: the permit is not free yet.
         tokio::time::sleep(Duration::from_millis(20)).await;
-        assert_eq!(permits.available_permits(), 0);
+        assert_eq!(permits.in_use(), 1);
         release.send(()).unwrap();
-        let permit = tokio::time::timeout(Duration::from_secs(5), permits.acquire())
-            .await
-            .unwrap();
-        assert!(permit.is_ok());
+        let _permit = free_permit(&permits).await;
     }
 
     #[tokio::test]
     async fn a_committing_request_is_awaited_and_reports_its_result() {
         let permits = permits(1);
         let control = RequestControl::with_timeout(Some(Duration::from_millis(20)));
-        let result = run_blocking(&permits, &control, move || {
+        let result = run(&permits, &control, move || {
             let control = crate::code_generator::current_request_control().unwrap();
             control.begin_commit().unwrap();
             // The deadline passes mid-commit.
@@ -336,7 +374,7 @@ mod tests {
     async fn a_panic_after_the_commit_began_is_an_unknown_outcome() {
         let permits = permits(1);
         let control = RequestControl::new(None);
-        let result: Result<(), _> = run_blocking(&permits, &control, move || {
+        let result: Result<(), _> = run(&permits, &control, move || {
             crate::code_generator::current_request_control()
                 .unwrap()
                 .begin_commit()
@@ -351,7 +389,7 @@ mod tests {
     async fn a_result_finished_before_a_cancel_is_kept() {
         let permits = permits(1);
         let control = RequestControl::new(None);
-        let result = run_blocking(&permits, &control, || Ok(7)).await;
+        let result = run(&permits, &control, || Ok(7)).await;
         assert_eq!(result.unwrap(), 7);
         assert_eq!(control.cancel(), crate::execution::Halt::TooLate);
     }

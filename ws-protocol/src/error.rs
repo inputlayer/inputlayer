@@ -51,6 +51,12 @@ pub enum ErrorCode {
     /// key's scope do not allow the statement, or its credential was revoked
     /// or has expired. Nothing ran.
     AccessDenied,
+    /// The server could not admit the request to compute in time: its
+    /// lane's queue was full, or no compute permit came within the longest
+    /// admission wait (`storage.performance.admission.max_wait_ms`) while
+    /// its own deadline was later. Nothing ran and nothing was applied;
+    /// retry later, with backoff.
+    Overloaded,
 }
 
 /// A failed statement of a program.
