@@ -60,10 +60,11 @@
 //! after each failure, or as soon as it has twice the bindings it had when
 //! it stopped: a verdict reached while views were still subscribing must
 //! not hold for the many more that follow. Nor does it count as a failure:
-//! a family that stopped with at least twice the bindings of its previous
-//! verdict probes again after one commit, and only a failure with fewer
-//! than that makes it wait longer. While sharing, a view evaluates its own
-//! query now and then to keep that cost current.
+//! only a stop with under twice the bindings of the previous verdict does,
+//! and makes the family wait longer. A family no failure was counted against
+//! since a round last kept sharing, not even earlier while its views were
+//! subscribing, probes again after one commit. While sharing, a view
+//! evaluates its own query now and then to keep that cost current.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -819,8 +820,9 @@ impl Family {
     /// probe: no parameter binds recursion under `snapshot`'s rules, there
     /// are more bindings than compute permits, and the family was never
     /// judged, has twice the bindings it had when it stopped sharing, or
-    /// enough own evaluations passed since it did: a commit's when that stop
-    /// counted no failure.
+    /// enough own evaluations passed since it did: a commit's only while no
+    /// failure was counted since a round last kept sharing, not even earlier
+    /// while its views were subscribing.
     fn record_own(&self, cost: Duration, snapshot: &KnowledgeGraphSnapshot) -> bool {
         let rules = snapshot.persistent_rules();
         if self.binds_recursion(snapshot) || !self.judges(rules) {
