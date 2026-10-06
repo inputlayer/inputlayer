@@ -305,11 +305,8 @@ async fn handler_with_body_facts() -> (Handler, TempDir) {
 }
 
 /// Bodies at the size limit plan and evaluate end to end, one at a time.
-/// Joins and wide atoms at the limit are too slow to evaluate here. About
-/// 20 s of the PR gate, so it runs with the soak (`scripts/soak.sh`); the
-/// restart case keeps a wide body on the PR gate.
+/// Joins and wide atoms at the limit are too slow to evaluate here.
 #[test]
-#[ignore = "soak: scripts/soak.sh"]
 fn bodies_at_the_size_limit_evaluate() {
     on_engine_threads(async {
         let (handler, _tmp) = handler_with_body_facts().await;

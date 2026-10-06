@@ -13,8 +13,8 @@
 #   --client-cpus LIST pin the soak's clients and verifier with taskset -c LIST
 #
 # The soak also runs the tests too slow for a PR, which are marked #[ignore]:
-# the nesting ceiling sweep and the body size limit evaluation of
-# tests/nesting_depth_tests.rs. Their outcome is the last line of summary.md.
+# the nesting ceiling sweep of tests/nesting_depth_tests.rs. Its outcome is
+# the last line of summary.md.
 #
 # Exit status: 0 when the soak passed, 1 when it failed, 3 on a setup error.
 # result.json and summary.md land in target/soak/runs/<utc-time>/;
@@ -120,8 +120,8 @@ if [ ! -s "$RUN_DIR/summary.md" ]; then
 fi
 echo "=== Nesting ceiling sweep ==="
 SWEEP=0
-cargo test --release --all-features --test nesting_depth_tests -- --ignored --exact --nocapture \
-    terms_at_the_nesting_ceiling_evaluate bodies_at_the_size_limit_evaluate || SWEEP=$?
+cargo test --release --all-features --test nesting_depth_tests \
+    terms_at_the_nesting_ceiling_evaluate -- --ignored --exact --nocapture || SWEEP=$?
 if [ "$SWEEP" -eq 0 ]; then
     printf '\nNesting ceiling sweep: passed\n' >> "$RUN_DIR/summary.md"
 else
