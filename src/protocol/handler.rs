@@ -5945,7 +5945,7 @@ fn parse_program_lines(
 /// syntax tree (see [`crate::params`]); a reference without a value, or one
 /// that cannot stand where it is, fails its statement, and a parameter the
 /// program never references fails the program. Nothing runs then.
-fn parse_bound_program(
+pub(crate) fn parse_bound_program(
     program: &str,
     params: &crate::params::Params,
 ) -> Result<Option<Vec<statement::Statement>>, ProgramError> {

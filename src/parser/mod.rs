@@ -63,6 +63,26 @@ fn too_deep(limit: usize) -> String {
     )
 }
 
+/// `s` as a float literal: decimal digits with an optional sign, fraction
+/// and exponent. `Ok(None)` when `s` is not one, including Rust's own `inf`
+/// and `NaN` spellings, which are identifiers in IQL. A literal beyond
+/// `f64`'s range is an error: neither infinity nor NaN has a JSON form, so
+/// a persistent rule holding one could not be read back (#397).
+pub(crate) fn float_literal(s: &str) -> Result<Option<f64>, String> {
+    let digits = s.strip_prefix(['+', '-']).unwrap_or(s);
+    if !digits.starts_with(|c: char| c.is_ascii_digit() || c == '.') {
+        return Ok(None);
+    }
+    match s.parse::<f64>() {
+        Ok(value) if value.is_finite() => Ok(Some(value)),
+        Ok(_) => Err(format!(
+            "Float literal {s} is out of range (beyond ±{:e})",
+            f64::MAX
+        )),
+        Err(_) => Ok(None),
+    }
+}
+
 /// Deepest parenthesis nesting in `s`, outside string literals.
 fn paren_depth(s: &str) -> usize {
     let (mut depth, mut max) = (0usize, 0usize);
@@ -476,10 +496,8 @@ fn parse_term_at(s: &str, depth: usize) -> Result<Term, String> {
     }
 
     // Try to parse as float (before arithmetic check, to handle scientific notation like 1.0e-3)
-    if let Ok(num) = s.parse::<f64>() {
-        if num.is_finite() {
-            return Ok(Term::FloatConstant(num));
-        }
+    if let Some(num) = float_literal(s)? {
+        return Ok(Term::FloatConstant(num));
     }
 
     // Check for arithmetic expression (contains +, -, *, /, %)
@@ -491,10 +509,10 @@ fn parse_term_at(s: &str, depth: usize) -> Result<Term, String> {
     // Handle negative numbers with spaces
     if s.starts_with('-') {
         let rest = s[1..].trim();
-        if let Ok(num) = rest.parse::<i64>() {
-            return Ok(Term::Constant(-num));
+        if let Some(num) = rest.parse::<i64>().ok().and_then(i64::checked_neg) {
+            return Ok(Term::Constant(num));
         }
-        if let Ok(num) = rest.parse::<f64>() {
+        if let Some(num) = float_literal(rest)? {
             return Ok(Term::FloatConstant(-num));
         }
     }
@@ -555,9 +573,8 @@ fn parse_vector_literal(s: &str) -> Result<Term, String> {
     let values: Result<Vec<f64>, String> = inner
         .split(',')
         .map(|v| {
-            v.trim()
-                .parse::<f64>()
-                .map_err(|_| format!("Invalid vector element: '{}'", v.trim()))
+            float_literal(v.trim())?
+                .ok_or_else(|| format!("Invalid vector element: '{}'", v.trim()))
         })
         .collect();
 
@@ -803,16 +820,17 @@ fn parse_primary(s: &str, depth: usize) -> Result<ArithExpr, String> {
     }
 
     // Try to parse as float constant
-    if let Ok(num) = s.parse::<f64>() {
+    if let Some(num) = float_literal(s)? {
         return Ok(ArithExpr::from_float(num));
     }
 
     // Handle negative numbers
     if s.starts_with('-') {
-        if let Ok(num) = s[1..].trim().parse::<i64>() {
-            return Ok(ArithExpr::Constant(-num));
+        let rest = s[1..].trim();
+        if let Some(num) = rest.parse::<i64>().ok().and_then(i64::checked_neg) {
+            return Ok(ArithExpr::Constant(num));
         }
-        if let Ok(num) = s[1..].trim().parse::<f64>() {
+        if let Some(num) = float_literal(rest)? {
             return Ok(ArithExpr::from_float(-num));
         }
     }
@@ -1981,6 +1999,43 @@ mod tests {
         assert_eq!(rule.to_string(), "r(A) <- n(A0e), A = A0e+A+A, B = A1E-2");
         let rule = parse_rule("r(A) <- n(A), B = A*1.5e-3+2e+1").unwrap();
         assert_eq!(rule.to_string(), "r(A) <- n(A), B = A*0.0015+20.0");
+    }
+
+    #[test]
+    fn float_literals_are_finite_decimals() {
+        assert_eq!(float_literal("1.5e3"), Ok(Some(1500.0)));
+        assert_eq!(float_literal("-.5"), Ok(Some(-0.5)));
+        assert_eq!(float_literal("1e-400"), Ok(Some(0.0)));
+        assert_eq!(float_literal("1.7976931348623157e308"), Ok(Some(f64::MAX)));
+        for word in [
+            "inf",
+            "-inf",
+            "infinity",
+            "NaN",
+            "nan",
+            "+Infinity",
+            "e5",
+            "",
+        ] {
+            assert_eq!(float_literal(word), Ok(None), "{word}");
+        }
+        for huge in ["1e400", "-1.0e309", "+2e308", "1e99999"] {
+            let err = float_literal(huge).unwrap_err();
+            assert!(err.contains("out of range"), "{huge}: {err}");
+        }
+        let err = parse_rule("r(X) <- n(Y), X = Y + 1e400").unwrap_err();
+        assert!(err.contains("out of range"), "{err}");
+    }
+
+    #[test]
+    fn negated_i64_min_does_not_overflow() {
+        let rule = parse_rule("r(X) <- n(Y), X = - -9223372036854775808").unwrap();
+        assert!(
+            matches!(&rule.body[1], BodyPredicate::Comparison(_, _, Term::FloatConstant(v)) if *v == 9.223_372_036_854_776e18),
+            "{rule:?}"
+        );
+        let rule = parse_rule("r(X) <- n(Y), X = Y - -9223372036854775808").unwrap();
+        assert_eq!(rule.body.len(), 2);
     }
 
     mod roundtrip {

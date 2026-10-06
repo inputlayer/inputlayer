@@ -54,6 +54,8 @@ use access::KgReadAccess;
 use in_flight::InFlight;
 use outbound::{encode, Outbound};
 use pipeline::{Access, Released, RequestPipeline, Startable};
+#[cfg(feature = "test-support")]
+pub use request::{decode_frame, DecodedFrame, DecodedJob};
 use request::{Job, Reply, Request};
 
 use crate::auth::{Principal, Role, INTERNAL_KG};

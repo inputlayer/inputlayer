@@ -239,6 +239,76 @@ impl Request {
     }
 }
 
+/// What an authenticated connection makes of a client frame (see
+/// `Request::from_text`), for the fuzz harness.
+#[cfg(feature = "test-support")]
+#[derive(Debug)]
+pub struct DecodedFrame {
+    /// The `id` its replies echo.
+    pub id: Option<RequestId>,
+    /// Whether it may overlap other requests (`Access::Shared`).
+    pub shared: bool,
+    pub job: DecodedJob,
+}
+
+/// `Job`, without the state an admitted request carries.
+#[cfg(feature = "test-support")]
+#[derive(Debug)]
+pub enum DecodedJob {
+    Immediate(ServerFrame),
+    Execute {
+        program: String,
+        params: Params,
+        precondition: bool,
+    },
+    Cancel {
+        target: RequestId,
+    },
+    Read {
+        queries: Vec<NamedQuery>,
+    },
+    Subscribe {
+        name: String,
+        query: String,
+    },
+    SubscribeGroup {
+        name: String,
+        queries: Vec<NamedQuery>,
+    },
+    Unsubscribe {
+        name: String,
+    },
+}
+
+/// Decode `text` as an authenticated connection's client frame.
+#[cfg(feature = "test-support")]
+pub fn decode_frame(text: &str) -> DecodedFrame {
+    let (access, Request { id, job }) = Request::from_text(text);
+    let job = match job {
+        Job::Immediate(frame) => DecodedJob::Immediate(frame),
+        Job::Execute {
+            program,
+            params,
+            precondition,
+            ..
+        } => DecodedJob::Execute {
+            program,
+            params,
+            precondition: precondition.is_some(),
+        },
+        Job::Cancel { target } => DecodedJob::Cancel { target },
+        Job::Read { queries, .. } => DecodedJob::Read { queries },
+        Job::Subscribe { name, query } => DecodedJob::Subscribe { name, query },
+        Job::SubscribeGroup { name, queries } => DecodedJob::SubscribeGroup { name, queries },
+        Job::Unsubscribe { name } => DecodedJob::Unsubscribe { name },
+    };
+    DecodedFrame {
+        id,
+        shared: access == Access::Shared,
+        job,
+    }
+}
+
 /// Programs made only of queries read the connection's KG and session
 /// without changing either, so they may overlap; a malformed query fails
 /// without effect. Anything else (writes, rules, session facts, meta

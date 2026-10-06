@@ -5,7 +5,7 @@ use crate::parser::lexer::{
     code_chars, contains_outside_strings, find_outside_strings, is_string_literal, split_top_level,
     unescape, Angles,
 };
-use crate::parser::{parse_rule, parse_term};
+use crate::parser::{float_literal, parse_rule, parse_term};
 
 /// Sort direction for query result ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,17 +202,17 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
     }
 
     // Float constant
-    if let Ok(num) = input.parse::<f64>() {
+    if let Some(num) = float_literal(input)? {
         return Ok(Term::FloatConstant(num));
     }
 
     // Negative numbers
     if input.starts_with('-') {
         let rest = input[1..].trim();
-        if let Ok(num) = rest.parse::<i64>() {
-            return Ok(Term::Constant(-num));
+        if let Some(num) = rest.parse::<i64>().ok().and_then(i64::checked_neg) {
+            return Ok(Term::Constant(num));
         }
-        if let Ok(num) = rest.parse::<f64>() {
+        if let Some(num) = float_literal(rest)? {
             return Ok(Term::FloatConstant(-num));
         }
     }
@@ -259,9 +259,8 @@ fn parse_vector_literal(input: &str) -> Result<Term, String> {
     let values: Result<Vec<f64>, String> = inner
         .split(',')
         .map(|v| {
-            v.trim()
-                .parse::<f64>()
-                .map_err(|_| format!("Invalid vector element: '{}'", v.trim()))
+            float_literal(v.trim())?
+                .ok_or_else(|| format!("Invalid vector element: '{}'", v.trim()))
         })
         .collect();
 

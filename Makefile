@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check perf-gate-remote bench-engine-remote bench-sessions-remote bench-views-remote soak soak-remote secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions bench-views test test-fast test-release unit-test xfail-list integration-test test-scenarios test-scenarios-modes test-budget oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check perf-gate-remote bench-engine-remote bench-sessions-remote bench-views-remote soak soak-remote fuzz secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions bench-views test test-fast test-release unit-test xfail-list integration-test test-scenarios test-scenarios-modes test-budget oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -378,6 +378,12 @@ oracle-test:
 soak:
 	./scripts/soak.sh $(SOAK_ARGS)
 
+# cargo-fuzz campaign over the parser and /ws frame targets (fuzz/README.md):
+# FUZZ_SECS per target, FUZZ_TARGETS to pick some (default all).
+FUZZ_SECS ?= 600
+fuzz:
+	./fuzz/run.sh $(FUZZ_SECS) $(FUZZ_TARGETS)
+
 # Tier 3: E2E snapshot tests (parallel, against live server)
 e2e-test:
 	./scripts/run_snapshot_tests.sh
@@ -653,11 +659,13 @@ static-analysis: lint doc-check
 fmt:
 	cargo fmt --all
 	cargo fmt --manifest-path perf-gate/Cargo.toml
+	cargo fmt --manifest-path fuzz/Cargo.toml
 
 # Check formatting (CI mode - fails if not formatted)
 fmt-check:
 	cargo fmt --all -- --check
 	cargo fmt --manifest-path perf-gate/Cargo.toml -- --check
+	cargo fmt --manifest-path fuzz/Cargo.toml -- --check
 
 # Run clippy lints
 lint:

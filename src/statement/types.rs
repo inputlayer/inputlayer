@@ -357,7 +357,7 @@ fn parse_refinement_args(input: &str) -> Result<Vec<RefinementArg>, String> {
         }
 
         // Float argument
-        if let Ok(f) = part.parse::<f64>() {
+        if let Some(f) = crate::parser::float_literal(part)? {
             args.push(RefinementArg::Float(f));
             continue;
         }
