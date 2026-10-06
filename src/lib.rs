@@ -225,6 +225,11 @@ mod recursion;
 #[cfg(test)]
 mod test_arithmetic;
 
+// Entry points for the fuzz harness in `fuzz/`
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub mod fuzzing;
+
 // Re-export public types
 pub use catalog::Catalog;
 pub use code_generator::CodeGenerator;

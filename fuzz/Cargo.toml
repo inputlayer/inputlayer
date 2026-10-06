@@ -1,0 +1,51 @@
+# cargo-fuzz targets for the client input the server parses: IQL statements
+# and programs, and `/ws` client frames (#301). A standalone workspace, like
+# `perf-gate`, so libFuzzer never reaches the engine build. See README.md.
+[workspace]
+
+[package]
+name = "inputlayer-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "Elastic-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+inputlayer = { path = "..", features = ["test-support"] }
+inputlayer-ws-protocol = { path = "../ws-protocol" }
+serde_json = "1.0"
+
+# Assertions on in a fuzzing build: an overflow or a broken invariant is a
+# finding, not a wrapped value.
+[profile.release]
+debug-assertions = true
+overflow-checks = true
+
+[[bin]]
+name = "iql_statement"
+path = "fuzz_targets/iql_statement.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "iql_program"
+path = "fuzz_targets/iql_program.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ws_client_frame"
+path = "fuzz_targets/ws_client_frame.rs"
+test = false
+doc = false
+bench = false
+
+# The engine's own patches; `[patch]` applies per workspace.
+[patch.crates-io]
+hnsw_rs = { path = "../vendor/hnsw_rs" }

@@ -294,6 +294,15 @@ INPUTLAYER_ORACLE_VIEWS=maintained make oracle-test   # add the maintained adapt
 
 `tests/property_arithmetic.rs` holds the property tests of typed arithmetic.
 
+### Fuzzing
+
+`fuzz/` holds cargo-fuzz targets for the client input the server parses: one IQL statement, a whole `execute` program with its `params`, and a `/ws` client frame. They run the server's own parse, bind and classification code on the server's stack size, and check invariants beyond not crashing (a persistent rule reloads unchanged; a request run read-only holds only queries). Seeds come from the example programs and the deep-nesting and oversized-body cases of #295. Campaigns belong on the benchmark host; see [`fuzz/README.md`](fuzz/README.md).
+
+```bash
+make fuzz                                         # Every target, 10 minutes each
+make fuzz FUZZ_SECS=3600 FUZZ_TARGETS=iql_program # One target, an hour
+```
+
 ## Tier 6: SDK contract
 
 ```bash
@@ -374,6 +383,7 @@ Scenario engines write `server.log` into their temporary directory (`Engine::log
 | `make pre-pr-selftest` | Behavioural tests of `make pre-pr` routing (`scripts/test_pre_pr.py`) | After changing `Makefile` or `scripts/` |
 | `make e2e-reactive` | Scenario suite in release against real engines, latency samples | Subscription or wire changes |
 | `make oracle-test` | Differential correctness oracle only | Changing evaluation, subscriptions or rule catalog changes |
+| `make fuzz` | cargo-fuzz campaign over the IQL parser and `/ws` frame targets (`fuzz/README.md`) | Changing the parser, parameter binding or frame decoding; long campaigns on the benchmark host |
 
 ### Code quality
 
