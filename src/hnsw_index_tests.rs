@@ -83,6 +83,30 @@ fn test_hnsw_recall_at_10_on_3000_random_vectors() {
     assert!(recall >= 0.95, "recall {recall} < 0.95");
 }
 
+/// Recall@10 against brute force as the index grows, at nightly scale: runs
+/// only with `INPUTLAYER_SOAK=1` (the nightly workflow, in release).
+#[test]
+fn test_hnsw_recall_at_10_against_brute_force_at_three_sizes() {
+    if std::env::var("INPUTLAYER_SOAK").as_deref() != Ok("1") {
+        return;
+    }
+    let (k, ef) = (10, 128);
+    for (n, seed) in [(1_000, 11), (10_000, 12), (50_000, 13)] {
+        let rows = random_rows(n, 32, seed);
+        let index = HnswIndex::build(config(DistanceMetric::Cosine), rows.clone()).unwrap();
+        let queries = random_rows(100, 32, seed + 1000);
+        let mut found = 0;
+        for (_, q) in &queries {
+            let truth: HashSet<TupleId> = brute_force_top_k(&rows, q, k).into_iter().collect();
+            let got = index.search(q, k, Some(ef), index.epoch()).unwrap();
+            found += got.iter().filter(|(id, _)| truth.contains(id)).count();
+        }
+        let recall = found as f64 / (queries.len() * k) as f64;
+        println!("hnsw recall@{k} (n={n}, dim=32, ef_search={ef}): {recall:.4}");
+        assert!(recall >= 0.95, "recall {recall} < 0.95 at n={n}");
+    }
+}
+
 #[test]
 fn test_hnsw_recall_holds_after_incremental_inserts() {
     let rows = random_rows(3000, 32, 5);

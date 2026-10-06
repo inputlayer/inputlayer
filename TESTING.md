@@ -130,6 +130,25 @@ box: `make perf-gate-remote` runs the gate there for a commit, and
 `make pre-pr PRE_PR_PERF=perf-gate-remote` makes the pre-PR gate do so. The
 Criterion benches in `benches/` are diagnostic only.
 
+## Nightly
+
+`.github/workflows/nightly.yml` runs once a night on `main` what is too long
+for the PR gate and for every push to `main`. Every job writes its results to
+the job summary, and a failed night opens one tracking issue (label
+`nightly-failure`) or comments on the open one.
+
+| Job | What runs |
+|-----|-----------|
+| Tests at nightly scale | `INPUTLAYER_ORACLE_SEEDS=300 INPUTLAYER_SOAK=1 make test-release`: every workspace test in release, the oracle at 300 seeds, and the tests that run only with `INPUTLAYER_SOAK=1`. Then the quarantined scenarios (`--ignored`) and the HNSW recall tests with their recall printed: recall@10 on 3,000 vectors, after incremental inserts, and against brute force at 1,000, 10,000 and 50,000 vectors. The summary lists the open `XFAIL`s and every test marked `#[ignore]`. |
+| Fuzz | Every `cargo fuzz` target for 10 minutes. The harness (parser and WS frames) is #301's; until it lands the job reports `XFAIL #301`. |
+| Benchmark host | `scripts/nightly-bench.sh`, behind the host's lock: the [concurrency soak](#concurrency-soak) for 10 minutes with 200 consumers, then the [performance gate](#performance-gate), whose report lands in the summary. It needs a self-hosted runner that can reach the host, named by the repository variable `NIGHTLY_BENCH_RUNNER`; without it the job is skipped and the report says so. |
+| Coverage | `make coverage`, on Sundays or when a manual run asks for it. |
+
+A test too long for the PR gate is gated on `INPUTLAYER_SOAK=1` and returns at
+once without it, not marked `#[ignore]`. A manual run
+(`gh workflow run nightly.yml --ref main`, `-f coverage=true` to add coverage)
+does the same as the nightly one.
+
 ## Scenario Suite (E2E)
 
 `tests/scenarios` is one test binary of scenarios against real
@@ -319,9 +338,9 @@ that refreshes it is exactly one rule evaluation, a read of base relations is
 none, and nothing is served from a view yet.
 
 Quarantined scenarios are ignored unconditionally, so the PR gate (plain
-`cargo test`) stays deterministic, and run in the nightly tier. Until a
-nightly workflow exists, `make e2e-reactive` stands in for it and passes
-`--include-ignored`. No scenario is quarantined today
+`cargo test`) stays deterministic, and run in the [nightly](#nightly)
+workflow; `make e2e-reactive` runs them too (`--include-ignored`). No
+scenario is quarantined today
 (`harness::shop_pack_vector_serves_the_near_rule` returned to the PR gate
 once #377 was fixed).
 

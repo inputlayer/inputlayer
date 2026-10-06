@@ -354,8 +354,8 @@ e2e-test:
 # Scenario suite (tests/scenarios) in a release build for representative
 # latency: real engine processes, agents subscribed over /ws, independent
 # writers. Plain `cargo test` runs the same scenarios in debug. Known defects
-# run as expected failures; quarantined scenarios run here too (--include-ignored)
-# until a nightly workflow exists. Raw writer->agent delta
+# run as expected failures; quarantined scenarios run here too
+# (--include-ignored), as in the nightly workflow. Raw writer->agent delta
 # latency samples (schema inputlayer.reactive.delta_latency.v1) land in
 # $(E2E_REACTIVE_SAMPLES)/<scenario>.jsonl.
 E2E_REACTIVE_SAMPLES ?= target/e2e-reactive

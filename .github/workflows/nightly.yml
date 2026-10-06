@@ -1,0 +1,317 @@
+name: Nightly
+
+# Once a night on main: the runs too long for the PR gate (ci.yml) and for
+# every push to main (main.yml).
+#   - the whole test suite in release at nightly scale: the differential
+#     oracle at 300 seeds, everything gated by INPUTLAYER_SOAK=1 (the HNSW
+#     recall against brute force at three sizes), and quarantined scenarios
+#   - cargo fuzz, every target (the parser and the WS frames) for 10 minutes
+#   - on the benchmark host, under its shared lock: the concurrency soak
+#     (10 minutes, 200 consumers, slow ones included) and the performance
+#     gate (scripts/nightly-bench.sh)
+#   - coverage, on Sundays or when a manual run asks for it
+# Every job writes its results to the job summary. A failed night opens one
+# tracking issue (label nightly-failure) or comments on the open one; a
+# manual run files one only on main. TESTING.md and CONTRIBUTING describe
+# the policy.
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      coverage:
+        description: Also run coverage (otherwise Sundays only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  tests:
+    name: Tests at nightly scale (300 oracle seeds, INPUTLAYER_SOAK=1)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 90
+    env:
+      INPUTLAYER_ORACLE_SEEDS: 300
+      INPUTLAYER_SOAK: 1
+      INPUTLAYER_XFAIL_LOG: ${{ github.workspace }}/target/xfail.log
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Registry only: one build a night does not pay for a cached target/.
+      - name: Cache cargo
+        uses: useblacksmith/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-nightly-v1-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-nightly-v1-
+
+      # shell: bash adds pipefail, so tee does not hide a failing test.
+      - name: Run every test in release
+        shell: bash
+        run: |
+          mkdir -p target && : > "$INPUTLAYER_XFAIL_LOG"
+          make test-release 2>&1 | tee "$RUNNER_TEMP/cargo-test.log"
+
+      # Quarantined scenarios are #[ignore]d on the PR gate and run here.
+      - name: Run quarantined scenarios
+        run: cargo test --release --all-features --test scenarios -- --ignored
+
+      - name: HNSW recall against brute force
+        shell: bash
+        run: |
+          cargo test --release --all-features --lib hnsw_index::tests::test_hnsw_recall -- --nocapture --test-threads 1 \
+            2>&1 | tee "$RUNNER_TEMP/recall.log"
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Tests at nightly scale"
+            echo
+            echo "\`INPUTLAYER_ORACLE_SEEDS=$INPUTLAYER_ORACLE_SEEDS INPUTLAYER_SOAK=$INPUTLAYER_SOAK make test-release\`"
+            echo
+            if [ -f "$RUNNER_TEMP/cargo-test.log" ]; then
+              ./scripts/test-timings.sh "$RUNNER_TEMP/cargo-test.log"
+            fi
+            echo
+            echo "### HNSW recall"
+            echo
+            echo '```'
+            grep -h '^hnsw recall' "$RUNNER_TEMP/recall.log" 2> /dev/null || echo "no recall line: the recall tests did not run"
+            echo '```'
+            echo
+            echo "### Expected failures"
+            echo
+            echo '```'
+            make --no-print-directory xfail-list XFAIL_LOG="$INPUTLAYER_XFAIL_LOG"
+            echo '```'
+            echo
+            echo "### Tests marked #[ignore]"
+            echo
+            echo '```'
+            git grep -n -E '#\[ignore|ignore = "' -- '*.rs' ':!vendor' || echo "none"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Every cargo-fuzz target for FUZZ_SECS seconds. The harness is #301's: until it
+  # lands there is nothing to run, which the summary reports as an expected
+  # failure naming that issue.
+  fuzz:
+    name: Fuzz (parser, WS frames)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 60
+    env:
+      FUZZ_SECS: 600
+    outputs:
+      harness: ${{ steps.harness.outputs.present }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Look for the fuzz harness
+        id: harness
+        run: |
+          if [ -f fuzz/Cargo.toml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Fuzz"
+              echo
+              echo "XFAIL #301: no fuzz harness in the tree (fuzz/Cargo.toml). Its parser and WS frame targets run here once it lands."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Install Rust toolchain (nightly)
+        if: steps.harness.outputs.present == 'true'
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        if: steps.harness.outputs.present == 'true'
+        run: cargo install cargo-fuzz --locked
+
+      - name: Fuzz every target
+        if: steps.harness.outputs.present == 'true'
+        shell: bash
+        run: |
+          targets=$(cargo fuzz list)
+          if [ -z "$targets" ]; then
+            echo "::error title=Fuzz::fuzz/Cargo.toml declares no target"
+            exit 1
+          fi
+          status=0
+          {
+            echo "## Fuzz"
+            echo
+            echo "| Target | Seconds | Result |"
+            echo "|---|---:|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for target in $targets; do
+            echo "=== $target: $FUZZ_SECS s ==="
+            if cargo fuzz run "$target" -- -max_total_time="$FUZZ_SECS"; then
+              echo "| $target | $FUZZ_SECS | no crash |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "| $target | $FUZZ_SECS | **crash** (input in the fuzz-artifacts artifact) |" >> "$GITHUB_STEP_SUMMARY"
+              status=1
+            fi
+          done
+          exit "$status"
+
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # The soak and the performance gate run only on the benchmark host, one
+  # benchmark at a time behind its lock (perf-gate/README.md). The host is on
+  # a private network, so this job needs a self-hosted runner that can ssh to
+  # it: the repository variable NIGHTLY_BENCH_RUNNER names that runner's
+  # label. Without it the job is skipped and the report says so.
+  bench:
+    name: Benchmark host (soak, performance gate)
+    if: vars.NIGHTLY_BENCH_RUNNER != ''
+    runs-on: ${{ vars.NIGHTLY_BENCH_RUNNER }}
+    timeout-minutes: 1080
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The baseline commit must resolve here.
+          fetch-depth: 0
+
+      - name: Soak and performance gate on the benchmark host
+        run: scripts/nightly-bench.sh
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-bench
+          path: target/perf-gate/remote/*/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  coverage:
+    name: Coverage (weekly)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 45
+    steps:
+      - name: Sunday, or asked for
+        id: due
+        run: |
+          if [ "${{ inputs.coverage }}" = true ] ||
+            { [ "${{ github.event_name }}" = schedule ] && [ "$(date -u +%u)" = 7 ]; }; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Coverage runs on Sundays or when a manual run asks for it." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.due.outputs.run == 'true'
+
+      - name: Install Rust toolchain
+        if: steps.due.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-tarpaulin
+        if: steps.due.outputs.run == 'true'
+        run: cargo install cargo-tarpaulin --locked
+
+      - name: Generate coverage report
+        if: steps.due.outputs.run == 'true'
+        run: make coverage
+
+      - name: Coverage summary
+        if: steps.due.outputs.run == 'true'
+        shell: bash
+        run: |
+          {
+            echo "## Coverage"
+            echo
+            echo '```'
+            make --no-print-directory view-coverage
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        if: steps.due.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: target/coverage/
+          retention-days: 14
+
+  report:
+    name: Report
+    needs: [tests, fuzz, bench, coverage]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      TESTS: ${{ needs.tests.result }}
+      FUZZ: ${{ needs.fuzz.result }}
+      FUZZ_HARNESS: ${{ needs.fuzz.outputs.harness }}
+      BENCH: ${{ needs.bench.result }}
+      COVERAGE: ${{ needs.coverage.result }}
+      FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Summary
+        run: |
+          if [ "$FUZZ" = success ] && [ "$FUZZ_HARNESS" != true ]; then
+            FUZZ="XFAIL #301 (no fuzz harness yet)"
+          fi
+          if [ "$BENCH" = skipped ]; then
+            BENCH="skipped (no runner: repository variable NIGHTLY_BENCH_RUNNER is unset)"
+          fi
+          {
+            echo "## Nightly, ${GITHUB_SHA:0:8}"
+            echo
+            echo "| Job | Result |"
+            echo "|---|---|"
+            echo "| Tests at nightly scale | $TESTS |"
+            echo "| Fuzz | $FUZZ |"
+            echo "| Benchmark host (soak, performance gate) | $BENCH |"
+            echo "| Coverage (weekly) | $COVERAGE |"
+            echo
+            echo "Run: $RUN_URL"
+          } | tee report.md >> "$GITHUB_STEP_SUMMARY"
+
+      # One issue for a failing nightly: opened by the first failed night,
+      # commented on by each later one until someone closes it.
+      - name: Open or update the tracking issue
+        if: env.FAILED == 'true' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh label create nightly-failure --color B60205 \
+            --description "The nightly workflow failed" 2> /dev/null || true
+          number=$(gh issue list --state open --label nightly-failure --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file report.md
+          else
+            gh issue create --title "Nightly workflow failing" --label nightly-failure --body-file report.md
+          fi
