@@ -60,6 +60,8 @@ jobs:
               - 'deny.toml'
               - '.cargo/audit.toml'
               - 'scripts/run_snapshot_tests.sh'
+              - 'scripts/affected-map.toml'
+              - 'scripts/gen-affected-map.py'
               - 'scripts/test-timings.sh'
               - '.github/workflows/ci.yml'
             # The SDKs speak the wire protocol the engine defines, so a

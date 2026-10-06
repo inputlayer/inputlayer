@@ -85,7 +85,7 @@ make soak-remote                                           # Sustained soak on t
 
 ### Tier 3: Snapshot Tests (E2E)
 
-~995 IQL scripts in `examples/iql/` organized across 33 categories. Each `.iql` file has a corresponding `.iql.out` file with expected output. The test runner starts a server, executes each script via the client binary, and compares actual output against the snapshot.
+~1,150 IQL scripts in `examples/iql/` organized across 36 categories. Each `.iql` file has a corresponding `.iql.out` file with expected output. The test runner starts a server, executes each script via the client binary, and compares actual output against the snapshot.
 
 ```bash
 make e2e-test                              # Run all (parallel, 4 jobs)
@@ -388,11 +388,12 @@ Optional:
 ```
 
 File-to-category mapping:
-- `src/vector_ops.rs`, `src/hnsw_index.rs`, `src/hnsw_index_tests.rs` → `16_vectors`, `30_quantization`, `31_lsh`
-- `src/temporal_ops.rs` → `29_temporal`
+- a leaf module listed in `scripts/affected-map.toml` → the categories whose statements reach it (for example `src/provenance/` → the categories that run `.why` or `.why_not`)
 - `examples/iql/<category>/...` → that category
-- any other file under `src/`, `Cargo.toml`, `Cargo.lock`, `config.toml`, `ws-protocol/`, `ontology-client/`, `scripts/run_snapshot_tests.sh` → every spec (a plan or parser change can reach any category; the whole corpus takes about 1.5 min on 4 cores against debug binaries)
+- any other file under `src/`, `Cargo.toml`, `Cargo.lock`, `config.toml`, `ws-protocol/`, `ontology-client/`, `scripts/run_snapshot_tests.sh`, the map or its generator → every spec (a plan or parser change can reach any category; the whole corpus takes about 1.5 min on 4 cores against debug binaries)
 - anything else (tests, docs, SDKs) → no specs
+
+`scripts/affected-map.toml` is generated: `./scripts/gen-affected-map.py` matches each category's statement types in the text of its specs, the files they `.load` and their recorded transcripts, and lists the categories per leaf module from a fixed statement-type to module table. Regenerate it after adding or changing specs.
 
 ## Makefile Targets
 
@@ -502,8 +503,8 @@ Rules:
 | `30_quantization` | Quantization | Vector quantization |
 | `31_lsh` | LSH | Locality-sensitive hashing |
 | `32_math` | Math functions | abs, round, sign, power, trig |
-| `33_meta` | Meta commands | Status, session, KG info |
+| `33_meta` | Meta commands | Status, session, KG info, load, rule and relation management, help |
 | `35_strings` | String functions | Length, concat, trim, substring, contains |
-| `39_meta_complete` | Meta complete | Comprehensive meta command coverage |
 | `40_load_command` | Load command | Loading data from files |
 | `80_sip` | SIP | Sideways information passing |
+| `90_product_fixtures` | Product fixtures | Rule packs and demo scripts of the product: consistency pack, prompt integrity, landing page examples |

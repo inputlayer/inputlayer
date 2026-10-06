@@ -18,7 +18,7 @@
 // Add one new edge
 +manages("charlie", "diana")
 
-// Query again: diana should appear without full recompute
+// Query again: diana appears (the rules are recomputed from the current facts)
 ?authority("alice", Who)
 
 // Cleanup
