@@ -2,9 +2,9 @@
 """Write the fuzz targets' seed corpora to fuzz/seeds/<target>/.
 
 Seeds are the repo's example IQL programs and their statements, the frames
-of the /ws protocol, and the deep-nesting and oversized-body cases of #295
+of the /ws protocol, the deep-nesting and oversized-body cases of #295
 around each limit (the default nesting limit 128, the ceiling 1024, and the
-4,096-element body cap). Generated, not committed: rerun after the examples
+4,096-element body cap), and past findings from fuzz/regressions/. Generated, not committed: rerun after the examples
 change. Usage: python3 fuzz/seeds.py
 """
 
@@ -99,6 +99,12 @@ def frames(programs):
         yield {"type": "execute", "id": "x", "program": program}
 
 
+def regressions(target):
+    """Inputs that once failed `target`, kept in fuzz/regressions/<target>/."""
+    for path in sorted((FUZZ / "regressions" / target).glob("*")):
+        yield path.read_text(encoding="utf-8")
+
+
 def write(target, items):
     out = SEEDS / target
     out.mkdir(parents=True, exist_ok=True)
@@ -119,10 +125,15 @@ def main():
     statements = [s for _, lines in corpus for s in lines]
     deep = list(deep_statements()) + list(oversized_bodies())
 
-    write("iql_statement", statements + deep)
+    fixed = list(regressions("iql_statement"))
+    write("iql_statement", statements + deep + fixed)
     params = '\0{"a": 1, "f": 2.5e-3, "s": "S-77", "b": false, "v": [0.5, -1e2]}'
-    write("iql_program", programs + deep + ["?edge($a, Y)" + params, "+r($s, $f)" + params])
-    write("ws_client_frame", [json.dumps(frame) for frame in frames(programs + deep)])
+    write(
+        "iql_program",
+        programs + deep + fixed + ["?edge($a, Y)" + params, "+r($s, $f)" + params],
+    )
+    frames_in = programs + deep + fixed
+    write("ws_client_frame", [json.dumps(frame) for frame in frames(frames_in)])
 
 
 if __name__ == "__main__":

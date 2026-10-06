@@ -22,7 +22,8 @@ nesting limit an operator may configure (`MAX_NESTING_DEPTH_CEILING`).
 - the #295 cases: nested calls, groups, operator chains, `list[...]` and
   records in every statement form at depths 1, 127-129, 1023-1025 and 4,000,
   and bodies of 4,095-4,097 elements (self-joins, distinct atoms, negations,
-  comparisons).
+  comparisons);
+- past findings, kept in `fuzz/regressions/<target>/`.
 
 `iql.dict` and `ws_frame.dict` are libFuzzer dictionaries of IQL tokens and
 frame JSON.
@@ -55,6 +56,10 @@ cd fuzz
 cargo fuzz run -O iql_program artifacts/iql_program/crash-<hash>
 cargo fuzz tmin -O iql_program artifacts/iql_program/crash-<hash>
 ```
+
+File each finding as its own issue. Once it is fixed, copy its input to
+`fuzz/regressions/<target>/<issue>-<hash>` so every later campaign starts
+from it, and add a test for it to the engine's own suite.
 
 cargo-fuzz wants a nightly toolchain. `run.sh` uses one when it is
 installed and otherwise sets `RUSTC_BOOTSTRAP=1` on the stable toolchain;
