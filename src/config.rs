@@ -2113,4 +2113,196 @@ mod tests {
         config.validate().unwrap();
         assert_eq!(config.http.ws_auth_timeout_ms, 5_000);
     }
+
+    #[test]
+    fn test_config_default_performance_settings() {
+        let config = Config::default();
+        assert_eq!(config.storage.performance.initial_capacity, 10000);
+        assert_eq!(config.storage.performance.batch_size, 1000);
+        assert!(config.storage.performance.async_io);
+        assert_eq!(config.storage.performance.num_threads, 0); // 0 = use all CPUs
+    }
+
+    #[test]
+    fn test_load_config_from_toml() {
+        let config_content = r#"
+[storage]
+data_dir = "/tmp/test_data"
+default_knowledge_graph = "test_db"
+auto_create_knowledge_graphs = true
+
+[storage.persistence]
+format = "csv"
+compression = "gzip"
+auto_save_interval = 60
+
+[storage.performance]
+initial_capacity = 5000
+batch_size = 500
+async_io = false
+num_threads = 4
+
+[optimization]
+enable_join_planning = false
+enable_sip_rewriting = false
+
+[logging]
+level = "debug"
+format = "json"
+"#;
+
+        // In a jail: the environment overrides the file, and other tests set
+        // INPUTLAYER_* variables in theirs.
+        figment::Jail::expect_with(|jail| {
+            jail.create_file("config.toml", config_content)?;
+            let config = Config::from_file("config.toml").unwrap();
+
+            // Verify loaded values
+            assert_eq!(config.storage.data_dir, PathBuf::from("/tmp/test_data"));
+            assert_eq!(config.storage.default_knowledge_graph, "test_db");
+            assert!(config.storage.auto_create_knowledge_graphs);
+            assert!(format!("{:?}", config.storage.persistence.format).contains("Csv"));
+            assert!(format!("{:?}", config.storage.persistence.compression).contains("Gzip"));
+            assert_eq!(config.storage.persistence.auto_save_interval, 60);
+            assert_eq!(config.storage.performance.initial_capacity, 5000);
+            assert_eq!(config.storage.performance.batch_size, 500);
+            assert!(!config.storage.performance.async_io);
+            assert_eq!(config.storage.performance.num_threads, 4);
+            assert!(!config.optimization.enable_join_planning);
+            assert!(!config.optimization.enable_sip_rewriting);
+            assert_eq!(config.logging.level, "debug");
+            assert_eq!(config.logging.format, "json");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_load_missing_config_file() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let nonexistent = temp.path().join("nonexistent.toml");
+
+        // from_file with a nonexistent path should fail (required fields missing)
+        let result = Config::from_file(nonexistent.to_str().unwrap());
+        assert!(
+            result.is_err(),
+            "Config::from_file() should return error when config file doesn't exist"
+        );
+    }
+
+    #[test]
+    fn test_config_local_overrides_base() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let base_path = temp.path().join("config.toml");
+        let local_path = temp.path().join("config.local.toml");
+
+        // Create base config.toml with complete config
+        let base_config = r#"
+[storage]
+data_dir = "./base_data"
+default_knowledge_graph = "base_db"
+
+[storage.persistence]
+format = "parquet"
+compression = "snappy"
+auto_save_interval = 0
+
+[storage.performance]
+initial_capacity = 10000
+batch_size = 1000
+async_io = true
+num_threads = 0
+
+[optimization]
+enable_join_planning = true
+enable_sip_rewriting = true
+enable_subplan_sharing = true
+enable_boolean_specialization = false
+
+[logging]
+level = "info"
+format = "text"
+"#;
+        std::fs::write(&base_path, base_config).unwrap();
+
+        // Create config.local.toml with override (data_dir changed)
+        let local_config = r#"
+[storage]
+data_dir = "./local_data"
+default_knowledge_graph = "base_db"
+
+[storage.persistence]
+format = "parquet"
+compression = "snappy"
+
+[storage.performance]
+initial_capacity = 10000
+batch_size = 1000
+async_io = true
+num_threads = 0
+
+[optimization]
+enable_join_planning = true
+enable_sip_rewriting = true
+enable_subplan_sharing = true
+
+[logging]
+level = "info"
+format = "text"
+"#;
+        std::fs::write(&local_path, local_config).unwrap();
+
+        // Merge using Figment directly (same logic as Config::load but with explicit paths)
+        let config: Config = Figment::new()
+            .merge(Toml::file(&base_path))
+            .merge(Toml::file(&local_path))
+            .extract()
+            .unwrap();
+
+        // data_dir should be from config.local.toml
+        assert_eq!(config.storage.data_dir, PathBuf::from("./local_data"));
+        // default_knowledge_graph should be from both (same value)
+        assert_eq!(config.storage.default_knowledge_graph, "base_db");
+    }
+
+    #[test]
+    fn test_config_relative_path() {
+        let mut config = Config::default();
+        config.storage.data_dir = PathBuf::from("./data");
+
+        // Should preserve relative path
+        assert!(
+            config.storage.data_dir.starts_with("./")
+                || config.storage.data_dir.starts_with("data")
+        );
+    }
+
+    #[test]
+    fn test_config_absolute_path() {
+        let mut config = Config::default();
+        config.storage.data_dir = PathBuf::from("/var/lib/inputlayer");
+
+        // Should handle absolute path
+        assert!(config.storage.data_dir.is_absolute());
+    }
+
+    #[test]
+    fn test_config_can_be_cloned() {
+        let config1 = Config::default();
+        let config2 = config1.clone();
+
+        assert_eq!(config1.storage.data_dir, config2.storage.data_dir);
+        assert_eq!(
+            config1.storage.default_knowledge_graph,
+            config2.storage.default_knowledge_graph
+        );
+    }
+
+    #[test]
+    fn test_config_can_be_debugged() {
+        let config = Config::default();
+        let debug_str = format!("{config:?}");
+
+        // Should contain some config information
+        assert!(debug_str.contains("storage") || debug_str.contains("Config"));
+    }
 }

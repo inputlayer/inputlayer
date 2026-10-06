@@ -2,8 +2,8 @@
 //!
 //! Tests for IR optimization passes.
 
-use inputlayer::ir::{IRNode, Predicate};
-use inputlayer::Optimizer;
+use crate::ir::{IRNode, Predicate};
+use crate::Optimizer;
 
 #[test]
 fn test_identity_map_single() {
@@ -399,7 +399,7 @@ fn test_multiple_real_filters_preserved() {
 // Advanced Optimizer Tests (join planning, subplan sharing, etc.)
 #[test]
 fn test_subplan_sharing_detects_common_subexpressions() {
-    use inputlayer::SubplanSharer;
+    use crate::SubplanSharer;
 
     let sharer = SubplanSharer::new();
 
@@ -427,7 +427,7 @@ fn test_subplan_sharing_detects_common_subexpressions() {
 
 #[test]
 fn test_boolean_specializer_analyzes_semiring() {
-    use inputlayer::BooleanSpecializer;
+    use crate::BooleanSpecializer;
 
     let mut specializer = BooleanSpecializer::new();
 
@@ -454,7 +454,7 @@ fn test_boolean_specializer_analyzes_semiring() {
 
 #[test]
 fn test_join_planner_analyzes_structure() {
-    use inputlayer::JoinPlanner;
+    use crate::JoinPlanner;
 
     let planner = JoinPlanner::new();
 
@@ -481,8 +481,8 @@ fn test_join_planner_analyzes_structure() {
 
 #[test]
 fn test_sip_rewriter_analyzes_joins() {
-    use inputlayer::ast::{Atom, BodyPredicate, Program, Rule, Term};
-    use inputlayer::SipRewriter;
+    use crate::ast::{Atom, BodyPredicate, Program, Rule, Term};
+    use crate::SipRewriter;
 
     let mut rewriter = SipRewriter::new();
 
@@ -530,7 +530,7 @@ fn test_sip_rewriter_analyzes_joins() {
 
 #[test]
 fn test_default_config_optimizations() {
-    use inputlayer::OptimizationConfig;
+    use crate::OptimizationConfig;
 
     let config = OptimizationConfig::default();
 

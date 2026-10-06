@@ -1,6 +1,6 @@
 //! JSON serialization round-trips for Value types, DTOs, and edge cases.
 
-use inputlayer::value::{DataType, Tuple, Value};
+use crate::value::{DataType, Tuple, Value};
 use std::sync::Arc;
 
 // Value Serialization Tests

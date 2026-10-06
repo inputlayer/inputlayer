@@ -176,6 +176,10 @@ pub use parser::parse_rule_definition;
 // Tests
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+mod iql_syntax_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::ast::{BodyPredicate, Term};
