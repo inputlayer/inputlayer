@@ -157,14 +157,19 @@ max_permits = 0
 max_queued = 4096
 
 # Programs that commit facts, schemas or rules, and commands that change
-# durable state (index builds, graph and user management). The smallest
-# share and no reserve: overload may slow writes down, but never the
-# deliveries they cause (each commit refreshes the views that depend on it).
+# durable state (index builds, graph and user management). Writes yield to
+# background work: a write waits while any refresh waits, because each
+# commit refreshes the views that depend on it, and writes admitted while
+# those refreshes wait only make the deliveries later. Writes cannot
+# starve: the refreshes commits cause are finite, so the background queue
+# drains while writes wait. Overload may slow writes down, but never the
+# deliveries they cause.
 [storage.performance.admission.write]
-weight = 1
+weight = 2
 min_permits = 0
 max_permits = 0
 max_queued = 4096
+yields_to_background = true
 
 # Subscription refreshes and shared standing-query rounds (bounded by the
 # views that exist, each refreshing at most once at a time)

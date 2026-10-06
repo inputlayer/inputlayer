@@ -798,10 +798,10 @@ Requests wait for a permit on one of three **lanes**, which share the pool by th
 | Lane | What runs on it | Default weight |
 |---|---|---|
 | `interactive` | Queries, `read`s, proofs, session queries and commands that change no durable state | 4 |
-| `write` | Programs that commit: facts, schemas, rules, index builds and the other commands that change durable state | 1 |
+| `write` | Programs that commit: facts, schemas, rules, index builds and the other commands that change durable state | 2 |
 | `background` | Subscription refreshes and the shared rounds of standing-query families | 4 |
 
-When a permit frees, the lane that has used the least permit time for its weight gets it, so a lane running cheap work keeps getting through however much another lane queues, and a lane that monopolized the pool yields until the others catch up. Writes get the smallest share on purpose: every commit refreshes the views that depend on it, so writes admitted faster than those refreshes drain only make the deliveries later; overload may slow writes down, but never the deliveries they cause, and the share keeps writers moving. Two bounds sit on top of that share: a lane holding fewer than its `min_permits` is served before any other (default 1 for `interactive`, so a cheap query never waits behind a full sweep of refreshes or writes, even on a host with two permits; 0 for the others, whose weights already guarantee their share); and no lane holds more than its `max_permits` (default `0`: every permit). The pool is work-conserving: a free permit never idles while any lane can use it. Sharing probes of standing-query families hold one permit of their own beside the pool.
+When a permit frees, the lane that has used the least permit time for its weight gets it, so a lane running cheap work keeps getting through however much another lane queues, and a lane that monopolized the pool yields until the others catch up. Writes **yield to background work** (`yields_to_background`, default on): a write waits while any refresh waits. Every commit refreshes the views that depend on it, so a write admitted while those refreshes still wait only makes the deliveries later and the refreshes repeat; yielding batches writes between sweeps of the views, whose refreshes coalesce, and keeps a delivery within one sweep of its write. Writes cannot starve: the refreshes commits cause are finite, so the background queue drains while writes wait, and against interactive work writes share by weight. Overload may slow writes down, but never the deliveries they cause. Two bounds sit on top of that share: a lane holding fewer than its `min_permits` is served before any other (default 1 for `interactive`, so a cheap query never waits behind a full sweep of refreshes or writes, even on a host with two permits; 0 for the others, whose weights already guarantee their share); and no lane holds more than its `max_permits` (default `0`: every permit). The pool is work-conserving: a free permit never idles while any lane can use it. Sharing probes of standing-query families hold one permit of their own beside the pool.
 
 Waits are bounded. A lane's queue holds at most `max_queued` requests (default 4,096 for `interactive` and `write`; unbounded for `background`, whose queue is bounded by the views that exist); one more is refused at once. No request waits longer than its own deadline or `max_wait_ms` (default 30,000), whichever is sooner. A request refused for either gets code `overloaded` (or `deadline_exceeded` when its own deadline passed), never runs later, and applied nothing; a request cancelled or disconnected while it waits leaves the queue at once. The `inputlayer_admission_*` [metrics](#metrics) show each lane's running and queued requests, refusals and summed wait and hold times.
 
@@ -817,10 +817,11 @@ max_permits = 0            # 0: every permit
 max_queued = 4096
 
 [storage.performance.admission.write]
-weight = 1
+weight = 2
 min_permits = 0
 max_permits = 0
 max_queued = 4096
+yields_to_background = true
 
 [storage.performance.admission.background]
 weight = 4
@@ -829,7 +830,7 @@ max_permits = 0
 max_queued = 0             # bounded by the views that exist
 ```
 
-Raise the `write` weight, or cap `interactive` with `max_permits`, on a server whose writes matter more than its reads; cap `write` with `max_permits` on a server where many writers commit to one knowledge graph, since each commit serializes on that graph's write lock and a permit held while waiting for it computes nothing.
+Turn `yields_to_background` off and raise the `write` weight on a server whose write acknowledgements matter more than its deliveries; cap `interactive` with `max_permits` on one whose writes matter more than its reads; cap `write` with `max_permits` on a server where many writers commit to one knowledge graph, since each commit serializes on that graph's write lock and a permit held while waiting for it computes nothing.
 
 ### Disk
 

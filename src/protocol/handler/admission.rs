@@ -24,6 +24,15 @@
 //! for the time it did not use. The pool is work-conserving: a free permit
 //! never idles while any lane can use it.
 //!
+//! Writes yield to background work (by default): a write waits while any
+//! refresh waits. Every commit refreshes the views that depend on it, so a
+//! write admitted while those refreshes still wait only makes the
+//! deliveries later and the refreshes repeat; yielding batches writes
+//! between sweeps of the views, whose refreshes coalesce, and keeps a
+//! delivery within one sweep of its write. Writes cannot starve: the
+//! refreshes commits cause are finite, so the background queue drains while
+//! writes wait, and against interactive work writes share by weight.
+//!
 //! Waits are bounded: each lane's queue holds at most `max_queued` requests
 //! (more are refused at once), and no request waits longer than its deadline
 //! or [`AdmissionConfig::max_wait_ms`], whichever is sooner. A request
@@ -151,6 +160,8 @@ struct LaneSettings {
     min: usize,
     max: usize,
     max_queued: usize,
+    /// Served only while no background request waits.
+    yields_to_background: bool,
 }
 
 struct State {
@@ -209,7 +220,7 @@ impl Admission {
     /// The pool of `config` with exactly `capacity` permits.
     pub fn with_capacity(config: &AdmissionConfig, capacity: usize) -> Self {
         let capacity = capacity.max(1);
-        let settings = |lane: &LaneConfig| LaneSettings {
+        let settings = |lane: &LaneConfig, yields: bool| LaneSettings {
             weight: u64::from(lane.weight.max(1)),
             min: lane.min_permits,
             max: match lane.max_permits {
@@ -217,15 +228,16 @@ impl Admission {
                 max => max.min(capacity),
             },
             max_queued: lane.max_queued,
+            yields_to_background: yields,
         };
         Self {
             inner: Arc::new(Inner {
                 capacity,
                 max_wait: Duration::from_millis(config.max_wait_ms.max(1)),
                 lanes: [
-                    settings(&config.interactive),
-                    settings(&config.write),
-                    settings(&config.background),
+                    settings(&config.interactive, false),
+                    settings(&config.write, config.write.yields_to_background),
+                    settings(&config.background, false),
                 ],
                 state: Mutex::new(State {
                     lanes: std::array::from_fn(|_| LaneState {
@@ -478,6 +490,9 @@ impl State {
         if running >= inner.capacity || lane_state.running >= settings.max {
             return None;
         }
+        if settings.yields_to_background && self.background_waits(inner) {
+            return None;
+        }
         // A free permit with a lane below its reserve waiting (and able to
         // take it) is theirs.
         let reserved_waiting = Lane::POOL.iter().any(|other| {
@@ -576,14 +591,25 @@ impl State {
         }
     }
 
+    /// Whether a background request waits for a permit it could take.
+    fn background_waits(&self, inner: &Inner) -> bool {
+        let state = &self.lanes[Lane::Background.index()];
+        !state.queue.is_empty() && state.running < inner.lanes[Lane::Background.index()].max
+    }
+
     /// The lane to serve next: among lanes with a waiter and room under their
-    /// cap, one below its reserve if any, else the one that has used the
-    /// least permit time for its weight; ties go to the longest wait.
+    /// cap (and, for a lane that yields, no background request waiting), one
+    /// below its reserve if any, else the one that has used the least permit
+    /// time for its weight; ties go to the longest wait.
     fn next_lane(&self, inner: &Inner) -> Option<Lane> {
+        let background_waits = self.background_waits(inner);
         let candidates = || {
             Lane::POOL.into_iter().filter(|lane| {
                 let state = &self.lanes[lane.index()];
-                !state.queue.is_empty() && state.running < inner.lanes[lane.index()].max
+                let settings = &inner.lanes[lane.index()];
+                !state.queue.is_empty()
+                    && state.running < settings.max
+                    && !(settings.yields_to_background && background_waits)
             })
         };
         let key = |lane: Lane| {
@@ -686,6 +712,7 @@ mod tests {
         let pool = pool_with(2, |c| {
             c.write.min_permits = 1;
             c.background.min_permits = 1;
+            c.write.yields_to_background = false;
         });
         let w1 = admitted(&pool, Lane::Write).await;
         let _w2 = admitted(&pool, Lane::Write).await;
@@ -768,6 +795,40 @@ mod tests {
             "about three interactive per background in {order:?}"
         );
         assert_eq!(order.iter().filter(|l| **l == Lane::Background).count(), 12);
+    }
+
+    #[tokio::test]
+    async fn writes_yield_while_refreshes_wait_and_run_once_they_drain() {
+        let pool = pool(1);
+        let held = admitted(&pool, Lane::Interactive).await;
+        let w = waiter(&pool, Lane::Write);
+        tokio::task::yield_now().await;
+        let b1 = waiter(&pool, Lane::Background);
+        let b2 = waiter(&pool, Lane::Background);
+        tokio::task::yield_now().await;
+        drop(held);
+        // The write arrived first, but yields to the refreshes.
+        let got_b1 = settled(b1).await.unwrap().unwrap();
+        assert_eq!(got_b1.lane(), Lane::Background);
+        assert_eq!(pool.stats(Lane::Write).queued, 1);
+        drop(got_b1);
+        let got_b2 = settled(b2).await.unwrap().unwrap();
+        assert_eq!(got_b2.lane(), Lane::Background);
+        drop(got_b2);
+        // The background queue drained: the write runs.
+        let got_w = settled(w).await.unwrap().unwrap();
+        assert_eq!(got_w.lane(), Lane::Write);
+        drop(got_w);
+        // A write never yields to interactive work, and with the yield
+        // off it shares with refreshes by weight.
+        let pool = pool_with(1, |c| c.write.yields_to_background = false);
+        let held = admitted(&pool, Lane::Interactive).await;
+        let w = waiter(&pool, Lane::Write);
+        tokio::task::yield_now().await;
+        let _b = waiter(&pool, Lane::Background);
+        tokio::task::yield_now().await;
+        drop(held);
+        assert_eq!(settled(w).await.unwrap().unwrap().lane(), Lane::Write);
     }
 
     #[tokio::test]

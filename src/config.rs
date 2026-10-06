@@ -388,6 +388,15 @@ pub struct LaneConfig {
     /// bound every wait).
     #[serde(default)]
     pub max_queued: usize,
+    /// Write lane only: whether writes wait while any background refresh
+    /// waits. Every commit refreshes the views that depend on it, so writes
+    /// admitted while those refreshes still wait only make the deliveries
+    /// later and the refreshes repeat; yielding batches writes between
+    /// sweeps of the views, whose refreshes coalesce. Writes cannot starve:
+    /// the refreshes commits cause are finite, so the background queue
+    /// drains while writes wait. Ignored on the other lanes.
+    #[serde(default = "default_true")]
+    pub yields_to_background: bool,
 }
 
 fn default_admission_max_wait_ms() -> u64 {
@@ -410,20 +419,21 @@ fn default_interactive_lane() -> LaneConfig {
         min_permits: 1,
         max_permits: 0,
         max_queued: 4096,
+        yields_to_background: false,
     }
 }
 
-/// Writes get the smallest share and no reserve: overload may slow writes
-/// down, but never the deliveries they cause. Every commit refreshes the
-/// views that depend on it, so writes admitted faster than those refreshes
-/// drain only make the deliveries later; the share keeps writers moving
-/// without letting them outrun their own refreshes.
+/// Writes yield to the refreshes they cause and keep no reserve: overload
+/// may slow writes down, but never the deliveries they cause (see
+/// [`LaneConfig::yields_to_background`]). Against interactive work they
+/// share by weight.
 fn default_write_lane() -> LaneConfig {
     LaneConfig {
-        weight: 1,
+        weight: 2,
         min_permits: 0,
         max_permits: 0,
         max_queued: 4096,
+        yields_to_background: true,
     }
 }
 
@@ -435,6 +445,7 @@ fn default_background_lane() -> LaneConfig {
         min_permits: 0,
         max_permits: 0,
         max_queued: 0,
+        yields_to_background: false,
     }
 }
 
@@ -457,6 +468,7 @@ impl Default for LaneConfig {
             min_permits: default_lane_min_permits(),
             max_permits: 0,
             max_queued: 0,
+            yields_to_background: true,
         }
     }
 }
