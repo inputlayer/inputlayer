@@ -1,11 +1,9 @@
 //! Live state must equal the state recovered after restart.
 #![allow(clippy::unwrap_used)]
 
+use crate::harness::commit;
 use inputlayer::config::DurabilityMode;
-use inputlayer::storage::persist::{
-    FilePersist, PersistBackend, PersistConfig, Transaction, Update,
-};
-use inputlayer::storage::StorageResult;
+use inputlayer::storage::persist::{FilePersist, PersistConfig, Update};
 use inputlayer::value::Tuple;
 use inputlayer::{Config, StorageEngine};
 use proptest::prelude::*;
@@ -13,19 +11,6 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::TempDir;
-
-/// Commit `updates` to `shard`, one transaction per run of equal times.
-fn commit(persist: &FilePersist, shard: &str, updates: &[Update]) -> StorageResult<()> {
-    for run in updates.chunk_by(|a, b| a.time == b.time) {
-        let mut txn = Transaction::new(run[0].time);
-        txn.facts(
-            shard,
-            run.iter().map(|u| (u.data.clone(), u.diff)).collect(),
-        );
-        persist.commit(txn)?;
-    }
-    Ok(())
-}
 
 const KG: &str = "default";
 

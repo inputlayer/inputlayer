@@ -1,10 +1,10 @@
 //! WAL crash consistency: acknowledged writes survive a crash (`mem::forget`, no drop)
 //! under concurrent flushes, torn tails, and invalid UTF-8.
 
+use crate::harness::{commit, wal_file};
 use inputlayer::config::DurabilityMode;
 use inputlayer::storage::persist::batch::Update;
-use inputlayer::storage::persist::{FilePersist, PersistBackend, PersistConfig, Transaction};
-use inputlayer::storage::StorageResult;
+use inputlayer::storage::persist::{FilePersist, PersistBackend, PersistConfig};
 use inputlayer::value::Tuple;
 use std::collections::BTreeSet;
 use std::fs;
@@ -12,19 +12,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::TempDir;
-
-/// Commit `updates` to `shard`, one transaction per run of equal times.
-fn commit(persist: &FilePersist, shard: &str, updates: &[Update]) -> StorageResult<()> {
-    for run in updates.chunk_by(|a, b| a.time == b.time) {
-        let mut txn = Transaction::new(run[0].time);
-        txn.facts(
-            shard,
-            run.iter().map(|u| (u.data.clone(), u.diff)).collect(),
-        );
-        persist.commit(txn)?;
-    }
-    Ok(())
-}
 
 fn open(path: PathBuf, buffer_size: usize, durability_mode: DurabilityMode) -> FilePersist {
     FilePersist::new(PersistConfig {
@@ -50,10 +37,6 @@ fn keys(persist: &FilePersist, shard: &str) -> BTreeSet<(i64, i64)> {
             (v[0].as_i64().expect("int"), v[1].as_i64().expect("int"))
         })
         .collect()
-}
-
-fn wal_file(dir: &Path) -> PathBuf {
-    dir.join("wal").join("current.wal")
 }
 
 fn append_raw(path: &Path, bytes: &[u8]) {

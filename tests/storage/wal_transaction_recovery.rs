@@ -3,6 +3,7 @@
 //! one.
 #![allow(clippy::unwrap_used)]
 
+use crate::harness::wal_file;
 use inputlayer::config::DurabilityMode;
 use inputlayer::storage::persist::{
     consolidate_to_current, to_tuples, FilePersist, PersistBackend, PersistConfig, Transaction,
@@ -26,10 +27,6 @@ fn open(path: &Path) -> FilePersist {
         ..Default::default()
     })
     .unwrap()
-}
-
-fn wal_file(dir: &Path) -> PathBuf {
-    dir.join("wal").join("current.wal")
 }
 
 fn state(persist: &FilePersist) -> State {

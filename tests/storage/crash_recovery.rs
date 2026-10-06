@@ -1,29 +1,16 @@
 //! WAL recovery, corruption handling, and crash resilience (production-critical).
 
+use crate::harness::commit;
 use inputlayer::config::DurabilityMode;
 use inputlayer::storage::persist::batch::Update;
 use inputlayer::storage::persist::{
-    consolidate, to_tuples, FilePersist, PersistBackend, PersistConfig, Transaction,
+    consolidate, to_tuples, FilePersist, PersistBackend, PersistConfig,
 };
-use inputlayer::storage::StorageResult;
 use inputlayer::value::Tuple;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use tempfile::TempDir;
-
-/// Commit `updates` to `shard`, one transaction per run of equal times.
-fn commit(persist: &FilePersist, shard: &str, updates: &[Update]) -> StorageResult<()> {
-    for run in updates.chunk_by(|a, b| a.time == b.time) {
-        let mut txn = Transaction::new(run[0].time);
-        txn.facts(
-            shard,
-            run.iter().map(|u| (u.data.clone(), u.diff)).collect(),
-        );
-        persist.commit(txn)?;
-    }
-    Ok(())
-}
 
 // Helper Functions
 fn _create_test_persist(temp: &TempDir) -> FilePersist {
