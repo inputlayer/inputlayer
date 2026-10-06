@@ -38,7 +38,6 @@ struct Member {
 }
 
 pub struct GroupAdapter {
-    host: EngineHost,
     notifications: broadcast::Receiver<inputlayer::protocol::handler::Notification>,
     registry: ViewRegistry,
     mailbox: mpsc::UnboundedSender<u64>,
@@ -54,6 +53,8 @@ pub struct GroupAdapter {
     lazy: Option<Member>,
     /// Why the group could not be subscribed.
     failed: Option<AdapterError>,
+    /// Last, so the group's handles on the engine drop before it.
+    host: EngineHost,
 }
 
 impl GroupAdapter {

@@ -20,9 +20,14 @@ pub const KG: &str = "oracle";
 
 pub struct EngineHost {
     runtime: tokio::runtime::Runtime,
-    dir: TempDir,
     /// `None` only between shutting down and reopening during a restart.
     handler: Option<Arc<Handler>>,
+    /// Declared after `handler`, so the engine closes before its data
+    /// directory is removed: every engine in the process raises its revision
+    /// bound together, and one whose directory is gone fails the others'
+    /// writes (#402). An adapter holding clones of the handler declares its
+    /// host last for the same reason.
+    dir: TempDir,
 }
 
 impl EngineHost {

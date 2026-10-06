@@ -50,7 +50,6 @@ struct View {
 }
 
 pub struct SubscriptionAdapter {
-    host: EngineHost,
     notifications: broadcast::Receiver<Notification>,
     registry: ViewRegistry,
     mailbox: mpsc::UnboundedSender<u64>,
@@ -58,6 +57,8 @@ pub struct SubscriptionAdapter {
     next_subscriber: u64,
     views: Vec<View>,
     fault: Fault,
+    /// Last, so the views' handles on the engine drop before it.
+    host: EngineHost,
 }
 
 impl SubscriptionAdapter {
