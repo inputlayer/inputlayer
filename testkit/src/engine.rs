@@ -149,15 +149,27 @@ impl EngineBuilder {
     /// For [`Mode::Maintained`] until V2 (#309) defines `engine.views`: the
     /// engine cannot run that mode, so the scenario fails before starting one.
     #[must_use]
-    pub fn views(mut self, mode: Mode) -> Self {
-        assert!(
-            mode == Mode::Recompute,
-            "engine.views = \"{}\": mode not available on this engine (V2 #309 adds it); \
-             unset INPUTLAYER_SCENARIO_VIEWS or set it to \"recompute\"",
-            mode.as_str()
-        );
+    pub fn views(self, mode: Mode) -> Self {
+        match self.try_views(mode) {
+            Ok(builder) => builder,
+            Err(violation) => {
+                panic!("{violation}; unset INPUTLAYER_SCENARIO_VIEWS or set it to \"recompute\"")
+            }
+        }
+    }
+
+    /// [`Self::views`], or [`Violation::Unavailable`] when this engine cannot
+    /// run `mode` (`maintained` until V2 #309 defines `engine.views`), for a
+    /// scenario that compares the modes.
+    pub fn try_views(mut self, mode: Mode) -> Checked<Self> {
+        if mode != Mode::Recompute {
+            return Err(Violation::Unavailable(format!(
+                "engine.views = \"{}\": mode not available on this engine (V2 #309 adds it)",
+                mode.as_str()
+            )));
+        }
         self.settings.views = mode;
-        self
+        Ok(self)
     }
 
     /// Refuse a query holding more than `query_bytes`

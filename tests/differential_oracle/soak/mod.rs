@@ -40,9 +40,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use inputlayer_testkit::{EngineBuilder, WsClient};
+use inputlayer_testkit::{EngineBuilder, Mode, WsClient};
 use serde_json::json;
 
+use crate::engine::VIEWS_ENV;
 use consumers::{ConsumerStats, Ctx};
 use verify::{Class, Histogram, Verdict, Verifier};
 use workload::WriterStats;
@@ -237,8 +238,9 @@ pub struct Report {
     pub server_log: Vec<(String, u64)>,
 }
 
-/// Run the soak described by `config` against `server`.
-pub async fn run(server: &str, config: Config) -> Report {
+/// Run the soak described by `config` against `server`, answering reads of
+/// persistent rules in `views` mode.
+pub async fn run(server: &str, config: Config, views: Mode) -> Report {
     config.validate();
     let config = Arc::new(config);
     let started = Instant::now();
@@ -247,7 +249,9 @@ pub async fn run(server: &str, config: Config) -> Report {
         // of them connect from 127.0.0.1 at once.
         .max_connections(4096)
         .ws_max_preauth_per_ip(0)
-        .ws_max_subscriptions(0);
+        .ws_max_subscriptions(0)
+        .try_views(views)
+        .unwrap_or_else(|v| panic!("{v}; unset {VIEWS_ENV} or set it to \"recompute\""));
     if let Some(ms) = config.send_timeout_ms {
         builder = builder.ws_send_timeout_ms(ms);
     }

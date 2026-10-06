@@ -187,6 +187,9 @@ pub struct Refusal {
     /// `None` when the engine sent none.
     pub code: Option<String>,
     pub message: String,
+    /// The message of each parse error (`validation_errors`) of a program
+    /// refused as unparsable, in statement order.
+    pub parse_errors: Vec<String>,
 }
 
 impl Refusal {
@@ -197,7 +200,21 @@ impl Refusal {
                 .as_str()
                 .unwrap_or_default()
                 .to_string(),
+            parse_errors: frame.value["validation_errors"]
+                .as_array()
+                .map(|errors| {
+                    errors
+                        .iter()
+                        .map(|e| e["error"].as_str().unwrap_or_default().to_string())
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
+    }
+
+    /// Whether the message or a parse error contains `text`.
+    pub fn names(&self, text: &str) -> bool {
+        self.message.contains(text) || self.parse_errors.iter().any(|e| e.contains(text))
     }
 }
 

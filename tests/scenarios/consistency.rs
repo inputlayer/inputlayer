@@ -29,7 +29,7 @@ use crate::support::{
 };
 
 /// Query replies name no revision (V9 #315).
-const NO_REVISION: KnownDefect = KnownDefect {
+pub const NO_REVISION: KnownDefect = KnownDefect {
     plan_item: "#315",
     summary: "query replies carry no revision",
     signature: |v| matches!(v, Violation::Transport(m) if m.starts_with(NO_QUERY_REVISION)),

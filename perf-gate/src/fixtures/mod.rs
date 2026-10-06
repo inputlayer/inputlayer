@@ -8,6 +8,7 @@ mod insert;
 mod interference;
 mod keyed;
 mod query;
+mod shop;
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -43,6 +44,9 @@ pub enum Fixture {
     DeltaKeyed,
     /// Writer to a probe agent, beside a long request and a slow consumer.
     Interference,
+    /// The scenario suite's shop pack installed into a fresh graph; held to
+    /// an absolute ceiling (`policy.toml`), not to the baseline.
+    ShopInstall,
     // The engine suite (not gated; see `engine`).
     /// Warm bound non-recursive rule (`?two_hop(1, Z)`).
     RuleQuery,
@@ -68,7 +72,7 @@ pub enum Fixture {
 
 impl Fixture {
     /// Every fixture, by name.
-    pub const ALL: [Fixture; 19] = [
+    pub const ALL: [Fixture; 20] = [
         Fixture::CheapQuery,
         Fixture::BoundQuery,
         Fixture::InsertSingle,
@@ -78,6 +82,7 @@ impl Fixture {
         Fixture::DeltaFirst,
         Fixture::DeltaKeyed,
         Fixture::Interference,
+        Fixture::ShopInstall,
         Fixture::RuleQuery,
         Fixture::UnboundQuery,
         Fixture::Writes,
@@ -91,7 +96,7 @@ impl Fixture {
     ];
 
     /// The gate's fixtures: the default of `run`, and what the policy judges.
-    pub const GATE: [Fixture; 9] = [
+    pub const GATE: [Fixture; 10] = [
         Fixture::CheapQuery,
         Fixture::BoundQuery,
         Fixture::InsertSingle,
@@ -101,6 +106,7 @@ impl Fixture {
         Fixture::DeltaFirst,
         Fixture::DeltaKeyed,
         Fixture::Interference,
+        Fixture::ShopInstall,
     ];
 
     pub fn name(self) -> &'static str {
@@ -114,6 +120,7 @@ impl Fixture {
             Fixture::DeltaFirst => "delta_first",
             Fixture::DeltaKeyed => "delta_keyed",
             Fixture::Interference => "interference",
+            Fixture::ShopInstall => "shop_install",
             Fixture::RuleQuery => "rule_query",
             Fixture::UnboundQuery => "unbound_query",
             Fixture::Writes => "writes",
@@ -172,6 +179,7 @@ impl Fixture {
             Fixture::DeltaFirst => first_delta::run(server, &profile.delta_first).await,
             Fixture::DeltaKeyed => keyed::run(server, &profile.delta_keyed).await,
             Fixture::Interference => interference::run(server, &profile.interference).await,
+            Fixture::ShopInstall => shop::install(server, &profile.shop_install).await,
             Fixture::RuleQuery => engine::rule_query(server, &engine.rule_query).await,
             Fixture::UnboundQuery => engine::unbound_query(server, &engine.unbound_query).await,
             Fixture::Writes => engine::writes(server, &engine.writes).await,

@@ -20,9 +20,11 @@
 //! `!blocked(Other)` while unblocking brings it back, the negation flipping
 //! one row each way while `related` stays quiet.
 //!
-//! Both histories, fed to the differential oracle
-//! (`s9_history_agrees_with_the_differential_oracle`), agree at every
-//! revision.
+//! The histories' writes are defined once, in the oracle's shop corpus
+//! (`tests/differential_oracle/shop.rs`); this module adds the deltas each
+//! step must deliver. Both histories, fed to the differential oracle
+//! (`s9_history_agrees_with_the_differential_oracle`, and the oracle's own
+//! corpus), agree at every revision.
 
 use inputlayer_testkit::{Agent, Checked, Fixture, Size, WsClient};
 use serde_json::{json, Value};
@@ -30,74 +32,60 @@ use serde_json::{json, Value};
 use crate::engine;
 use crate::lifecycle::{KG, OFFERS};
 use crate::oracle_check::oracle_check;
+use crate::shop::{self, Retraction, S9, S9B};
 use crate::support::{committed, fresh, write_revision_matches_delta, QUIET};
 
-const RELATED: &str = r#"?related("i1", X)"#;
+const RELATED: &str = shop::S9_QUERIES[0];
 
-/// One write and the exact delta of each subscription (`None`: quiet).
-struct Step {
-    program: &'static str,
+/// The exact delta of each subscription after one step (`None`: quiet).
+struct Expected {
     related: Option<(&'static [&'static str], &'static [&'static str])>,
     offers: Option<(&'static [&'static str], &'static [&'static str])>,
 }
 
-/// Writes on top of the shop pack before subscribing, then the steps.
-struct History {
-    name: &'static str,
-    setup: &'static [&'static str],
-    steps: &'static [Step],
-}
+/// After [`S9`]'s cut, blocking and unblocking i4 are quiet.
+const S9_DELTAS: [Expected; 3] = [
+    Expected {
+        related: Some((&[], &["i3", "i4"])),
+        offers: Some((&[], &["i3", "i4"])),
+    },
+    Expected {
+        related: None,
+        offers: None,
+    },
+    Expected {
+        related: None,
+        offers: None,
+    },
+];
 
-const S9: History = History {
-    name: "S9",
-    setup: &[],
-    steps: &[
-        Step {
-            program: r#"-link("i2", "i3")"#,
-            related: Some((&[], &["i3", "i4"])),
-            offers: Some((&[], &["i3", "i4"])),
-        },
-        Step {
-            program: r#"+blocked("i4")"#,
-            related: None,
-            offers: None,
-        },
-        Step {
-            program: r#"-blocked("i4")"#,
-            related: None,
-            offers: None,
-        },
-    ],
-};
-
-/// o-42's other item i5 also reaches i4, so (o-42, i4) has two supports.
-const S9B: History = History {
-    name: "S9b",
-    setup: &[r#"+link("i5", "i4")"#],
-    steps: &[
-        Step {
-            program: r#"-link("i2", "i3")"#,
-            related: Some((&[], &["i3", "i4"])),
-            offers: Some((&[], &["i3"])),
-        },
-        Step {
-            program: r#"+blocked("i4")"#,
-            related: None,
-            offers: Some((&[], &["i4"])),
-        },
-        Step {
-            program: r#"-blocked("i4")"#,
-            related: None,
-            offers: Some((&["i4"], &[])),
-        },
-    ],
-};
+/// [`S9B`]: (o-42, i4) survives the cut, then flips with `blocked(i4)`.
+const S9B_DELTAS: [Expected; 3] = [
+    Expected {
+        related: Some((&[], &["i3", "i4"])),
+        offers: Some((&[], &["i3"])),
+    },
+    Expected {
+        related: None,
+        offers: Some((&[], &["i4"])),
+    },
+    Expected {
+        related: None,
+        offers: Some((&["i4"], &[])),
+    },
+];
 
 fn rows(key: &str, items: &[&str]) -> Vec<Value> {
     items.iter().map(|item| json!([key, item])).collect()
 }
 
-async fn run(history: &History) -> Checked<()> {
+async fn run(history: &Retraction, deltas: &[Expected]) -> Checked<()> {
+    assert_eq!(
+        history.steps.len(),
+        deltas.len(),
+        "{}: a delta per step",
+        history.name
+    );
     let engine = engine().start().await.expect("start engine");
     Fixture::shop_pack(Size::Small).install(&engine).await?;
     let mut agent = Agent::connect(&engine, KG).await?;
@@ -116,8 +104,8 @@ async fn run(history: &History) -> Checked<()> {
         .view("offers")
         .assert_matches(&rows("o-42", &["i2", "i3", "i4", "i6", "i7", "i8", "i9"]))?;
 
-    for step in history.steps {
-        let write = committed(writer.try_execute(step.program).await?)?;
+    for (program, step) in history.steps.iter().zip(deltas) {
+        let write = committed(writer.try_execute(program).await?)?;
         for (id, key, expected) in [
             ("related", "i1", &step.related),
             ("offers", "o-42", &step.offers),
@@ -143,27 +131,20 @@ async fn run(history: &History) -> Checked<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s9_retraction_through_recursion_and_negation() -> Checked<()> {
-    run(&S9).await
+    run(&S9, &S9_DELTAS).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s9b_a_second_support_keeps_the_offer_through_the_cut() -> Checked<()> {
-    run(&S9B).await
+    run(&S9B, &S9B_DELTAS).await
 }
 
 /// S9's and S9b's histories through the differential oracle, observed after
-/// the pack and its setup and after every step.
+/// the pack and its setup and after every step. The oracle's own corpus runs
+/// the same histories (`shop_pack_corpus_agrees_across_all_adapters`).
 #[test]
 fn s9_history_agrees_with_the_differential_oracle() {
-    let queries = [RELATED, OFFERS, "?eligible(O, I, W)", "?n_eligible(O, N)"];
     for history in [&S9, &S9B] {
-        let mut statements = Fixture::shop_pack(Size::Small).statements;
-        statements.extend(history.setup.iter().map(ToString::to_string));
-        statements.push("#installed".to_string());
-        for (n, step) in history.steps.iter().enumerate() {
-            statements.push(step.program.to_string());
-            statements.push(format!("#step-{}", n + 1));
-        }
-        oracle_check(history.name, &queries, &statements);
+        oracle_check(history.name, &shop::s9_history(history));
     }
 }

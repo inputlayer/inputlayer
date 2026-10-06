@@ -14,6 +14,10 @@
 //!
 //! Missing fixtures, failed or wrong-result runs, too few rounds or too few
 //! samples make the verdict invalid. Only a pass exits zero.
+//!
+//! A policy ceiling is absolute: when the run includes its fixture, the
+//! candidate's median per-round value must not exceed it, whatever the
+//! baseline measured. A breach fails the gate like a required regression.
 
 use std::collections::BTreeSet;
 
@@ -54,6 +58,18 @@ pub struct MetricVerdict {
     pub baseline_spread: Option<f64>,
 }
 
+/// A candidate statistic against its absolute ceiling.
+#[derive(Debug, Clone, Serialize)]
+pub struct CeilingVerdict {
+    pub metric: String,
+    /// Microseconds.
+    pub ceiling: f64,
+    /// Median of the candidate's per-round values.
+    pub candidate_median: Option<f64>,
+    pub status: Status,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Verdict {
     pub status: Status,
@@ -61,6 +77,8 @@ pub struct Verdict {
     /// Run-level problems; any makes the verdict invalid.
     pub problems: Vec<String>,
     pub metrics: Vec<MetricVerdict>,
+    /// The policy's ceilings whose fixture the run includes.
+    pub ceilings: Vec<CeilingVerdict>,
 }
 
 /// Judge `record` under `policy`.
@@ -82,10 +100,17 @@ pub fn judge(record: &RunRecord, policy: &Policy) -> Verdict {
             problems.push(format!("{}: {}", metric.metric, metric.reason));
         }
     }
+    let ceilings = judge_ceilings(record, policy);
+    for ceiling in &ceilings {
+        if ceiling.status == Status::Invalid {
+            problems.push(format!("{}: {}", ceiling.metric, ceiling.reason));
+        }
+    }
     let worst = metrics
         .iter()
         .filter(|m| m.required)
         .map(|m| m.status)
+        .chain(ceilings.iter().map(|c| c.status))
         .max()
         .unwrap_or(Status::Invalid);
     let status = if problems.is_empty() {
@@ -98,7 +123,45 @@ pub fn judge(record: &RunRecord, policy: &Policy) -> Verdict {
         policy_status: policy.status.clone(),
         problems,
         metrics,
+        ceilings,
     }
+}
+
+/// Each policy ceiling whose fixture ran, against the candidate's median.
+fn judge_ceilings(record: &RunRecord, policy: &Policy) -> Vec<CeilingVerdict> {
+    let mut verdicts = Vec::new();
+    for (name, &ceiling) in &policy.ceilings {
+        let Ok(key) = MetricKey::parse(name) else {
+            continue;
+        };
+        if !record.runs.iter().any(|run| run.fixture == key.fixture) {
+            continue;
+        }
+        let (rounds, issue) = round_values(record, policy, &key, "candidate");
+        let values: Vec<f64> = rounds.iter().map(|(_, v)| *v).collect();
+        let candidate_median = median(&values);
+        let (status, reason) = match (issue, candidate_median) {
+            (Some(issue), _) => (Status::Invalid, issue),
+            (None, None) => (Status::Invalid, "no candidate rounds".to_string()),
+            (None, Some(m)) if m > ceiling => (
+                Status::Fail,
+                format!(
+                    "median {:.3} ms above the ceiling {:.3} ms",
+                    m / 1000.0,
+                    ceiling / 1000.0
+                ),
+            ),
+            (None, Some(_)) => (Status::Pass, "within the ceiling".to_string()),
+        };
+        verdicts.push(CeilingVerdict {
+            metric: name.clone(),
+            ceiling,
+            candidate_median,
+            status,
+            reason,
+        });
+    }
+    verdicts
 }
 
 fn run_problems(record: &RunRecord) -> Vec<String> {

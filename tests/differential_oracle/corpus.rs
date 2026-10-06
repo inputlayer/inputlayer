@@ -9,6 +9,10 @@
 //! Cases that need what a history cannot express (several knowledge graphs,
 //! session state, file loads, indexes) are listed as unsupported with the
 //! reason, not silently dropped.
+//!
+//! The scenario suite's shop pack and its S9 histories are a corpus pack of
+//! their own ([`check_shop_pack`], histories in [`crate::shop`]): no
+//! recorded transcript, but the reference must model every observation.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -340,4 +344,13 @@ pub fn check_all() {
         compared.get("spec").copied().unwrap_or(0) > 0,
         "no spec rows compared"
     );
+}
+
+/// The shop pack corpus ([`crate::shop::histories`]) agrees across all
+/// adapters, and the reference models all of it.
+pub fn check_shop_pack() {
+    for (label, history) in crate::shop::histories() {
+        let report = crate::assert_agrees(label, &history);
+        crate::assert_reference_complete(label, &report);
+    }
 }

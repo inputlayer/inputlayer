@@ -74,6 +74,9 @@ pub enum Violation {
     /// The engine's counters show work the step must not cause, such as a
     /// read of a deployed rule evaluating the rule instead of reading its view.
     UnexpectedWork(String),
+    /// The engine cannot run in the requested configuration, such as a views
+    /// mode it does not have.
+    Unavailable(String),
 }
 
 impl fmt::Display for Violation {
@@ -147,6 +150,7 @@ impl fmt::Display for Violation {
             Self::Transport(detail) => write!(f, "transport: {detail}"),
             Self::NotMeasurable(counter) => write!(f, "counter {counter} is not exported"),
             Self::UnexpectedWork(detail) => write!(f, "unexpected work: {detail}"),
+            Self::Unavailable(detail) => write!(f, "not available: {detail}"),
         }
     }
 }

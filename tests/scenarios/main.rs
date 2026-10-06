@@ -23,11 +23,11 @@
 //! scenarios on the shop pack, each naming its captain's table row and the
 //! milestone 9 issues it gates: `lifecycle` (S1), `claims` (S7),
 //! `retraction` (S9, also through the differential oracle via
-//! `oracle_check`), `restart` (S12) and `tenancy` (S15), and the ones that
-//! hold milestone 9's contract as expected failures: `reads` (S2, S3),
-//! `consistency` (S4), `fanout` (S5), `subscribe_rules` (S6),
-//! `generations` (S8) and `burst` (S17), sharing the assertions in
-//! `support`. Expected failures for tracked defects use
+//! `oracle_check`), `restart` (S12), `limits` (S14) and `tenancy` (S15), and
+//! the ones that hold milestone 9's contract as expected failures: `reads`
+//! (S2, S3), `consistency` (S4), `fanout` (S5), `subscribe_rules` (S6),
+//! `generations` (S8), `vectors` (S10, S11), `failover` (S13), `modes`
+//! (S16) and `burst` (S17), sharing the assertions in `support`. Expected failures for tracked defects use
 //! `inputlayer_testkit::KnownDefect`, naming the issue that fixes them; an
 //! XPASS fails the run.
 //!
@@ -40,10 +40,13 @@ mod burst;
 mod claims;
 mod consistency;
 mod delivery;
+mod failover;
 mod fanout;
 mod generations;
 mod harness;
 mod lifecycle;
+mod limits;
+mod modes;
 mod oracle_check;
 mod reactive;
 mod reads;
@@ -54,6 +57,7 @@ mod stream;
 mod subscribe_rules;
 mod support;
 mod tenancy;
+mod vectors;
 mod views;
 mod wire;
 
@@ -75,9 +79,13 @@ mod model;
 #[allow(dead_code)]
 mod oracle;
 #[path = "../differential_oracle/recompute.rs"]
+#[allow(dead_code)]
 mod recompute;
 #[path = "../differential_oracle/reference/mod.rs"]
 mod reference;
+#[path = "../differential_oracle/shop.rs"]
+#[allow(dead_code)]
+mod shop;
 #[path = "../differential_oracle/subscription.rs"]
 #[allow(dead_code)]
 mod subscription;

@@ -563,6 +563,10 @@ else
     fi
 fi
 
+# Run time of the specs from here on, without the build: the specs tier of
+# tests/budget.toml (scripts/check-test-budget.py reads the summary line).
+RUN_STARTED=$(date +%s.%N)
+
 # Detect target dir
 TARGET_DIR=$(cargo metadata --format-version 1 --no-deps 2>/dev/null \
     | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)
@@ -806,6 +810,8 @@ else
     if [[ "$PENDING_COUNT" -gt 0 ]]; then
         echo -e "Pending: ${CYAN}$PENDING_COUNT${NC} (features not yet implemented)"
     fi
+    awk -v start="$RUN_STARTED" -v end="$(date +%s.%N)" \
+        'BEGIN { printf "Specs finished in %.2fs\n", end - start }'
     echo ""
 
     if [[ $FAILED -gt 0 ]]; then

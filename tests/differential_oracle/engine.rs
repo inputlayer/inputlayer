@@ -3,6 +3,11 @@
 //! Each adapter gets its own data directory and `Handler`, so adapters cannot
 //! observe each other's state. Restart shuts the handler down and reopens the
 //! same directory, exercising WAL/parquet recovery of facts and rules.
+//!
+//! An engine answers reads of persistent rules in a views [`Mode`]
+//! (`engine.views`): `recompute` re-derives them on every read (today's
+//! engine), `maintained` keeps them as incrementally maintained views.
+//! [`VIEWS_ENV`] selects the mode of the `maintained` adapter's run.
 
 use std::sync::Arc;
 
@@ -11,6 +16,7 @@ use inputlayer::protocol::rest::handlers::wire_value_to_json;
 use inputlayer::protocol::wire::QueryResult;
 use inputlayer::protocol::Handler;
 use inputlayer::Config;
+use inputlayer_testkit::Mode;
 use tempfile::TempDir;
 
 use crate::model::{AdapterError, Cell, Outcome, Row};
@@ -18,25 +24,45 @@ use crate::model::{AdapterError, Cell, Outcome, Row};
 /// Knowledge graph every history runs in.
 pub const KG: &str = "oracle";
 
+/// Environment variable selecting the views mode the oracle checks
+/// (`recompute`, the default, or `maintained`).
+pub const VIEWS_ENV: &str = "INPUTLAYER_ORACLE_VIEWS";
+
+/// The views mode [`VIEWS_ENV`] selects.
+///
+/// # Panics
+/// On a value other than `recompute` or `maintained`.
+pub fn views_mode() -> Mode {
+    Mode::from_env(VIEWS_ENV)
+}
+
 pub struct EngineHost {
     runtime: tokio::runtime::Runtime,
     dir: TempDir,
+    views: Mode,
     /// `None` only between shutting down and reopening during a restart.
     handler: Option<Arc<Handler>>,
 }
 
 impl EngineHost {
     pub fn open() -> Result<Self, AdapterError> {
+        Self::open_in(Mode::Recompute)
+    }
+
+    /// An engine answering reads of persistent rules in `views` mode;
+    /// fails when this engine cannot run that mode.
+    pub fn open_in(views: Mode) -> Result<Self, AdapterError> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
             .build()
             .map_err(|e| AdapterError::Failed(format!("tokio runtime: {e}")))?;
         let dir = scratch_dir().map_err(|e| AdapterError::Failed(format!("temp dir: {e}")))?;
-        let handler = Some(start(&runtime, &dir)?);
+        let handler = Some(start(&runtime, &dir, views)?);
         Ok(Self {
             runtime,
             dir,
+            views,
             handler,
         })
     }
@@ -83,7 +109,7 @@ impl EngineHost {
             ));
         }
         drop(old);
-        self.handler = Some(start(&self.runtime, &self.dir)?);
+        self.handler = Some(start(&self.runtime, &self.dir, self.views)?);
         Ok(())
     }
 }
@@ -101,18 +127,33 @@ fn scratch_dir() -> std::io::Result<TempDir> {
     TempDir::new()
 }
 
-fn config(dir: &TempDir) -> Config {
+/// The engine's config in `views` mode.
+///
+/// `maintained` fails until V2 (#309) adds `engine.views`; V2 sets it here.
+fn config(dir: &TempDir, views: Mode) -> Result<Config, AdapterError> {
+    if views != Mode::Recompute {
+        return Err(AdapterError::Failed(format!(
+            "engine.views = \"{}\": mode not available on this engine (V2 #309 adds it); \
+             unset {VIEWS_ENV} or set it to \"recompute\"",
+            views.as_str()
+        )));
+    }
     let mut config = Config::default();
     config.storage.data_dir = dir.path().join("data");
     config.storage.performance.num_threads = 2;
     config.storage.persist.durability_mode = DurabilityMode::Immediate;
     config.http.gui.enabled = false;
-    config
+    Ok(config)
 }
 
-fn start(runtime: &tokio::runtime::Runtime, dir: &TempDir) -> Result<Arc<Handler>, AdapterError> {
+fn start(
+    runtime: &tokio::runtime::Runtime,
+    dir: &TempDir,
+    views: Mode,
+) -> Result<Arc<Handler>, AdapterError> {
     let _guard = runtime.enter();
-    let handler = Arc::new(Handler::from_config(config(dir)).map_err(AdapterError::Failed)?);
+    let handler =
+        Arc::new(Handler::from_config(config(dir, views)?).map_err(AdapterError::Failed)?);
     {
         let storage = handler.get_storage();
         // Present after a restart; created on first open.

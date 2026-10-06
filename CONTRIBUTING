@@ -69,7 +69,10 @@ credential. ESLint for the GUI is not hooked; it belongs to the deferred UI work
 
 Hooks never run tests. Before each commit, run the tests that cover your
 change: `make test-fast` (or the touched crate's `cargo test -p ...`) and the
-affected snapshot specs (`make test-affected`).
+affected snapshot specs (`make test-affected`). A new test goes in the tier
+that owns the behaviour; [TESTING.md](TESTING.md#where-a-new-test-belongs)
+has the decision table, and end-to-end coverage is a scenario module in
+`tests/scenarios`, not a new `tests/*.rs` binary.
 
 Before every push to a PR, `make pre-pr` must pass. It runs formatting,
 and the checks that apply to changes since `PRE_PR_BASE` (default: the branch's
@@ -92,8 +95,18 @@ make pre-pr                         # fast checks in parallel, then make perf-ga
 make perf-gate                      # the gate alone; see perf-gate/README.md
 ```
 
+On a shared development box, measure on the benchmark host instead (commit
+first): `make pre-pr PRE_PR_PERF=perf-gate-remote`.
+
 Changes to subscriptions, notifications or the WebSocket protocol also run
 `make e2e-reactive` (agents subscribed to a real engine; see `TESTING.md`).
+Milestone 9 (incremental views) work also runs `make test-scenarios-modes`
+and `INPUTLAYER_ORACLE_VIEWS=maintained make oracle-test`, and the PR that
+lands an issue removes the expected-failure markers naming it (an `XPASS`
+fails the run). A PR that adds tests or slows them keeps each tier within
+`tests/budget.toml` on the PR gate's runner (`scripts/check-test-budget.py`
+on the `Tests` job's log; a busy development box runs slower) or raises the
+budget with the reason in its description.
 
 ---
 
@@ -248,19 +261,24 @@ value
 
 ### Test Types
 
-| Type | Location | Purpose |
+Tests are organised in tiers, each with a time budget; [TESTING.md](TESTING.md)
+says what belongs where and how to run each.
+
+| Tier | Location | Purpose |
 |------|----------|---------|
-| Unit tests | Inline in `src/*.rs` | Individual functions |
-| Integration tests | `tests/` | Full pipeline |
-| Snapshot tests | `examples/datalog/` | Golden file comparison |
+| Unit | `#[cfg(test)]` modules in `src/` | One module's logic |
+| Component | `tests/*.rs` | One layer through its public API, in process |
+| Scenario | `tests/scenarios/` | Agents on real server processes over the wire |
+| Snapshot specs | `examples/iql/` | IQL semantics of record, golden transcripts |
+| Oracle | `tests/differential_oracle/` | The same history through independent evaluators |
 
 ### Running Tests
 
 ```bash
-# All unit tests
-cargo test
+# Every workspace test (unit, component, scenarios, oracle)
+make unit-test
 
-# All snapshot tests
+# All snapshot specs
 ./scripts/run_snapshot_tests.sh
 
 # Specific category
@@ -270,7 +288,7 @@ cargo test
 ./scripts/run_snapshot_tests.sh -v
 
 # Update snapshots after intentional changes
-./scripts/run_snapshot_tests.sh --update
+./scripts/run_snapshot_tests.sh -u
 ```
 
 ### Test Requirements

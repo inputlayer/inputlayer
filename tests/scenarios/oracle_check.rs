@@ -10,7 +10,7 @@
 use crate::adapter::Adapter;
 use crate::group::GroupAdapter;
 use crate::minimize;
-use crate::model::{History, Step};
+use crate::model::History;
 use crate::oracle::{self, Report};
 use crate::recompute::RecomputeAdapter;
 use crate::reference::ReferenceAdapter;
@@ -27,24 +27,12 @@ fn adapters(queries: &[String]) -> Vec<Box<dyn Adapter>> {
     ]
 }
 
-/// Run `steps` (statements; `"#name"` is a checkpoint, `"restart"` a
-/// restart) observing `queries`; panics with the first divergence, minimized
-/// to a reproducing script, or when the reference skipped anything.
-pub fn oracle_check(label: &str, queries: &[&str], steps: &[String]) -> Report {
-    let history = History {
-        queries: queries.iter().map(|q| (*q).to_string()).collect(),
-        steps: steps
-            .iter()
-            .map(|line| match line.as_str() {
-                "restart" => Step::Restart,
-                l if l.starts_with('#') => Step::Checkpoint(l[1..].to_string()),
-                l => Step::Execute(l.to_string()),
-            })
-            .collect(),
-    };
-    let report = oracle::run(&history, &adapters);
+/// Run `history`; panics with the first divergence, minimized to a
+/// reproducing script, or when the reference skipped anything.
+pub fn oracle_check(label: &str, history: &History) -> Report {
+    let report = oracle::run(history, &adapters);
     if let Some(first) = report.divergences.first() {
-        let minimized = minimize::minimize(&history, &adapters, &first.signature);
+        let minimized = minimize::minimize(history, &adapters, &first.signature);
         panic!(
             "{label}: {first}\nminimized to {} statements:\n{}",
             minimized.statements(),

@@ -1,0 +1,34 @@
+# Time budget per test tier (TESTING.md, "Tiers"), in seconds of test run
+# time on the PR gate's 4-vCPU runner. `scripts/check-test-budget.py` sums
+# each tier from a `cargo test` log (the "finished in" time of every test
+# binary's result line) and the spec runner's log, and fails when a tier runs
+# more than `tolerance` over its budget. Compile time is not counted.
+#
+# Raising a budget is a decision for the PR that needs it, with the reason in
+# its description; lowering one is always welcome.
+
+# Fraction a tier may run over its budget before the check fails.
+tolerance = 0.25
+
+[budget]
+# `#[cfg(test)]` modules in `src/` of every workspace crate, and doc tests.
+unit = 60
+# Integration binaries in `tests/` (one layer through its public API).
+component = 180
+# `tests/scenarios`: real engine processes over the wire.
+scenarios = 120
+# The snapshot specs the PR gate runs (`run_snapshot_tests.sh --debug`).
+specs = 60
+# `tests/differential_oracle` at the PR seed count (12). Raised from 15:
+# CI measured 14.4-19.9 s before the shop pack corpus added about 1.3 s.
+oracle_pr = 20
+
+# Which tier a test binary belongs to, by the source path cargo prints in its
+# `Running <path> (...)` line (relative to its crate). The longest matching
+# prefix wins; doc tests are `unit`. A binary no prefix matches fails the
+# check, so a new kind of test gets a tier on purpose.
+[tiers]
+"src/" = "unit"
+"tests/scenarios/" = "scenarios"
+"tests/differential_oracle/" = "oracle_pr"
+"tests/" = "component"

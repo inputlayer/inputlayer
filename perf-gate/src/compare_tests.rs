@@ -22,6 +22,7 @@ fn policy() -> Policy {
             "q.latency_us.p99".into(),
             "q.per_sec".into(),
         ],
+        ceilings: std::collections::BTreeMap::new(),
     }
 }
 
@@ -210,4 +211,40 @@ fn unrequired_metrics_are_reported_but_do_not_gate() {
     let diagnostic = status_of(&verdict, "q.diagnostic_us.p50");
     assert!(!diagnostic.required);
     assert_eq!(diagnostic.status, Status::Fail);
+}
+
+/// A policy with one absolute ceiling, in microseconds.
+fn with_ceiling(metric: &str, ceiling: f64) -> Policy {
+    let mut policy = policy();
+    policy.ceilings.insert(metric.into(), ceiling);
+    policy
+}
+
+#[test]
+fn a_ceiling_breach_fails_without_any_regression() {
+    // Both arms around 1 ms: no regression, but over a 0.5 ms ceiling.
+    let verdict = judge(&record(1.0, 0.0), &with_ceiling("q.latency_us.p50", 500.0));
+    assert_eq!(verdict.ceilings.len(), 1);
+    assert_eq!(verdict.ceilings[0].status, Status::Fail);
+    assert_eq!(verdict.status, Status::Fail);
+}
+
+#[test]
+fn a_held_ceiling_passes() {
+    let verdict = judge(
+        &record(1.0, 0.0),
+        &with_ceiling("q.latency_us.p50", 5_000.0),
+    );
+    assert_eq!(verdict.ceilings[0].status, Status::Pass);
+    assert_eq!(verdict.status, Status::Pass);
+}
+
+#[test]
+fn a_ceiling_on_a_fixture_not_run_is_not_judged() {
+    let verdict = judge(
+        &record(1.0, 0.0),
+        &with_ceiling("other.latency_us.p50", 1.0),
+    );
+    assert!(verdict.ceilings.is_empty());
+    assert_eq!(verdict.status, Status::Pass);
 }

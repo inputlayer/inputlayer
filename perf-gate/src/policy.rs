@@ -1,6 +1,7 @@
 //! The acceptance policy: which metrics are required and how much a candidate
 //! may cost relative to the baseline. Loaded from `perf-gate/policy.toml`.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use anyhow::{bail, Context, Result};
@@ -23,6 +24,12 @@ pub struct Policy {
     pub tolerance: Tolerance,
     /// Metrics that must be present, valid and within budget.
     pub required: Vec<String>,
+    /// Absolute upper bounds, in microseconds, on the candidate's median
+    /// per-round value of a latency statistic, e.g.
+    /// `"shop_install.install_us.p50" = 200000`. Judged whenever the run
+    /// includes the fixture, whatever the baseline measured.
+    #[serde(default)]
+    pub ceilings: BTreeMap<String, f64>,
 }
 
 /// Largest allowed relative cost increase, e.g. 0.10 = 10% slower.
@@ -60,6 +67,14 @@ impl Policy {
         }
         for key in &self.required {
             MetricKey::parse(key)?;
+        }
+        for (key, ceiling) in &self.ceilings {
+            if MetricKey::parse(key)?.stat == Stat::Rate {
+                bail!("ceiling '{key}': only p50 and p99 latencies have ceilings");
+            }
+            if !(ceiling.is_finite() && *ceiling > 0.0) {
+                bail!("ceiling '{key}' must be a positive number of microseconds");
+            }
         }
         Ok(())
     }
@@ -145,5 +160,9 @@ mod tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("policy.toml");
         let policy = Policy::load(&path).unwrap();
         assert!(!policy.required.is_empty());
+        assert_eq!(
+            policy.ceilings.get("shop_install.install_us.p50"),
+            Some(&200_000.0)
+        );
     }
 }
