@@ -12,8 +12,9 @@
 #   --server-cpus LIST pin the engine with taskset -c LIST
 #   --client-cpus LIST pin the soak's clients and verifier with taskset -c LIST
 #
-# The soak also runs the tests too slow for a PR (INPUTLAYER_SOAK=1): the
-# nesting ceiling sweep of tests/nesting_depth_tests.rs.
+# The soak also runs the tests too slow for a PR, which are marked #[ignore]:
+# the nesting ceiling sweep of tests/nesting_depth_tests.rs. Its outcome is
+# the last line of summary.md.
 #
 # Exit status: 0 when the soak passed, 1 when it failed, 3 on a setup error.
 # result.json and summary.md land in target/soak/runs/<utc-time>/;
@@ -36,7 +37,7 @@ while [ $# -gt 0 ]; do
         --set) SETS+=("$2"); shift 2 ;;
         --server-cpus) SERVER_CPUS=$2; shift 2 ;;
         --client-cpus) CLIENT_CPUS=$2; shift 2 ;;
-        -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
         *) echo "soak: unknown option $1" >&2; exit 3 ;;
     esac
 done
@@ -115,9 +116,14 @@ env "${ENVS[@]}" INPUTLAYER_SOAK_REPORT_DIR="$RUN_DIR" \
 ln -sfn "$RUN_DIR" "$OUT/latest"
 echo "=== Nesting ceiling sweep ==="
 SWEEP=0
-INPUTLAYER_SOAK=1 cargo test --release --all-features --test nesting_depth_tests \
-    terms_at_the_nesting_ceiling_evaluate -- --exact --nocapture || SWEEP=$?
-if [ "$SWEEP" -ne 0 ]; then STATUS=$SWEEP; fi
+cargo test --release --all-features --test nesting_depth_tests \
+    terms_at_the_nesting_ceiling_evaluate -- --ignored --exact --nocapture || SWEEP=$?
+if [ "$SWEEP" -eq 0 ]; then
+    printf '\nNesting ceiling sweep: passed\n' >> "$RUN_DIR/summary.md"
+else
+    printf '\nNesting ceiling sweep: FAILED (exit status %s)\n' "$SWEEP" >> "$RUN_DIR/summary.md"
+    STATUS=$SWEEP
+fi
 echo ""
 echo "Results: $RUN_DIR (exit status $STATUS)"
 if [ "$STATUS" -ne 0 ]; then exit 1; fi
