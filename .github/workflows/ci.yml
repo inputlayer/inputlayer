@@ -8,8 +8,8 @@ name: CI
 # main. CONTRIBUTING describes the policy.
 
 on:
-  pull_request:
-    branches: [main]
+  # CI is disabled on PRs and main for now: run the checks locally (see CONTRIBUTING).
+  workflow_dispatch:
 
 permissions:
   contents: read

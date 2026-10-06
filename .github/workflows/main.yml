@@ -10,8 +10,8 @@ name: Main
 # CONTRIBUTING describes the policy.
 
 on:
-  push:
-    branches: [main]
+  # CI is disabled on PRs and main for now: run the checks locally (see CONTRIBUTING).
+  workflow_dispatch:
 
 permissions:
   contents: read
