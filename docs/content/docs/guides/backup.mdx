@@ -27,7 +27,8 @@ Every file and directory under the data directory:
 
 | Path | Contents |
 |---|---|
-| `metadata/` | Knowledge graph list, pending drops, the bound on issued revisions (`revisions.json`) |
+| `metadata/` | Knowledge graph list, pending drops |
+| `revisions.json` | The bound on issued revisions |
 | `persist/wal/` | Write-ahead log: committed writes not yet in batch files |
 | `persist/shards/`, `persist/batches/` | Shard metadata and Parquet batch files |
 | `<kg>/` | Per-KG rule and schema catalogs |

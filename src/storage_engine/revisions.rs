@@ -19,8 +19,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use tracing::error;
 
-/// The bound's file, under the data directory.
-const RESERVATION_FILE: &str = "metadata/revisions.json";
+/// The bound's file, directly under the data directory: no knowledge graph's
+/// directory can hold it, since a name has no `.`.
+const RESERVATION_FILE: &str = "revisions.json";
 
 /// Revisions reserved per durable write of the bound.
 const BLOCK: u64 = 1 << 20;
@@ -106,28 +107,18 @@ impl Counter {
         let mut reservations = self.reservations.lock();
         let mut lowest = u64::MAX;
         let mut raised = Ok(());
-        reservations.retain(|open| {
-            let Some(reservation) = open.upgrade() else {
+        reservations.retain(|reservation| {
+            let Some(reservation) = reservation.upgrade() else {
                 return false;
             };
-            let mut failed = None;
             if reservation.reserved.load(Ordering::SeqCst) < revision {
                 let last = self.last.load(Ordering::SeqCst);
-                failed = reservation.reserve(last.max(revision) + BLOCK).err();
-            }
-            let reserved = reservation.reserved.load(Ordering::SeqCst);
-            drop(reservation);
-            if let Some(e) = failed {
-                // The engine closed during the write (in production, at
-                // shutdown): with no strong reference it issues no more
-                // revisions, so its bound no longer matters.
-                if open.strong_count() == 0 {
-                    return false;
+                if let Err(e) = reservation.reserve(last.max(revision) + BLOCK) {
+                    error!(error = %e, revision, "revision_reservation_failed");
+                    raised = Err(e);
                 }
-                error!(error = %e, revision, "revision_reservation_failed");
-                raised = Err(e);
             }
-            lowest = lowest.min(reserved);
+            lowest = lowest.min(reservation.reserved.load(Ordering::SeqCst));
             true
         });
         self.reserved.store(lowest, Ordering::SeqCst);

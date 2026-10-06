@@ -2691,6 +2691,28 @@ mod tests {
         assert!(!Arc::ptr_eq(&stale, ArcRwLockWriteGuard::rwlock(&live)));
     }
 
+    #[test]
+    fn test_dropping_a_graph_named_metadata_keeps_the_revision_bound() {
+        let temp = TempDir::new().unwrap();
+        let bound = || {
+            let bytes = fs::read(temp.path().join("revisions.json")).unwrap();
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["reserved"]
+                .as_u64()
+                .unwrap()
+        };
+        let storage = StorageEngine::new(create_test_config(temp.path().to_path_buf())).unwrap();
+        let issued = storage.create_knowledge_graph_at("metadata").unwrap();
+        storage.drop_knowledge_graph("metadata").unwrap();
+        let recorded = bound();
+        assert!(issued <= recorded, "{issued} is above the bound {recorded}");
+        drop(storage);
+
+        let storage = StorageEngine::new(create_test_config(temp.path().to_path_buf())).unwrap();
+        let revision = storage.create_knowledge_graph_at("later").unwrap();
+        assert!(revision > recorded, "{revision} reissues up to {recorded}");
+        assert!(revision <= bound());
+    }
+
     fn relation_tuples(storage: &StorageEngine, kg: &str, rel: &str) -> Option<HashSet<Tuple>> {
         let db = storage.kg_handle(kg).unwrap();
         let db = db.read();
