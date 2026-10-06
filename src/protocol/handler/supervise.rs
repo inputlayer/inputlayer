@@ -455,7 +455,7 @@ mod tests {
             tokio::time::sleep(step).await;
         }
         // Still busy: the fifth finished short of the quiet period ago.
-        tokio::time::sleep(RELEASE_QUIET - step - margin).await;
+        tokio::time::sleep(RELEASE_QUIET.checked_sub(step + margin).unwrap()).await;
         assert_eq!(RELEASED.load(Ordering::SeqCst), 0);
         tokio::time::sleep(2 * margin).await;
         assert_eq!(RELEASED.load(Ordering::SeqCst), 1);
@@ -490,7 +490,7 @@ mod tests {
 
         // A new wait: a quiet gap releases sooner than the cap.
         RELEASER.finished_large(release);
-        tokio::time::sleep(RELEASE_QUIET - margin).await;
+        tokio::time::sleep(RELEASE_QUIET.checked_sub(margin).unwrap()).await;
         assert_eq!(RELEASED.load(Ordering::SeqCst), 1);
         tokio::time::sleep(2 * margin).await;
         assert_eq!(RELEASED.load(Ordering::SeqCst), 2);
